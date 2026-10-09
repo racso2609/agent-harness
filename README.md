@@ -1,9 +1,9 @@
 # agent-harness
 
 Mi propio **agent harness** ligero, del estilo de openclaw / picoclaw / zeroclaw.
-Construido a mano, en Go, aprendiendo el esqueleto de los que ya existen.
+Construido a mano, en TS, aprendiendo el esqueleto de los que ya existen.
 
-> Proyecto de aprendizaje + herramienta personal. Objetivo: entender *de verdad* cómo
+> Proyecto de aprendizaje + herramienta personal. Objetivo: entender _de verdad_ cómo
 > funciona un agente (loop, tools, contexto) construyendo el más mínimo que funcione.
 
 ## Qué es un "agent harness"
@@ -70,7 +70,7 @@ ceremonia de cada uno.
   https://www.anthropic.com/engineering/building-effective-agents
 - **OpenAI — Function calling / Tools** — el contrato de tool calling bien explicado:
   https://platform.openai.com/docs/guides/function-calling
-- **Papers (para el *porqué*):**
+- **Papers (para el _porqué_):**
   - ReAct: https://arxiv.org/abs/2210.03629
   - Reflexion (reintentar si falla): https://arxiv.org/abs/2303.11366
 - **Contraste (qué NO hacer de primeras):** LangGraph, OpenHands, SWE-agent —
@@ -80,14 +80,13 @@ ceremonia de cada uno.
 
 - **Tool calls como texto plano:** algunos modelos (p.ej. DeepSeek) escupen el markup
   en vez de `tool_calls` nativos y el turno muere en silencio. Normalizar el marcador
-  *antes* de parsear.
+  _antes_ de parsear.
 - **Sin context budget** un turno largo mata la sesión. Tenerlo presente desde el Día 1.
 - **Subprocesos con stdout redirigido a fichero = bloqueo** (log "colgado" que sí
   trabaja). Si el harness lanza procesos, usar heartbeat en fichero, no tamaño de log.
 - **Reinicialización de MCP:** no usar `sync.Once` para el init, o recargar config lo
   mata para siempre.
-- **Lenguaje:** Go da binario único y reutiliza el modelo mental de picoclaw; Python/TS
-  dan ecosistema y velocidad de prototipo. Para "ligero + a mano", Go encaja.
+- **Lenguaje:** TS dan ecosistema y velocidad de prototipo.
 
 ---
 
