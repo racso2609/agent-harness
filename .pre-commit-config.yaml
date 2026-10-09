@@ -1,0 +1,34 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+
+  # backend
+  # TypeScript type check
+  - repo: local
+    hooks:
+      - id: tsc
+        name: TypeScript Build
+        entry: bash -c 'cd backend && exec pnpm build'
+        language: system
+        pass_filenames: false
+
+  # ESLint
+  - repo: local
+    hooks:
+      - id: eslint
+        name: ESLint
+        entry: bash -c 'cd backend && exec pnpm lint'
+        language: system
+        args: ["--fix"]
+
+  # Tests
+  - repo: local
+    hooks:
+      - id: tests
+        name: Run Tests
+        entry: bash -c 'cd backend && exec pnpm test'
+        language: system
+        pass_filenames: false
