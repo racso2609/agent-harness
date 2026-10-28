@@ -13,14 +13,25 @@ export class OpenAiProvider extends BasicProvider implements Provider {
   protected model = "";
   history: History[] = [];
   compactThreshold = 4;
+  protected _onChunk = async (_content: string, _done: boolean) => {};
 
-  constructor(url: string, apikey: string, defaultModel: string) {
+  constructor(
+    url: string,
+    apikey: string,
+    defaultModel: string,
+    onChunk?: (content: string, done: boolean) => Promise<void>,
+  ) {
     super(url, apikey);
     this.model = defaultModel;
+    if (onChunk) this._onChunk = onChunk;
   }
 
   async getAvailableModels() {
-    const models = await this._fetcher<OpenAIModelsResponse>("/models");
+    const models = await this._fetcher<OpenAIModelsResponse>(
+      "/models",
+      {},
+      false,
+    );
     const mappedModels = models.data.map((m) => {
       return {
         name: m.id,
@@ -68,6 +79,44 @@ export class OpenAiProvider extends BasicProvider implements Provider {
     return this.history;
   }
 
+  protected async _handleStream(response: Response) {
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder("utf-8");
+    let buffer = "";
+    let fullAssistantResponse = "";
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith(":") || trimmed === "data: [DONE]")
+          continue;
+
+        if (trimmed.startsWith("data: ")) {
+          try {
+            const json = JSON.parse(trimmed.replace("data: ", ""));
+            const content = json.choices?.[0]?.delta?.content;
+
+            if (content) {
+              fullAssistantResponse += content;
+              if (this._onChunk) this._onChunk?.(content, done); // Notificas al exterior en tiempo real
+            }
+          } catch (err) {
+            // Ignorar errores de parseo en chunks parciales
+          }
+        }
+      }
+    }
+
+    return fullAssistantResponse;
+  }
+
   async ask(input: string) {
     if (!input) throw new Error(Errors.MISSING_INPUT);
     if (!this.models.length) throw new Error(Errors.NO_LIST_INITIALIZATED);
@@ -77,11 +126,23 @@ export class OpenAiProvider extends BasicProvider implements Provider {
 
     this.history.push({ role: "user", content: input });
 
-    const response = { text: "first implementation" };
+    const response = (await this._fetcher(
+      "/chat/completions",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          model: modelExist.id,
+          messages: this.history,
+          stream: true,
+        }),
+      },
+      true,
+    )) as Response;
+    const responseText = await this._handleStream(response);
 
-    this.history.push({ role: "system", content: response.text });
+    this.history.push({ role: "system", content: responseText });
 
-    return response;
+    return { text: responseText };
   }
 
   setModel(model: string) {
