@@ -9,7 +9,7 @@ export abstract class BasicProvider {
     this.apikey = apikey;
   }
 
-  async fetcher<T>(
+  protected async _fetcher<T>(
     path: `/${string}`,
     init: RequestInit & { timeout?: number } = {},
   ): Promise<T> {

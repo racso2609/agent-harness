@@ -20,7 +20,7 @@ export class OpenAiProvider extends BasicProvider implements Provider {
   }
 
   async getAvailableModels() {
-    const models = await this.fetcher<OpenAIModelsResponse>("/models");
+    const models = await this._fetcher<OpenAIModelsResponse>("/models");
     const mappedModels = models.data.map((m) => {
       return {
         name: m.id,
@@ -36,8 +36,8 @@ export class OpenAiProvider extends BasicProvider implements Provider {
   compact(compactThreshold = this.compactThreshold) {
     const { systemMessages, nonSystemMessages } = this.history.reduce(
       (acc, data) => {
-        if (!!acc.systemMessages) acc.systemMessages = [];
-        if (!!acc.nonSystemMessages) acc.nonSystemMessages = [];
+        if (!acc.systemMessages) acc.systemMessages = [];
+        if (!acc.nonSystemMessages) acc.nonSystemMessages = [];
 
         if (data.role === "system") acc.systemMessages.push(data);
         if (data.role === "user") acc.nonSystemMessages.push(data);
@@ -50,7 +50,7 @@ export class OpenAiProvider extends BasicProvider implements Provider {
     if (nonSystemMessages?.length <= compactThreshold) return this.history;
 
     const recentMessages = nonSystemMessages.slice(-compactThreshold);
-    const olderMessages = nonSystemMessages.slice(0 - compactThreshold);
+    const olderMessages = nonSystemMessages.slice(0, -compactThreshold);
     const summaryText = olderMessages
       .map((m) => `${m.role}: ${m.content}`)
       .join(" | ");
@@ -61,12 +61,14 @@ export class OpenAiProvider extends BasicProvider implements Provider {
     };
 
     // Reconstruimos el contexto optimizado
-    return [systemMessages, memoryBlock, ...recentMessages].filter(
+    this.history = [...systemMessages, memoryBlock, ...recentMessages].filter(
       Boolean,
     ) as History[]; // Limpia nulos si no hay system prompt
+
+    return this.history;
   }
 
-  ask(input: string) {
+  async ask(input: string) {
     if (!input) throw new Error(Errors.MISSING_INPUT);
     if (!this.models.length) throw new Error(Errors.NO_LIST_INITIALIZATED);
     const modelExist = this.finModel(this.model);

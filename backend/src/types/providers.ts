@@ -7,7 +7,7 @@ export type History = { role: "system" | "user"; content: string };
 export type Provider = {
   url: string;
   history: History[];
-  ask: (input: string) => AgentResponse;
+  ask: (input: string) => Promise<AgentResponse>;
   compact: (compactThreshold: number) => History[];
   // models functions
   getAvailableModels: () => Promise<Model[]>;
