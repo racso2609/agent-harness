@@ -1,8 +1,17 @@
 {
   "compilerOptions": {
+    "types": [
+      "node"
+    ],
+    "baseUrl": "./src",
+    "paths": {
+      "@/*": [
+        "./*"
+      ]
+    },
     "target": "ES2022",
+    "moduleResolution": "bundler",
     "module": "NodeNext",
-    "moduleResolution": "NodeNext",
     "rootDir": "./src",
     "outDir": "./dist",
     "strict": true,
@@ -13,7 +22,8 @@
     "sourceMap": true
   },
   "include": [
-    "src/**/*"
+    "src/**/*",
+    "tests/**/*"
   ],
   "exclude": [
     "node_modules",
