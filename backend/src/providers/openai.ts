@@ -26,6 +26,10 @@ export class OpenAiProvider extends BasicProvider implements Provider {
     if (onChunk) this._onChunk = onChunk;
   }
 
+  async initialize() {
+    await this.getAvailableModels();
+  }
+
   async getAvailableModels() {
     const models = await this._fetcher<OpenAIModelsResponse>(
       "/models",
