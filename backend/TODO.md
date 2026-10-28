@@ -1,0 +1,16 @@
+1. Provider capabilities detection for loaded model
+2. Configuration class turn on configuration mode if something missing
+3. session manager
+   - send initial config params per session
+     - maxMessage, autocompact: boolean, tokens limit etc
+   - prompt classification text generation or image generation
+
+4. Tooling
+
+5. memory
+   - define how the memory will work
+   - select memory provider (postgress, enmgram, etc)
+
+6. mcp connections
+
+7. RAG integration??
