@@ -82,7 +82,7 @@ class Config {
       const parsed = JSON.parse(raw) as HarnessConfig;
 
       // 10mensajes el max history message antes de compactar
-      if (!parsed.compactThreshold) parse.compactThreshold = 100;
+      if (!parsed.compactThreshold) parsed.compactThreshold = 100;
       parsed.providers ??= {};
       return parsed;
     } catch {

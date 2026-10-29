@@ -1,3 +1,3 @@
 export const generateSessionId = () => {
-  return crypto.randomUUID();
+  return "session-" + crypto.randomUUID();
 };

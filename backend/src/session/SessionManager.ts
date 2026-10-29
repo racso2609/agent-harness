@@ -53,8 +53,8 @@ interface SessionManager {
 
 class SessionManagerImpl implements SessionManager {
   // Unique identifier for this session.
-  id = generateSessionId();
-  sessionId = this.id;
+  id: string = generateSessionId();
+  sessionId: string = this.id;
   // Configuration source (providers + default model).
   config: Config;
   // Active provider instance, undefined until initialize() succeeds.
