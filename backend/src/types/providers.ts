@@ -23,7 +23,7 @@ export type Provider = {
   ask: (input: string) => Promise<AgentResponse>;
   generateImage: (input: string) => Promise<AgentResponse>;
 
-  compact: (compactThreshold: number) => History[];
+  compact: (compactThreshold?: number) => History[];
   // models functions
   getAvailableModels: () => Promise<Model[]>;
   setModel: (model: string) => boolean;

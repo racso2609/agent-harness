@@ -11,6 +11,7 @@ interface ProviderConfig {
 interface HarnessConfig {
   model?: string;
   defaultProvider?: string;
+  compactThreshold?: number;
 
   //  later setup para ahorrar tokens con modelos mas baratos para clasificar si es una image o un text generatiuon
   //  classificationModel: string;
@@ -80,6 +81,9 @@ class Config {
     try {
       const raw = fs.readFileSync(this.configLocation, "utf8");
       const parsed = JSON.parse(raw) as HarnessConfig;
+
+      // 10mensajes el max history message antes de compactar
+      if (!parsed.compactThreshold) parse.compactThreshold = 100;
       parsed.providers ??= {};
       return parsed;
     } catch {

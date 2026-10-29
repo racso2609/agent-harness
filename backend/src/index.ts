@@ -1,11 +1,11 @@
 import { input, printLogo } from "./utils/stdin";
-import { logger } from "./utils/logger";
+//import { logger } from "./utils/logger";
 
 const handleSession = async () => {
   printLogo();
   while (true) {
-    const answer = await input("Type your prompt: ");
-    logger.info({ answer }, "user prompt");
+    // const answer =
+    await input("Type your prompt: ");
   }
 };
 
