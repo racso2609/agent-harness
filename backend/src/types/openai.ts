@@ -6,6 +6,19 @@ export interface OpenAIModelsResponse {
   pricing_updated_at: Date;
 }
 
+export interface OpenAIImageResponse {
+  created: number;
+  data: ({ url: string; revised_prompt: string } | { b64_json: string })[];
+  request_id: string;
+  billing: {
+    status: "settled";
+    billed_cost_usd: `${number}`;
+    currency: "USD";
+    zero_data_retention: boolean;
+    effective_discount_percent: number;
+  };
+}
+
 export interface Datum {
   id: string;
   context_length: number | null;

@@ -1,11 +1,12 @@
 import { History, Model, Provider } from "@/types/providers";
 import { BasicProvider } from "./basic";
-import { OpenAIModelsResponse } from "@/types/openai";
+import { OpenAIImageResponse, OpenAIModelsResponse } from "@/types/openai";
 
 enum Errors {
   NO_LIST_INITIALIZATED = "Please initialize model list first",
   MODEL_NOT_FOUND = "Model not available for this provider",
   MISSING_INPUT = "Please type what do you want to ask to the agent",
+  MISSING_CAPABILITIES = "Missing capabilities: ",
 }
 
 export class OpenAiProvider extends BasicProvider implements Provider {
@@ -40,6 +41,7 @@ export class OpenAiProvider extends BasicProvider implements Provider {
       return {
         name: m.id,
         id: m.id,
+        capabilities: m.capabilities,
       };
     });
 
@@ -127,6 +129,8 @@ export class OpenAiProvider extends BasicProvider implements Provider {
     const modelExist = this.finModel(this.model);
 
     if (!modelExist) throw new Error(Errors.MODEL_NOT_FOUND);
+    if (!modelExist.capabilities.streaming)
+      throw new Error(Errors.MISSING_CAPABILITIES + "streaming");
 
     this.history.push({ role: "user", content: input });
 
@@ -147,6 +151,36 @@ export class OpenAiProvider extends BasicProvider implements Provider {
     this.history.push({ role: "system", content: responseText });
 
     return { text: responseText };
+  }
+  async generateImage(prompt: string) {
+    if (!prompt) throw new Error(Errors.MISSING_INPUT);
+    if (!this.models.length) throw new Error(Errors.NO_LIST_INITIALIZATED);
+    const modelExist = this.finModel(this.model);
+
+    if (!modelExist) throw new Error(Errors.MODEL_NOT_FOUND);
+    if (!modelExist.capabilities.image_generation)
+      throw new Error(Errors.MISSING_CAPABILITIES + "image-generation");
+    const response = await this._fetcher<OpenAIImageResponse>(
+      "/images/generations",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          model: modelExist.id,
+          prompt: prompt,
+          size: "1024x1024",
+        }),
+      },
+      false,
+    );
+    console.log(response);
+
+    const images = response.data.map((i) => {
+      return {
+        url: "url" in i ? i.url : i.b64_json,
+      };
+    });
+
+    return { text: "Image generated", images };
   }
 
   setModel(model: string) {

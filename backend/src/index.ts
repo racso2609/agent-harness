@@ -9,8 +9,6 @@ const handleSession = async () => {
 };
 
 const cleanup = () => {
-  // ASCII for Ctrl+L
-  console.log("Ctrl+L detected");
   // Handle your custom logic here, e.g., clear screen manually
   process.stdout.write("\x1Bc");
   printLogo();
@@ -23,6 +21,7 @@ process.stdin.resume();
 process.stdin.on("data", (buf) => {
   const char = buf.toString().charCodeAt(0);
 
+  // ctrl-L
   if (char === 0x0c) cleanup();
 });
 
