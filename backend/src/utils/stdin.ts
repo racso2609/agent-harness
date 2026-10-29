@@ -1,23 +1,87 @@
-import readline from "node:readline";
 import fs from "node:fs";
 import path from "node:path";
 import terminalImage from "terminal-image";
 
-const rl = readline.createInterface({
-  input: process.stdin,
-  output: process.stdout,
-});
+// State of the prompt currently waiting for input, kept so async output
+// (logs) can wipe and redraw the line without losing what the user typed.
+let activePrompt: string | null = null;
+let typed = "";
 
-export function input(message: string) {
-  return new Promise<string>((resolve) => {
-    rl.question(message, (answer) => {
+const renderPrompt = () => {
+  if (activePrompt === null) return;
+  process.stdout.write(`\r\x1b[2K${activePrompt}${typed}`);
+};
+
+export function input(message: string): Promise<string> {
+  return new Promise((resolve) => {
+    activePrompt = message;
+    typed = "";
+    renderPrompt();
+
+    const onData = (buf: Buffer) => {
+      const str = buf.toString("utf8");
+
+      for (const char of str) {
+        if (char === "\r" || char === "\n") {
+          finish();
+          return;
+        }
+        if (char === "\u0003") {
+          // Ctrl-C
+          cleanup();
+          process.stdout.write("\n");
+          process.exit(130);
+        }
+        if (char === "\u007f" || char === "\b") {
+          if (typed.length) {
+            typed = typed.slice(0, -1);
+            renderPrompt();
+          }
+          continue;
+        }
+        if (char >= " ") {
+          typed += char;
+          process.stdout.write(char);
+        }
+      }
+    };
+
+    const finish = () => {
+      cleanup();
+      process.stdout.write("\n");
+      const answer = typed;
+      typed = "";
       resolve(answer);
-    });
+    };
+
+    const cleanup = () => {
+      activePrompt = null;
+      process.stdin.removeListener("data", onData);
+      if (process.stdin.isTTY) process.stdin.setRawMode(false);
+    };
+
+    if (process.stdin.isTTY) process.stdin.setRawMode(true);
+    process.stdin.resume();
+    process.stdin.on("data", onData);
   });
 }
 
+// Clears the current line before writing async output (logs) so it does not
+// overwrite what the user is typing.
+export function clearPrompt() {
+  if (activePrompt === null || !process.stdout.isTTY) return;
+  process.stdout.write("\r\x1b[2K");
+}
+
+// Redraws the prompt and the buffered input after async output was written.
+export function restorePrompt() {
+  if (activePrompt === null || !process.stdout.isTTY) return;
+  renderPrompt();
+}
+
 export function closeInput() {
-  rl.close();
+  activePrompt = null;
+  typed = "";
 }
 
 export async function select(

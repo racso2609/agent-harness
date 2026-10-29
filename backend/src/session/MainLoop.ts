@@ -45,15 +45,6 @@ class MainLoop {
 
   // Ctrl-C triggers cleanup and exit; Ctrl-L redraws the screen.
   protected installKeyHandlers() {
-    process.stdin.setRawMode(true);
-    process.stdin.resume();
-
-    process.stdin.on("data", (buf) => {
-      const char = buf.toString().charCodeAt(0);
-      if (char === 0x03) this.shutdown(0);
-      if (char === 0x0c) this.cleanup();
-    });
-
     process.on("SIGINT", () => this.shutdown(130));
   }
 
