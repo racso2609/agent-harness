@@ -8,8 +8,8 @@ const rl = readline.createInterface({
   output: process.stdout,
 });
 
-export function input(message) {
-  return new Promise((resolve) => {
+export function input(message: string) {
+  return new Promise<string>((resolve) => {
     rl.question(message, (answer) => {
       resolve(answer);
     });

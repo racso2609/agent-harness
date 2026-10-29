@@ -10,7 +10,6 @@ interface ProviderConfig {
 
 interface HarnessConfig {
   model?: string;
-
   defaultProvider?: string;
 
   //  later setup para ahorrar tokens con modelos mas baratos para clasificar si es una image o un text generatiuon

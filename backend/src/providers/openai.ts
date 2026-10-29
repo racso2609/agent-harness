@@ -1,6 +1,7 @@
 import { History, Model, Provider } from "@/types/providers";
 import { BasicProvider } from "./basic";
 import { OpenAIImageResponse, OpenAIModelsResponse } from "@/types/openai";
+import { logger } from "@/utils/logger";
 
 enum Errors {
   NO_LIST_INITIALIZATED = "Please initialize model list first",
@@ -172,7 +173,7 @@ export class OpenAiProvider extends BasicProvider implements Provider {
       },
       false,
     );
-    console.log(response);
+    logger.debug({ response }, "image generation response");
 
     const images = response.data.map((i) => {
       return {
