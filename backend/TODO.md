@@ -1,5 +1,9 @@
-1. Provider capabilities detection for loaded model
-2. Configuration class turn on configuration mode if something missing
+- [x] Provider capabilities detection for loaded model
+- [-] Configuration class turn on configuration mode if something missing
+- [] Sanitize apikeys
+  - definir si usar vault local (creo que seria mejor esta)
+  - archivos con apikeys hasheadas
+
 3. session manager
    - send initial config params per session
      - maxMessage, autocompact: boolean, tokens limit etc
