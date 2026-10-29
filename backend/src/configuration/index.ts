@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { env } from "@/utils/env";
 import { input, select } from "@/utils/stdin";
 
 interface ProviderConfig {
@@ -22,7 +23,7 @@ interface HarnessConfig {
 const SUPPORTED_PROVIDERS = ["openai"];
 
 const DEFAULT_CONFIG_LOCATION = path.join(
-  process.env.HOME ?? process.cwd(),
+  env.HOME ?? process.cwd(),
   ".racso-harness",
   "config.json",
 );
@@ -33,7 +34,7 @@ class Config {
 
   constructor() {
     this.configLocation =
-      process.env.RACSO_HARNESS_CONFIG_LOCATION ?? DEFAULT_CONFIG_LOCATION;
+      env.RACSO_HARNESS_CONFIG_LOCATION ?? DEFAULT_CONFIG_LOCATION;
     this.config = this.readConfig() ?? { providers: {} };
   }
 

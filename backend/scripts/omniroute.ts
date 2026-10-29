@@ -1,10 +1,9 @@
 import { OpenAiProvider } from "@/providers/openai";
 import { printImage } from "@/utils/stdin";
-import dotenv from "dotenv";
-dotenv.config();
+import { env } from "@/utils/env";
 
 const url = "https://api.cheaperinference.com/v1";
-const apikey = process.env.OMNIROUTE_API_KEY!;
+const apikey = env.OMNIROUTE_API_KEY!;
 const model = "deepseek-v4.1-flash-1017";
 const imageModel = "qwen-image";
 
