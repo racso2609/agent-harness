@@ -2,6 +2,7 @@ import { Config } from "@/configuration";
 import { OpenAiProvider } from "@/providers/openai";
 import { Provider } from "@/types/providers";
 import { generateSessionId } from "@/utils/session";
+import { logger } from "@/utils/logger";
 import { select } from "@/utils/stdin";
 import { ClassifiedAction, classifyAction } from "./classifyAction";
 import { SessionRecord, SessionStore } from "./SessionStore";
@@ -59,6 +60,9 @@ class SessionManagerImpl implements SessionManager {
   config: Config;
   // Active provider instance, undefined until initialize() succeeds.
   provider?: Provider;
+  // Secondary provider used only to classify prompts. Kept isolated so its
+  // classification traffic never pollutes the main conversation history.
+  classifierProvider?: Provider;
   // Name of the active provider as keyed in the config.
   providerName?: string;
   // Active model id.
@@ -95,6 +99,8 @@ class SessionManagerImpl implements SessionManager {
     this.providerName = providerName;
     this.model = this.provider.getModel();
 
+    await this.initializeClassifier();
+
     const resumed = options.sessionId && (await this.load(options.sessionId));
 
     if (!resumed) this.save();
@@ -125,6 +131,8 @@ class SessionManagerImpl implements SessionManager {
     this.provider = provider;
     this.providerName = record.provider;
     this.model = provider.getModel();
+
+    await this.initializeClassifier();
 
     return true;
   }
@@ -171,6 +179,8 @@ class SessionManagerImpl implements SessionManager {
     this.provider = provider;
     this.providerName = name;
     this.model = provider.getModel();
+
+    await this.initializeClassifier();
 
     this.save();
     return true;
@@ -222,9 +232,46 @@ class SessionManagerImpl implements SessionManager {
   }
 
   // Determines whether the prompt is a text or image generation request.
+  // Uses the isolated classifier provider when available so the extra call
+  // never lands in the main conversation history.
   async classifyAction(prompt: string) {
     if (!this.provider) throw new Error("Session not initialized");
-    return classifyAction(prompt, this.provider);
+    return classifyAction(prompt, this.classifierProvider ?? this.provider);
+  }
+
+  // Builds the secondary provider used only for prompt classification.
+  // Falls back to the main provider when no dedicated one is configured.
+  protected async initializeClassifier() {
+    const name =
+      this.config.config.classificationProvider ?? this.providerName;
+    const model =
+      this.config.config.classificationModel ?? this.config.config.model;
+
+    if (!name || !model) {
+      this.classifierProvider = undefined;
+      return;
+    }
+
+    const providerConfig = this.config.config.providers[name];
+    if (!providerConfig) {
+      this.classifierProvider = undefined;
+      return;
+    }
+
+    try {
+      const provider = this.createProvider(name, providerConfig, model);
+      await provider.initialize();
+
+      if (!provider.setModel(model)) {
+        this.classifierProvider = undefined;
+        return;
+      }
+
+      this.classifierProvider = provider;
+    } catch (err) {
+      logger.warn({ err }, "classifier provider init failed, using fallback");
+      this.classifierProvider = undefined;
+    }
   }
 
   // Resolves the factory for the given provider name and instantiates it.

@@ -135,13 +135,18 @@ export class OpenAiProvider extends BasicProvider implements Provider {
 
     this.history.push({ role: "user", content: input });
 
+    const messages = this.history.map((m) => ({
+      ...m,
+      content: this.format(m.content),
+    }));
+
     const response = (await this._fetcher(
       "/chat/completions",
       {
         method: "POST",
         body: JSON.stringify({
           model: modelExist.id,
-          messages: this.history,
+          messages,
           stream: true,
         }),
       },

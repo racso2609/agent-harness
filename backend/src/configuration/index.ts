@@ -13,9 +13,10 @@ interface HarnessConfig {
   defaultProvider?: string;
   compactThreshold?: number;
 
-  //  later setup para ahorrar tokens con modelos mas baratos para clasificar si es una image o un text generatiuon
-  //  classificationModel: string;
-  //  classificationProvider: string;
+  // Optional provider/model used only to classify prompts, so the cheap
+  // classification call never pollutes the main conversation history.
+  classificationProvider?: string;
+  classificationModel?: string;
 
   providers: Record<string, ProviderConfig>;
 }

@@ -9,6 +9,17 @@ export abstract class BasicProvider {
     this.apikey = apikey;
   }
 
+  protected format(content: string): string {
+    return content
+      .normalize("NFC")
+      .replace(/[\u200B-\u200D\uFEFF]/g, "")
+      .split("\n")
+      .map((line) => line.replace(/[ \t]+/g, " ").trim())
+      .join("\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+  }
+
   // Sobrecarga 1: Cuando stream es true, retorna Promise<Response>
   protected async _fetcher<T = any>(
     path: `/${string}`,
