@@ -4,6 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+    "dev": "pnpm dlx tsx ./src/index.ts",
     "build": "tsc",
     "lint": "eslint .",
     "test": "vitest"
