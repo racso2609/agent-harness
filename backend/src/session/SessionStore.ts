@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { env } from "@/utils/env";
+import { env, harnessHome } from "@/utils/env";
 import { History } from "@/types/providers";
 
 export interface SessionRecord {
@@ -19,8 +19,7 @@ export interface SessionRecord {
 }
 
 const DEFAULT_SESSIONS_DIR = path.join(
-  env.HOME ?? process.cwd(),
-  ".racso-harness",
+  harnessHome(),
   "sessions",
 );
 

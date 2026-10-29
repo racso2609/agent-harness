@@ -1,6 +1,13 @@
 import dotenv from "dotenv";
+import path from "node:path";
 
 dotenv.config();
+
+// Root directory for all harness persisted state (config, sessions, ...).
+export const HARNESS_DIR_NAME = ".racso-harness";
+
+export const harnessHome = () =>
+  path.join(process.env.HOME ?? process.cwd(), HARNESS_DIR_NAME);
 
 export const env = {
   OMNIROUTE_API_KEY: process.env.OMNIROUTE_API_KEY,
