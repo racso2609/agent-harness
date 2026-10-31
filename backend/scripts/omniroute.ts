@@ -4,7 +4,6 @@ import { env } from "@/utils/env";
 
 const url = "https://api.cheaperinference.com/v1";
 const apikey = env.OMNIROUTE_API_KEY!;
-const model = "deepseek-v4.1-flash-1017";
 const imageModel = "qwen-image";
 
 const provider = new OpenAiProvider(url, apikey, imageModel);

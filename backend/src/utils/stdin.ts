@@ -22,6 +22,13 @@ let linesBelow = 0;
 
 const MAX_VISIBLE_COMMANDS = 8;
 
+// Writes a line to stdout. This is terminal rendering (menus, prompts,
+// logo, images), not application logging, so it deliberately bypasses
+// the structured logger.
+const write = (text: string) => {
+  process.stdout.write(`${text}\n`);
+};
+
 const matches = () => filterCommands(activeCommands, typed.slice(1));
 
 // Erases the menu lines and leaves the cursor at the start of the prompt line.
@@ -252,8 +259,8 @@ export async function select(
 ): Promise<string> {
   if (!options.length) throw new Error("select requires at least one option");
 
-  console.log(message);
-  options.forEach((option, index) => console.log(`  ${index + 1}) ${option}`));
+  write(message);
+  options.forEach((option, index) => write(`  ${index + 1}) ${option}`));
 
   while (true) {
     const answer = await input("Select an option: ");
@@ -261,9 +268,7 @@ export async function select(
     if (Number.isInteger(index) && index >= 0 && index < options.length) {
       return options[index];
     }
-    console.log(
-      `Invalid option. Enter a number between 1 and ${options.length}.`,
-    );
+    write(`Invalid option. Enter a number between 1 and ${options.length}.`);
   }
 }
 
@@ -320,12 +325,13 @@ export const loadLogo = () => {
 };
 
 export const printLogo = () => {
-  console.log(loadLogo(), "\n");
+  write(loadLogo());
+  write("");
 };
 
 export const printImage = async (base64: string) => {
   const cleanBase64 = base64.replace(/^data:image\/\w+;base64,/, "");
 
   const buffer = Buffer.from(cleanBase64, "base64");
-  console.log(await terminalImage.buffer(buffer));
+  write(await terminalImage.buffer(buffer));
 };

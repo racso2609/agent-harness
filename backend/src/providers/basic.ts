@@ -21,7 +21,7 @@ export abstract class BasicProvider {
   }
 
   // Sobrecarga 1: Cuando stream es true, retorna Promise<Response>
-  protected async _fetcher<T = any>(
+  protected async _fetcher(
     path: `/${string}`,
     init?: RequestInit & { timeout?: number },
     stream?: true,

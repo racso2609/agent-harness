@@ -33,8 +33,10 @@
 - [x] validación de args: manual por tool (sin `zod`); cada tool valida y lanza, el registry convierte en `isError`
 
 ### 4.1 correcciones previas (bloquean una verificación real) — review 2026-10-31
-- [] `tsconfig.json`: `rootDir` está en `src` pero `include` trae `tests/**` y `scripts/**` (TS6059 en cascada) + `baseUrl` deprecado (TS5101) + `moduleResolution: "bundler"` con `module: "NodeNext"` (TS5095/TS5109). `tsc --noEmit` hoy falla antes de tipar nada → cualquier pendiente nuevo entra sin typecheck.
-- [] `tests/session/SessionStore.spec.ts:41` espera `version: 2`, el store persiste `3`. Test rojo (89/90 pasan).
+- [x] `tsconfig.json`: `rootDir` está en `src` pero `include` trae `tests/**` y `scripts/**` (TS6059 en cascada) + `baseUrl` deprecado (TS5101) + `moduleResolution: "bundler"` con `module: "NodeNext"` (TS5095/TS5109). `tsc --noEmit` hoy falla antes de tipar nada → cualquier pendiente nuevo entra sin typecheck. → `include: ["src/**/*"]`, `module: "ESNext"` + `moduleResolution: "bundler"`, `paths: { "@/*": ["./src/*"] }` (sin `baseUrl`). `pnpm build` OK.
+- [x] `tests/session/SessionStore.spec.ts` — ya espera `version: 3`; suite verde (123/123).
+- [x] `eslint.config.ts`: usaba `globals.browser` (`process`/`Buffer`/`__dirname` undefined) y no ignoraba `dist/`. → `globals.node` + `ignores: ["dist/**", "node_modules/**"]`. `pnpm lint` limpio.
+- [x] lint `no-explicit-any` en `basic.ts` (quitar `<T = any>` del overload de stream) y `no-console` en `stdin.ts` (helper `write` para render de terminal).
 - [] cablear el agente en `SessionManager`: `agentId`/`agent` no existen; se importan `AgentRegistry`/`AgentLoader`/`AgentSummary`/`composeSystemPrompt`/`strictestApproval`/`builtInDefaultAgent` y **no se usan**. Consecuencias: `composeSystemPrompt` nunca se manda al provider, `agent.tools` / `agent.approval` / `agent.maxIterations` se parsean pero se ignoran.
 - [] `OpenAiProvider`: type-only imports (`AssistantTurn`, `ChatOptions`, `ChatResult`, `FinishReason`, `History`, `Model`, `Provider`, `TokenUsage`, `ToolCall`, `ToolSpec`) sin `type` → errores con `verbatimModuleSyntax`/`isolatedModules`.
 - [] `shell`: `spawn("/bin/bash")` hardcodeado aunque el código ramifica por `process.platform` (Windows). Usar `bash` del `PATH` o `process.env.SHELL` con fallback, y documentar que en win32 no aplica `detached`/`kill(-pid)`.
