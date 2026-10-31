@@ -428,8 +428,66 @@ describe("SessionManager agent loop", () => {
     expect(session.history).toContainEqual({
       role: "tool",
       toolCallId: "call_1",
-      content: "Command rejected by the user",
+      content: "[tool error] Command rejected by the user",
     });
+  });
+
+  it("emits one tool message per call, in order, padding unparsable calls", async () => {
+    const session = makeSession();
+    const execute = vi.fn(async () => ({ output: "ok" }));
+
+    session.tools.register({
+      name: "echo",
+      description: "Echo a value",
+      parameters: { type: "object" },
+      execute,
+    });
+
+    provider.chat = vi
+      .fn()
+      .mockResolvedValueOnce({
+        turn: {
+          text: "",
+          toolCalls: [
+            { id: "call_1", name: "echo", args: { value: "hi" } },
+            {
+              id: "call_2",
+              name: "echo",
+              args: undefined,
+              parseError: "Tool arguments are not valid JSON",
+            },
+          ],
+          finishReason: "toolCalls",
+        },
+      })
+      .mockResolvedValueOnce(stopTurn("done"));
+
+    await session.ask("run two");
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(session.history).toEqual([
+      { role: "user", content: "run two" },
+      {
+        role: "assistant",
+        content: "",
+        toolCalls: [
+          { id: "call_1", name: "echo", args: { value: "hi" } },
+          {
+            id: "call_2",
+            name: "echo",
+            args: undefined,
+            parseError: "Tool arguments are not valid JSON",
+          },
+        ],
+      },
+      { role: "tool", toolCallId: "call_1", content: "ok" },
+      {
+        role: "tool",
+        toolCallId: "call_2",
+        content: "[tool error] Tool arguments are not valid JSON",
+      },
+      { role: "assistant", content: "done" },
+    ]);
   });
 
   it("stops after maxIterations when the model keeps calling tools", async () => {

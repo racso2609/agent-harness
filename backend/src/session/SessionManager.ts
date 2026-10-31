@@ -55,6 +55,19 @@ const PROVIDER_FACTORIES: Record<
     new OpenAiProvider(config.url, config.apikey, model),
 };
 
+const applyProviderOptions = (
+  provider: Provider,
+  config: Config,
+  providerName: string,
+) => {
+  if (providerName !== "openai") return provider;
+
+  const openai = provider as OpenAiProvider;
+  openai.normalizeTextToolCalls =
+    config.config.tools?.normalizeTextToolCalls ?? true;
+  return provider;
+};
+
 // Public contract of the session manager.
 // Concrete implementation is SessionManagerImpl below.
 interface SessionManager {
@@ -515,10 +528,13 @@ class SessionManagerImpl implements SessionManager {
 
       for (const call of result.turn.toolCalls) {
         const toolResult = await this.runTool(call);
+        const content = toolResult.isError
+          ? `[tool error] ${toolResult.output}`
+          : toolResult.output;
         this.history.push({
           role: "tool",
           toolCallId: call.id,
-          content: toolResult.output,
+          content,
         });
       }
     }
@@ -734,7 +750,7 @@ class SessionManagerImpl implements SessionManager {
   ) {
     const factory = PROVIDER_FACTORIES[name];
     if (!factory) throw new Error(`Unsupported provider: ${name}`);
-    return factory(config, model);
+    return applyProviderOptions(factory(config, model), this.config, name);
   }
 }
 

@@ -6,6 +6,15 @@ interface ShellOptions {
   maxOutputBytes?: number;
 }
 
+// Picks the shell to spawn: the user's login shell when it looks usable,
+// otherwise `bash` from the PATH (POSIX fallback). Commands run as
+// `shell -lc "<command>"`, so any POSIX shell works.
+const resolveShell = (): string => {
+  const configured = process.env.SHELL;
+  if (configured && configured.trim()) return configured;
+  return process.platform === "win32" ? "bash" : "/bin/bash";
+};
+
 // Only pass variables that are safe/useful for commands. Keeps provider
 // credentials (API keys, tokens) out of child processes.
 const SAFE_ENV_KEYS = [
@@ -70,11 +79,12 @@ class ShellTool implements Tool {
 
   protected run(ctx: ToolContext, command: string): Promise<ToolResult> {
     return new Promise((resolve) => {
-      const child = spawn("/bin/bash", ["-lc", command], {
+      const child = spawn(resolveShell(), ["-lc", command], {
         cwd: ctx.cwd,
         env: safeEnv(),
         stdio: ["ignore", "pipe", "pipe"],
         // Run in its own process group so the whole tree can be killed.
+        // Not available on win32, where kill(-pid) is a no-op.
         detached: process.platform !== "win32",
       });
 

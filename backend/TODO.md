@@ -37,20 +37,23 @@
 - [x] `tests/session/SessionStore.spec.ts` — ya espera `version: 3`; suite verde (123/123).
 - [x] `eslint.config.ts`: usaba `globals.browser` (`process`/`Buffer`/`__dirname` undefined) y no ignoraba `dist/`. → `globals.node` + `ignores: ["dist/**", "node_modules/**"]`. `pnpm lint` limpio.
 - [x] lint `no-explicit-any` en `basic.ts` (quitar `<T = any>` del overload de stream) y `no-console` en `stdin.ts` (helper `write` para render de terminal).
-- [] cablear el agente en `SessionManager`: `agentId`/`agent` no existen; se importan `AgentRegistry`/`AgentLoader`/`AgentSummary`/`composeSystemPrompt`/`strictestApproval`/`builtInDefaultAgent` y **no se usan**. Consecuencias: `composeSystemPrompt` nunca se manda al provider, `agent.tools` / `agent.approval` / `agent.maxIterations` se parsean pero se ignoran.
-- [] `OpenAiProvider`: type-only imports (`AssistantTurn`, `ChatOptions`, `ChatResult`, `FinishReason`, `History`, `Model`, `Provider`, `TokenUsage`, `ToolCall`, `ToolSpec`) sin `type` → errores con `verbatimModuleSyntax`/`isolatedModules`.
-- [] `shell`: `spawn("/bin/bash")` hardcodeado aunque el código ramifica por `process.platform` (Windows). Usar `bash` del `PATH` o `process.env.SHELL` con fallback, y documentar que en win32 no aplica `detached`/`kill(-pid)`.
-- [] `runAgentLoop` no marca fallos al modelo: el `tool` message se empuja con `toolResult.output` sin prefijo aunque `isError` sea `true`; además se empuja tool result para calls con `parseError`/`name` vacío, desalineando `tool_call_id`. Prefijar `[tool error] …` y garantizar un `tool` message por cada `tool_call` (mismo orden).
+- [x] cablear el agente en `SessionManager`: `agent.tools` (L151/201/432), `agent.maxIterations` (L486), `agent.approval` + `strictestApproval` (L569) y `composeSystemPrompt` (L718) ya están cableados. La nota de que "se parsean pero se ignoran" quedó obsoleta.
+- [x] `OpenAiProvider`: type-only imports → aplicado `import type` en `openai.ts` (dominio) y `import type` en los tipos wire que no se usan en runtime; seguro bajo `verbatimModuleSyntax`/`isolatedModules`.
+- [x] `shell`: usa `process.env.SHELL` con fallback a `bash` del `PATH` (y `/bin/bash` en POSIX); documentado que en win32 no aplica `detached`/`kill(-pid)`.
+- [x] `runAgentLoop` prefija `[tool error] …` cuando `isError` es `true` y garantiza un `tool` message por cada `tool_call` en el mismo orden (incluye calls con `parseError`).
 
 ### 4.2 pendientes de tooling (propuesta revisada, con orden y estimación)
-- [] **normalizar tool calls que llegan como texto plano (DeepSeek)** — `normalizeToolMarkup`
+- [x] **normalizar tool calls que llegan como texto plano (DeepSeek)** — `normalizeToolMarkup`
 - review: hoy solo se leen `delta.tool_calls`; los modelos que emiten `<tool_call>{json}</tool_call>`, fences ```tool_call``` o el markup `<|tool▁calls▁begin|>` devuelven `finishReason: "stop"` con JSON crudo en `text` y el loop corta.
 - propuesta: `src/providers/normalizeToolMarkup.ts` → `normalizeToolMarkup(turn): AssistantTurn`, aplicado en `OpenAiProvider.chat()` solo si `turn.toolCalls.length === 0`. Patrones en orden (tool_call tags, fences, DeepSeek); si el JSON no parsea se deja el texto intacto + `logger.debug` (evitar falsos positivos). Al matchear: limpiar markup del `text`, ids sintéticos, `rawArgs` normalizado, `finishReason: "toolCalls"`. Flag `tools.normalizeTextToolCalls` (default `true`).
 - tests: unit del normalizer (3 formatos, mixto, falso positivo, JSON inválido) + e2e en `openai.spec.ts` con stream con markup. ~120 LOC + ~80 LOC tests. Riesgo bajo.
-- [] **límites de approval: allowlist read-only, deny patterns, sandbox de `workspace`**
-- review: `writeFile`/`readFile`/`listDir` **nunca** llaman `ctx.approve` y aceptan rutas absolutas y `../..` (el `cwd` es cosmético: se puede leer/escribir cualquier ruta sin prompt). `approval: "ask"` solo cubre `shell` y su firma `approve(command: string) => boolean` no alcanza para "allow once / always". En `auto` no hay deny list. `agent.approval` + `strictestApproval` sin cablear.
-- propuesta en 3 capas: (1) `src/tools/paths.ts#resolveInWorkspace` (`resolve` + `realpath` + `startsWith(root + sep)`, cubre symlinks) en los 3 file tools; `writeFile` rechaza `.git/` y `config.tools.writeDeny` (glob simple); (2) `src/tools/shellPolicy.ts` con `READ_ONLY_COMMANDS` + `DENY_PATTERNS` (`rm -rf /`, `curl | sh`, `dd if=`, `git push --force`, …) y nuevo `ToolContext.approve(req: ApprovalRequest) => Promise<"allow"|"deny">` con `{ tool, command, kind: read|write|exec }`; tabla por modo (`auto`: read-only/dir allow, exec con deny list; `ask`: prompt en write/exec no read-only; `deny`: solo reads; las tres respetan deny list); (3) cablear agente en `SessionManager` (`effectiveApproval = strictestApproval(config, agent)` + `maxIterations = min(...)` + system prompt) y "always allow" en memoria por sesión.
-- estimación: capa 1 ~1h, capa 2 ~3h, capa 3 ~2h. Riesgo medio: cambia la firma de `ToolContext` → tocar los 4 tools, ambos specs y `SessionManager.toolContext()`; hacerlo en 3 commits para que el sandbox aterrice primero (es bug de seguridad).
+- [-] **límites de approval: allowlist read-only, deny patterns, sandbox de `workspace`** (capa 1 hecha)
+- review: `writeFile`/`readFile`/`listDir` **nunca** llaman `ctx.approve` y aceptan rutas absolutas y `../..` (el `cwd` es cosmético: se puede leer/escribir cualquier ruta sin prompt). `approval: "ask"` solo cubre `shell` y su firma `approve(command: string) => boolean` no alcanza para "allow once / always". En `auto` no hay deny list. `agent.approval` + `strictestApproval` ya cableados (L569).
+- propuesta en 3 capas:
+  - [x] capa 1: `src/tools/paths.ts#resolveInWorkspace` (`resolve` + `realpath` + `startsWith(root + sep)`, cubre symlinks) aplicado en los 3 file tools; `writeFile` rechaza `.git/` y `config.tools.writeDeny` (glob simple con `*`). Tests en `paths.spec.ts` y `writeFile.spec.ts`.
+  - [] capa 2: `src/tools/shellPolicy.ts` con `READ_ONLY_COMMANDS` + `DENY_PATTERNS` (`rm -rf /`, `curl | sh`, `dd if=`, `git push --force`, …) y nuevo `ToolContext.approve(req: ApprovalRequest) => Promise<"allow"|"deny">` con `{ tool, command, kind: read|write|exec }`; tabla por modo (`auto`: read-only/dir allow, exec con deny list; `ask`: prompt en write/exec no read-only; `deny`: solo reads; las tres respetan deny list).
+  - [] capa 3: "always allow" en memoria por sesión + UI de approval.
+- estimación restante: capa 2 ~3h, capa 3 ~2h. Riesgo medio: cambia la firma de `ToolContext` → tocar los 4 tools, ambos specs y `SessionManager.toolContext()`.
 - [] **tool calls en paralelo**
 - review: hoy `for … await` secuencial en `runAgentLoop`. Riesgos reales: N `shell` en paralelo saturan la máquina, `writeFile` a la misma ruta es race, dependencias implícitas de orden en el modelo, y OpenAI exige que los `tool` messages vayan en el mismo orden que los `tool_calls`.
 - propuesta: `config.tools.parallel: { enabled, maxConcurrency }` (default `false`/`4`), metadata `Tool.execution.parallelSafe` (`readFile`/`listDir` `true`; `writeFile`/`shell` `false`), `ToolRegistry.parallelizable(calls)`, `src/utils/concurrency.ts#runWithLimit` (~20 LOC, sin `p-limit`); recolectar resultados y recién entonces empujar los `tool` messages en el orden original. ~1.5h. Riesgo bajo detrás de flag; no activar por default sin métrica de calls múltiples.
@@ -59,13 +62,13 @@
 - propuesta nivel 1: reemplazar `onChunk` por `onEvent: (e: ChatEvent) => void` con `ChatEvent = text | toolCallStart | toolCallDelta`; `toolCallStart` se emite una sola vez por `index` (al aparecer `function.name`) y `SessionManager` lo loguea vía `logger.transient` ("→ shell …"). Nivel 2 (post-MVP): `ToolContext.onOutput?: (chunk) => void` que `ShellTool` llama con throttle ~100 ms para salida viva (el truncado sigue aplicando al resultado final, no al stream). Nivel 1 ~1h riesgo bajo; nivel 2 ~2h riesgo medio (no romper el redibujado del prompt en `stdin.ts`).
 
 ### 4.3 orden sugerido
-1. 4.1 (`tsconfig` + test de `SessionStore`) — sin esto no hay typecheck real.
-2. Sandbox de paths (4.2 approval, capa 1) — bug de seguridad.
-3. Cablear agente (prompt/tools/approval/maxIterations) — bug funcional; habilita el resto.
-4. `normalizeToolMarkup`.
-5. Approval allowlist/deny + UI (capas 2 y 3).
-6. Streaming nivel 1.
-7. Paralelo (último, detrás de flag).
+1. [x] 4.1 (`tsconfig` + test de `SessionStore`) — sin esto no hay typecheck real.
+2. [x] Sandbox de paths (4.2 approval, capa 1) — bug de seguridad.
+3. [x] Cablear agente (prompt/tools/approval/maxIterations) — bug funcional; habilita el resto.
+4. [x] `normalizeToolMarkup`.
+5. [] Approval allowlist/deny + UI (capas 2 y 3).
+6. [] Streaming nivel 1.
+7. [] Paralelo (último, detrás de flag).
 
 5. memory
 - define how the memory will work
