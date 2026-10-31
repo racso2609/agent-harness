@@ -14,6 +14,11 @@ import { generateSessionId } from "@/utils/session";
 import { logger } from "@/utils/logger";
 import { input, select } from "@/utils/stdin";
 import { ClassifiedAction, classifyAction } from "./classifyAction";
+import {
+  compactHistory,
+  DEFAULT_COMPACT_THRESHOLD,
+  estimateHistoryTokens,
+} from "./history";
 import { SessionRecord, SessionStore } from "./SessionStore";
 
 // Options accepted by initialize/load to resume an existing session.
@@ -57,7 +62,7 @@ interface SessionManager {
   // Returns the current session usage, cost and context status.
   status: () => SessionStatus;
   // Routes the prompt to text or image generation based on classification.
-  ask: (prompt: string) => ReturnType<Provider["ask"]>;
+  ask: (prompt: string) => Promise<AgentResponse>;
   // internal
   // la idea es agharrar el propmt pasaarlo por un agent peque;o que no consuma mucho y preguntarle que tipo de accion es textGeneration or imageGeneration para luego enrutarlo a la accion correcta del provider (jev)
   classifyAction: (prompt: string) => Promise<ClassifiedAction>;
@@ -71,6 +76,8 @@ class SessionManagerImpl implements SessionManager {
   config: Config;
   // Active provider instance, undefined until initialize() succeeds.
   provider?: Provider;
+  // Conversation history owned by the session, replayed into the provider.
+  history: History[] = [];
   // Secondary provider used only to classify prompts. Kept isolated so its
   // classification traffic never pollutes the main conversation history.
   classifierProvider?: Provider;
@@ -141,7 +148,7 @@ class SessionManagerImpl implements SessionManager {
     await provider.initialize();
     if (!provider.setModel(record.model)) return false;
 
-    provider.history = record.history ?? [];
+    this.history = record.history ?? [];
 
     this.id = record.id;
     this.sessionId = record.id;
@@ -171,7 +178,7 @@ class SessionManagerImpl implements SessionManager {
       updatedAt: new Date().toISOString(),
       provider: this.providerName,
       model: this.model,
-      history: this.provider.history,
+      history: this.history,
       usage: this.usage,
       costUsd: this.costUsd,
     };
@@ -234,15 +241,22 @@ class SessionManagerImpl implements SessionManager {
     return true;
   }
 
-  // Compacts the provider history using the configured threshold.
+  // Compacts the session history using the configured threshold.
   async compactSession() {
     if (!this.provider) throw new Error("Session not initialized");
 
-    const before = this.provider.history;
-    this.provider.compact(this.config.config.compactThreshold);
-    const changed = this.provider.history !== before;
+    const before = this.history;
+    this.history = compactHistory(
+      this.history,
+      this.config.config.compactThreshold ?? DEFAULT_COMPACT_THRESHOLD,
+      this.provider.getContextWindow(),
+    );
+    const changed = this.history !== before;
 
-    if (changed) this.save();
+    if (changed) {
+      this.provider.resetContextUsage();
+      this.save();
+    }
     return changed;
   }
 
@@ -273,7 +287,7 @@ class SessionManagerImpl implements SessionManager {
     const maxIterations = Math.max(1, toolsConfig?.maxIterations ?? 8);
     const specs = toolsConfig?.enabled === false ? [] : this.tools.specs();
 
-    provider.history.push({ role: "user", content: prompt });
+    this.history.push({ role: "user", content: prompt });
 
     const usage: TokenUsage = {
       promptTokens: 0,
@@ -284,7 +298,7 @@ class SessionManagerImpl implements SessionManager {
     let lastText = "";
 
     for (let iteration = 0; iteration < maxIterations; iteration++) {
-      const result = await provider.chat(provider.history, { tools: specs });
+      const result = await provider.chat(this.history, { tools: specs });
 
       this.addUsage(usage, result.usage);
       costUsd += result.costUsd ?? 0;
@@ -301,7 +315,7 @@ class SessionManagerImpl implements SessionManager {
 
       for (const call of result.turn.toolCalls) {
         const toolResult = await this.runTool(call);
-        provider.history.push({
+        this.history.push({
           role: "tool",
           toolCallId: call.id,
           content: toolResult.output,
@@ -330,15 +344,13 @@ class SessionManagerImpl implements SessionManager {
   }
 
   protected appendAssistant(text: string, toolCalls: ToolCall[]) {
-    if (!this.provider) return;
-
     const message: Extract<History, { role: "assistant" }> = {
       role: "assistant",
       content: text,
     };
     if (toolCalls.length) message.toolCalls = toolCalls;
 
-    this.provider.history.push(message);
+    this.history.push(message);
   }
 
   protected toolContext(): ToolContext {
@@ -377,7 +389,8 @@ class SessionManagerImpl implements SessionManager {
   // Current session usage, cost and context occupancy.
   status(): SessionStatus {
     const contextWindow = this.provider?.getContextWindow();
-    const contextTokens = this.provider?.getContextTokens() ?? 0;
+    const contextTokens =
+      this.provider?.getContextTokens() || estimateHistoryTokens(this.history);
     const contextUsage = contextWindow
       ? Math.min(contextTokens / contextWindow, 1)
       : 0;

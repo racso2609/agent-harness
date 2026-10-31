@@ -26,10 +26,13 @@ export const classifyAction = async (
   provider: Provider,
 ): Promise<ClassifiedAction> => {
   try {
-    const { text } = await provider.ask(
-      `${CLASSIFICATION_PROMPT}\n\nPrompt: ${prompt}`,
-    );
-    const parsed = normalize(text);
+    const { turn } = await provider.chat([
+      {
+        role: "user",
+        content: `${CLASSIFICATION_PROMPT}\n\nPrompt: ${prompt}`,
+      },
+    ]);
+    const parsed = normalize(turn.text);
 
     if (typeof parsed?.is_image_generation === "boolean")
       return parsed.is_image_generation ? "imageGeneration" : "textGeneration";

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { OpenAiProvider } from "../../src/providers/openai";
-import type { History, Model } from "../../src/types/providers";
+import type { Model } from "../../src/types/providers";
 
 const url = "https://api.example.com/v1";
 const apiKey = "test-api-key";
@@ -66,9 +66,6 @@ const loadModels = async (
   return provider.getAvailableModels();
 };
 
-const userMessages = (...contents: string[]): History[] =>
-  contents.map((content) => ({ role: "user" as const, content }));
-
 describe("OpenAiProvider", () => {
   let provider: OpenAiProvider;
   let fetchMock: FetchMock;
@@ -89,18 +86,10 @@ describe("OpenAiProvider", () => {
       expect(provider.getModel()).toBe(DEFAULT_MODEL);
     });
 
-    it("starts with an empty history", () => {
-      expect(provider.history).toEqual([]);
-    });
-
     it("starts with an empty model list", () => {
       expect(() => provider.listModels()).toThrow(
         "Please initialize model list first",
       );
-    });
-
-    it("uses a compact threshold of 4 by default", () => {
-      expect(provider.compactThreshold).toBe(4);
     });
   });
 
@@ -193,28 +182,22 @@ describe("OpenAiProvider", () => {
     });
   });
 
-  describe("ask", () => {
-    it("throws when input is empty", async () => {
-      await expect(provider.ask("")).rejects.toThrow(
-        "Please type what do you want to ask to the agent",
-      );
-    });
-
+  describe("chat transport", () => {
     it("throws when the model list is not initialized", async () => {
-      await expect(provider.ask("hello")).rejects.toThrow(
-        "Please initialize model list first",
-      );
+      await expect(
+        provider.chat([{ role: "user", content: "hello" }]),
+      ).rejects.toThrow("Please initialize model list first");
     });
 
     it("throws when the default model is not available", async () => {
       await loadModels(provider, fetchMock, [{ id: "unknown-model" }]);
 
-      await expect(provider.ask("hello")).rejects.toThrow(
-        "Model not available for this provider",
-      );
+      await expect(
+        provider.chat([{ role: "user", content: "hello" }]),
+      ).rejects.toThrow("Model not available for this provider");
     });
 
-    it("appends the user input and the response to the history", async () => {
+    it("returns the assistant turn without mutating any history", async () => {
       await loadModels(provider, fetchMock);
       mockStreamOnce(fetchMock, [
         `data: {"choices":[{"delta":{"content":"first "}}]}\n\n`,
@@ -223,17 +206,19 @@ describe("OpenAiProvider", () => {
         "data: [DONE]\n\n",
       ]);
 
-      const response = await provider.ask("hello");
+      const result = await provider.chat([
+        { role: "user", content: "hello" },
+      ]);
 
-      expect(response).toEqual({
-        text: "first implementation",
+      expect(result).toEqual({
+        turn: {
+          text: "first implementation",
+          toolCalls: [],
+          finishReason: "other",
+        },
         usage: { promptTokens: 10, completionTokens: 3, totalTokens: 13 },
         costUsd: 0,
       });
-      expect(provider.history).toEqual([
-        { role: "user", content: "hello" },
-        { role: "assistant", content: "first implementation" },
-      ]);
     });
 
     it("requests token usage from the streaming endpoint", async () => {
@@ -243,7 +228,7 @@ describe("OpenAiProvider", () => {
         "data: [DONE]\n\n",
       ]);
 
-      await provider.ask("hello");
+      await provider.chat([{ role: "user", content: "hello" }]);
 
       const [, init] = fetchMock.mock.calls[1] as [string, RequestInit];
       expect(JSON.parse(String(init.body))).toMatchObject({
@@ -261,10 +246,13 @@ describe("OpenAiProvider", () => {
         "data: [DONE]\n\n",
       ]);
 
-      await provider.ask("hello");
+      await provider.chat([{ role: "user", content: "hello" }]);
 
       expect(provider.getContextWindow()).toBe(1000);
       expect(provider.getContextTokens()).toBe(255);
+
+      provider.resetContextUsage();
+      expect(provider.getContextTokens()).toBe(0);
     });
 
     it("computes the request cost from the model pricing", async () => {
@@ -283,14 +271,11 @@ describe("OpenAiProvider", () => {
         "data: [DONE]\n\n",
       ]);
 
-      const response = await provider.ask("hello");
+      const result = await provider.chat([
+        { role: "user", content: "hello" },
+      ]);
 
-      expect(response.costUsd).toBeCloseTo(6);
-    });
-
-    it("does not modify the history when validation fails", async () => {
-      await expect(provider.ask("")).rejects.toThrow();
-      expect(provider.history).toEqual([]);
+      expect(result.costUsd).toBeCloseTo(6);
     });
   });
 
@@ -359,204 +344,6 @@ describe("OpenAiProvider", () => {
     });
   });
 
-  describe("compact", () => {
-    it("returns the same history when there are no messages", () => {
-      const history: History[] = [];
-      provider.history = history;
-
-      expect(provider.compact()).toBe(history);
-    });
-
-    it("returns the same history when user messages equal the threshold", () => {
-      const history = userMessages("u1", "u2", "u3", "u4");
-      provider.history = history;
-
-      expect(provider.compact()).toBe(history);
-      expect(provider.history).toEqual(history);
-    });
-
-    it("returns the same history when user messages are below the threshold", () => {
-      const history = userMessages("u1", "u2");
-      provider.history = history;
-
-      expect(provider.compact()).toBe(history);
-    });
-
-    it("summarizes older messages and keeps the most recent ones", () => {
-      provider.history = userMessages("u1", "u2", "u3", "u4", "u5", "u6");
-
-      const compacted = provider.compact();
-
-      expect(compacted).toEqual([
-        { role: "system", content: "[Memoria previa compactada]: user: u1 | user: u2" },
-        { role: "user", content: "u3" },
-        { role: "user", content: "u4" },
-        { role: "user", content: "u5" },
-        { role: "user", content: "u6" },
-      ]);
-    });
-
-    it("compacts assistant messages alongside user messages", () => {
-      provider.history = [
-        { role: "user", content: "u1" },
-        { role: "assistant", content: "a1" },
-        { role: "user", content: "u2" },
-        { role: "assistant", content: "a2" },
-        { role: "user", content: "u3" },
-        { role: "assistant", content: "a3" },
-      ];
-
-      const compacted = provider.compact(2);
-
-      expect(compacted).toEqual([
-        {
-          role: "system",
-          content: "[Memoria previa compactada]: user: u1 | assistant: a1 | user: u2 | assistant: a2",
-        },
-        { role: "user", content: "u3" },
-        { role: "assistant", content: "a3" },
-      ]);
-    });
-
-    it("truncates older messages to keep the summary bounded", () => {
-      const long = "x".repeat(2000);
-      provider.history = [
-        { role: "user", content: long },
-        { role: "assistant", content: long },
-        ...userMessages("u1", "u2", "u3", "u4", "u5"),
-      ];
-
-      const compacted = provider.compact(4);
-      const memory = compacted[0].content;
-
-      expect(memory.length).toBeLessThan(4000);
-      expect(memory).toContain("…");
-    });
-
-    it("uses a custom threshold", () => {
-      provider.history = userMessages("u1", "u2", "u3");
-
-      const compacted = provider.compact(2);
-
-      expect(compacted).toEqual([
-        { role: "system", content: "[Memoria previa compactada]: user: u1" },
-        { role: "user", content: "u2" },
-        { role: "user", content: "u3" },
-      ]);
-    });
-
-    it("preserves system messages before the compacted memory", () => {
-      provider.history = [
-        { role: "system", content: "you are a helpful agent" },
-        ...userMessages("u1", "u2", "u3", "u4", "u5", "u6"),
-      ];
-
-      const compacted = provider.compact();
-
-      expect(compacted).toEqual([
-        { role: "system", content: "you are a helpful agent" },
-        { role: "system", content: "[Memoria previa compactada]: user: u1 | user: u2" },
-        { role: "user", content: "u3" },
-        { role: "user", content: "u4" },
-        { role: "user", content: "u5" },
-        { role: "user", content: "u6" },
-      ]);
-    });
-
-    it("preserves multiple system messages in order", () => {
-      provider.history = [
-        { role: "system", content: "first system" },
-        { role: "system", content: "second system" },
-        ...userMessages("u1", "u2", "u3", "u4", "u5"),
-      ];
-
-      const compacted = provider.compact();
-
-      expect(compacted.slice(0, 2)).toEqual([
-        { role: "system", content: "first system" },
-        { role: "system", content: "second system" },
-      ]);
-      expect(compacted[2]).toEqual({
-        role: "system",
-        content: "[Memoria previa compactada]: user: u1",
-      });
-    });
-
-    it("keeps tool results paired with their assistant message", () => {
-      provider.history = [
-        { role: "user", content: "u1" },
-        {
-          role: "assistant",
-          content: "",
-          toolCalls: [{ id: "call_1", name: "shell", args: {} }],
-        },
-        { role: "tool", toolCallId: "call_1", content: "out" },
-        { role: "user", content: "u2" },
-      ];
-
-      const compacted = provider.compact(2);
-
-      expect(compacted).toEqual([
-        {
-          role: "system",
-          content: "[Memoria previa compactada]: user: u1",
-        },
-        {
-          role: "assistant",
-          content: "",
-          toolCalls: [{ id: "call_1", name: "shell", args: {} }],
-        },
-        { role: "tool", toolCallId: "call_1", content: "out" },
-        { role: "user", content: "u2" },
-      ]);
-    });
-
-    it("does not count system messages towards the threshold", () => {
-      const history: History[] = [
-        ...userMessages("u1", "u2", "u3", "u4"),
-        { role: "system", content: "system after users" },
-      ];
-      provider.history = history;
-
-      expect(provider.compact()).toBe(history);
-    });
-
-    it("updates the provider history with the compacted result", () => {
-      provider.history = userMessages("u1", "u2", "u3", "u4", "u5", "u6");
-
-      const compacted = provider.compact();
-
-      expect(provider.history).toBe(compacted);
-    });
-
-    it("uses the default threshold when none is provided", () => {
-      provider.history = userMessages("u1", "u2", "u3", "u4", "u5");
-
-      const compacted = provider.compact();
-
-      expect(compacted).toEqual([
-        { role: "system", content: "[Memoria previa compactada]: user: u1" },
-        ...userMessages("u2", "u3", "u4", "u5"),
-      ]);
-    });
-
-    it("produces only valid History entries", () => {
-      provider.history = [
-        { role: "system", content: "system" },
-        ...userMessages("u1", "u2", "u3", "u4", "u5", "u6"),
-      ];
-
-      const compacted = provider.compact();
-
-      expect(Array.isArray(compacted)).toBe(true);
-      for (const message of compacted) {
-        expect(Array.isArray(message)).toBe(false);
-        expect(["system", "user", "assistant"]).toContain(message.role);
-        expect(typeof message.content).toBe("string");
-      }
-    });
-  });
-
   describe("chat", () => {
     it("accumulates streamed tool calls by index and maps them to camelCase", async () => {
       await loadModels(provider, fetchMock);
@@ -603,7 +390,6 @@ describe("OpenAiProvider", () => {
         completionTokens: 4,
         totalTokens: 16,
       });
-      expect(provider.history).toEqual([]);
     });
 
     it("sends tool specs and tool messages using the wire snake_case contract", async () => {

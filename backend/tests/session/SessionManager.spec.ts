@@ -35,7 +35,6 @@ describe("SessionManager status", () => {
 
   beforeEach(() => {
     provider = new OpenAiProvider("https://api.example.com", "key", "model");
-    provider.history = [{ role: "user", content: "hello" }];
     provider.getContextWindow = () => 1000;
     provider.getContextTokens = () => 900;
     store = makeStore();
@@ -91,7 +90,10 @@ describe("SessionManager status", () => {
       makeConfig({ autoCompact: true, autoCompactThreshold: 80, compactThreshold: 2 }),
       store,
     );
-    provider.history = [
+    session.provider = provider;
+    session.providerName = "openai";
+    session.model = "model";
+    session.history = [
       { role: "user", content: "u1" },
       { role: "user", content: "u2" },
       { role: "user", content: "u3" },
@@ -99,15 +101,12 @@ describe("SessionManager status", () => {
       { role: "user", content: "u5" },
       { role: "user", content: "u6" },
     ];
-    session.provider = provider;
-    session.providerName = "openai";
-    session.model = "model";
     vi.spyOn(session, "classifyAction").mockResolvedValue("textGeneration");
     provider.chat = vi.fn(async () => stopTurn());
 
     await session.ask("hello");
 
-    expect(provider.history).toEqual([
+    expect(session.history).toEqual([
       {
         role: "system",
         content:
@@ -123,21 +122,21 @@ describe("SessionManager status", () => {
       makeConfig({ autoCompact: true, autoCompactThreshold: 95, compactThreshold: 2 }),
       store,
     );
-    provider.history = [
+    session.provider = provider;
+    session.providerName = "openai";
+    session.model = "model";
+    session.history = [
       { role: "user", content: "u1" },
       { role: "user", content: "u2" },
       { role: "user", content: "u3" },
       { role: "user", content: "u4" },
     ];
-    session.provider = provider;
-    session.providerName = "openai";
-    session.model = "model";
     vi.spyOn(session, "classifyAction").mockResolvedValue("textGeneration");
     provider.chat = vi.fn(async () => stopTurn());
 
     await session.ask("hello");
 
-    expect(provider.history).toHaveLength(6);
+    expect(session.history).toHaveLength(6);
   });
 });
 
@@ -206,7 +205,7 @@ describe("SessionManager agent loop", () => {
       completionTokens: 7,
       totalTokens: 22,
     });
-    expect(provider.history).toEqual([
+    expect(session.history).toEqual([
       { role: "user", content: "run echo" },
       {
         role: "assistant",
@@ -240,7 +239,7 @@ describe("SessionManager agent loop", () => {
 
     await session.ask("delete everything");
 
-    expect(provider.history).toContainEqual({
+    expect(session.history).toContainEqual({
       role: "tool",
       toolCallId: "call_1",
       content: "Command rejected by the user",

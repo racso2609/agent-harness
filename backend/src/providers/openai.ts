@@ -1,5 +1,4 @@
 import {
-  AgentResponse,
   AssistantTurn,
   ChatOptions,
   ChatResult,
@@ -64,8 +63,6 @@ enum Errors {
 export class OpenAiProvider extends BasicProvider implements Provider {
   protected models: Model[] = [];
   protected model = "";
-  history: History[] = [];
-  compactThreshold = 4;
   protected contextWindow?: number;
   protected lastContextTokens = 0;
   protected _onChunk: (content: string, done: boolean) => Promise<void> =
@@ -124,62 +121,6 @@ export class OpenAiProvider extends BasicProvider implements Provider {
 
   protected syncContextWindow() {
     this.contextWindow = this.finModel(this.model)?.contextLength;
-  }
-
-  compact(compactThreshold = this.compactThreshold) {
-    const systemMessages: History[] = [];
-    const conversation: History[] = [];
-
-    for (const message of this.history) {
-      if (message.role === "system") systemMessages.push(message);
-      else conversation.push(message);
-    }
-
-    if (conversation.length <= compactThreshold) return this.history;
-
-    // Never start the recent window with a tool result: it must stay paired
-    // with the assistant message that requested it.
-    let start = Math.max(0, conversation.length - compactThreshold);
-    while (start > 0 && conversation[start].role === "tool") start--;
-
-    const recentMessages = conversation.slice(start);
-    const olderMessages = conversation.slice(0, start);
-    const summaryText = this.summarize(olderMessages);
-
-    const memoryBlock: History = {
-      role: "system",
-      content: `[Memoria previa compactada]: ${summaryText}`,
-    };
-
-    this.history = [...systemMessages, memoryBlock, ...recentMessages];
-    this.lastContextTokens = 0;
-
-    return this.history;
-  }
-
-  protected summarize(messages: History[]) {
-    const budget = this.contextWindow
-      ? Math.min(Math.floor(this.contextWindow * 0.2), 200_000)
-      : 16_000;
-    const parts: string[] = [];
-    let used = 0;
-
-    for (const message of messages) {
-      const content =
-        message.content.length > 500
-          ? `${message.content.slice(0, 500)}…`
-          : message.content;
-      const part = `${message.role}: ${content}`;
-
-      if (used + part.length > budget) break;
-
-      parts.push(part);
-      used += part.length + 3;
-    }
-
-    if (parts.length < messages.length) parts.push("…");
-
-    return parts.join(" | ");
   }
 
   protected async _handleStream(
@@ -317,23 +258,6 @@ export class OpenAiProvider extends BasicProvider implements Provider {
     return { turn, usage, costUsd: usage ? this.costOf(usage) : undefined };
   }
 
-  async ask(input: string): Promise<AgentResponse> {
-    if (!input) throw new Error(Errors.MISSING_INPUT);
-    this.assertReady();
-
-    this.history.push({ role: "user", content: input });
-
-    const { turn, usage, costUsd } = await this.chat(this.history);
-    const assistant: Extract<History, { role: "assistant" }> = {
-      role: "assistant",
-      content: turn.text,
-    };
-    if (turn.toolCalls.length) assistant.toolCalls = turn.toolCalls;
-    this.history.push(assistant);
-
-    return { text: turn.text, usage, costUsd };
-  }
-
   protected assertReady(): Model {
     if (!this.models.length) throw new Error(Errors.NO_LIST_INITIALIZATED);
     const model = this.finModel(this.model);
@@ -392,7 +316,7 @@ export class OpenAiProvider extends BasicProvider implements Provider {
     };
   }
 
-  protected estimateHistoryTokens(messages: History[] = this.history) {
+  protected estimateHistoryTokens(messages: History[]) {
     const characters = messages.reduce(
       (total, message) => total + message.content.length,
       0,
@@ -416,7 +340,11 @@ export class OpenAiProvider extends BasicProvider implements Provider {
   }
 
   getContextTokens() {
-    return this.lastContextTokens || this.estimateHistoryTokens();
+    return this.lastContextTokens;
+  }
+
+  resetContextUsage() {
+    this.lastContextTokens = 0;
   }
   async generateImage(prompt: string) {
     if (!prompt) throw new Error(Errors.MISSING_INPUT);

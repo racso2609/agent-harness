@@ -112,13 +112,9 @@ export type History =
 
 export type Provider = {
   url: string;
-  history: History[];
   initialize: () => Promise<void>;
-  ask: (input: string) => Promise<AgentResponse>;
   chat: (messages: History[], options?: ChatOptions) => Promise<ChatResult>;
   generateImage: (input: string) => Promise<AgentResponse>;
-
-  compact: (compactThreshold?: number) => History[];
   // models functions
   getAvailableModels: () => Promise<Model[]>;
   setModel: (model: string) => boolean;
@@ -126,4 +122,5 @@ export type Provider = {
   listModels?: () => Model[];
   getContextWindow: () => number | undefined;
   getContextTokens: () => number;
+  resetContextUsage: () => void;
 };
