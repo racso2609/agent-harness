@@ -185,7 +185,7 @@ describe("OpenAiProvider", () => {
         json: async () => {
           throw new Error("invalid json");
         },
-      } as Response);
+      } as unknown as Response);
 
       await expect(provider.getAvailableModels()).rejects.toThrow(
         "invalid json",
@@ -482,6 +482,35 @@ describe("OpenAiProvider", () => {
       });
     });
 
+    it("keeps tool results paired with their assistant message", () => {
+      provider.history = [
+        { role: "user", content: "u1" },
+        {
+          role: "assistant",
+          content: "",
+          toolCalls: [{ id: "call_1", name: "shell", args: {} }],
+        },
+        { role: "tool", toolCallId: "call_1", content: "out" },
+        { role: "user", content: "u2" },
+      ];
+
+      const compacted = provider.compact(2);
+
+      expect(compacted).toEqual([
+        {
+          role: "system",
+          content: "[Memoria previa compactada]: user: u1",
+        },
+        {
+          role: "assistant",
+          content: "",
+          toolCalls: [{ id: "call_1", name: "shell", args: {} }],
+        },
+        { role: "tool", toolCallId: "call_1", content: "out" },
+        { role: "user", content: "u2" },
+      ]);
+    });
+
     it("does not count system messages towards the threshold", () => {
       const history: History[] = [
         ...userMessages("u1", "u2", "u3", "u4"),
@@ -525,6 +554,141 @@ describe("OpenAiProvider", () => {
         expect(["system", "user", "assistant"]).toContain(message.role);
         expect(typeof message.content).toBe("string");
       }
+    });
+  });
+
+  describe("chat", () => {
+    it("accumulates streamed tool calls by index and maps them to camelCase", async () => {
+      await loadModels(provider, fetchMock);
+      mockStreamOnce(fetchMock, [
+        `data: {"choices":[{"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"readFile","arguments":""}}]}}]}\n\n`,
+        `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\\"path\\":"}}]}}]}\n\n`,
+        `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\\"a.txt\\"}"}}]}}]}\n\n`,
+        `data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}\n\n`,
+        `data: {"choices":[],"usage":{"prompt_tokens":12,"completion_tokens":4,"total_tokens":16}}\n\n`,
+        "data: [DONE]\n\n",
+      ]);
+
+      const result = await provider.chat(
+        [{ role: "user", content: "read a.txt" }],
+        {
+          tools: [
+            {
+              name: "readFile",
+              description: "Read a file",
+              parameters: {
+                type: "object",
+                properties: { path: { type: "string" } },
+                required: ["path"],
+              },
+            },
+          ],
+        },
+      );
+
+      expect(result.turn).toEqual({
+        text: "",
+        finishReason: "toolCalls",
+        toolCalls: [
+          {
+            id: "call_1",
+            name: "readFile",
+            args: { path: "a.txt" },
+            rawArgs: '{"path":"a.txt"}',
+          },
+        ],
+      });
+      expect(result.usage).toEqual({
+        promptTokens: 12,
+        completionTokens: 4,
+        totalTokens: 16,
+      });
+      expect(provider.history).toEqual([]);
+    });
+
+    it("sends tool specs and tool messages using the wire snake_case contract", async () => {
+      await loadModels(provider, fetchMock);
+      mockStreamOnce(fetchMock, [
+        `data: {"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}\n\n`,
+        "data: [DONE]\n\n",
+      ]);
+
+      const toolCall = {
+        id: "call_1",
+        name: "shell",
+        args: { command: "ls" },
+        rawArgs: '{"command":"ls"}',
+      };
+
+      await provider.chat(
+        [
+          { role: "user", content: "list" },
+          { role: "assistant", content: "", toolCalls: [toolCall] },
+          { role: "tool", toolCallId: "call_1", content: "a.txt" },
+        ],
+        {
+          tools: [
+            {
+              name: "shell",
+              description: "Run a command",
+              parameters: {
+                type: "object",
+                properties: { command: { type: "string" } },
+                required: ["command"],
+              },
+            },
+          ],
+        },
+      );
+
+      const [, init] = fetchMock.mock.calls[1] as [string, RequestInit];
+      const body = JSON.parse(String(init.body));
+
+      expect(body.tools).toEqual([
+        {
+          type: "function",
+          function: {
+            name: "shell",
+            description: "Run a command",
+            parameters: {
+              type: "object",
+              properties: { command: { type: "string" } },
+              required: ["command"],
+            },
+          },
+        },
+      ]);
+      expect(body.messages[1].tool_calls).toEqual([
+        {
+          id: "call_1",
+          type: "function",
+          function: { name: "shell", arguments: '{"command":"ls"}' },
+        },
+      ]);
+      expect(body.messages[2]).toMatchObject({
+        role: "tool",
+        tool_call_id: "call_1",
+        content: "a.txt",
+      });
+    });
+
+    it("flags malformed tool arguments instead of throwing", async () => {
+      await loadModels(provider, fetchMock);
+      mockStreamOnce(fetchMock, [
+        `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"shell","arguments":"{oops"}}]},"finish_reason":"tool_calls"}]}\n\n`,
+        "data: [DONE]\n\n",
+      ]);
+
+      const result = await provider.chat([
+        { role: "user", content: "run" },
+      ]);
+
+      expect(result.turn.toolCalls[0]).toMatchObject({
+        id: "call_1",
+        name: "shell",
+        rawArgs: "{oops",
+        parseError: "Tool arguments are not valid JSON",
+      });
     });
   });
 

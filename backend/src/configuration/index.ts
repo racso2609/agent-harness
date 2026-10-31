@@ -8,6 +8,22 @@ interface ProviderConfig {
   apikey: string;
 }
 
+interface ShellToolsConfig {
+  timeoutMs?: number;
+  maxOutputBytes?: number;
+}
+
+interface ToolsConfig {
+  enabled?: boolean;
+  maxIterations?: number;
+  approval?: "ask" | "auto" | "deny";
+  // Root directory where tools resolve relative paths.
+  workspace?: string;
+  // Hard cap applied to every tool output before it enters the history.
+  maxOutputBytes?: number;
+  shell?: ShellToolsConfig;
+}
+
 interface HarnessConfig {
   model?: string;
   defaultProvider?: string;
@@ -21,7 +37,24 @@ interface HarnessConfig {
   classificationModel?: string;
 
   providers: Record<string, ProviderConfig>;
+  tools?: ToolsConfig;
 }
+
+const applyDefaults = (config: HarnessConfig): HarnessConfig => {
+  config.compactThreshold ??= 350;
+  config.autoCompact ??= true;
+  config.autoCompactThreshold ??= 60;
+  config.tools ??= {};
+  config.tools.enabled ??= true;
+  config.tools.maxIterations ??= 8;
+  config.tools.approval ??= "auto";
+  config.tools.maxOutputBytes ??= 32_768;
+  config.tools.shell ??= {};
+  config.tools.shell.timeoutMs ??= 30_000;
+  config.tools.shell.maxOutputBytes ??= 32_768;
+
+  return config;
+};
 
 const SUPPORTED_PROVIDERS = ["openai"];
 
@@ -37,10 +70,7 @@ class Config {
   constructor() {
     this.configLocation =
       env.RACSO_HARNESS_CONFIG_LOCATION ?? DEFAULT_CONFIG_LOCATION;
-    this.config = this.readConfig() ?? { providers: {} };
-    this.config.compactThreshold ??= 350;
-    this.config.autoCompact ??= true;
-    this.config.autoCompactThreshold ??= 60;
+    this.config = applyDefaults(this.readConfig() ?? { providers: {} });
   }
 
   async startSetup() {
@@ -87,11 +117,8 @@ class Config {
       const raw = fs.readFileSync(this.configLocation, "utf8");
       const parsed = JSON.parse(raw) as HarnessConfig;
 
-      if (!parsed.compactThreshold) parsed.compactThreshold = 350;
-      if (parsed.autoCompact === undefined) parsed.autoCompact = true;
-      if (!parsed.autoCompactThreshold) parsed.autoCompactThreshold = 60;
       parsed.providers ??= {};
-      return parsed;
+      return applyDefaults(parsed);
     } catch {
       return null;
     }
@@ -99,4 +126,4 @@ class Config {
 }
 
 export { Config };
-export type { HarnessConfig, ProviderConfig };
+export type { HarnessConfig, ProviderConfig, ShellToolsConfig, ToolsConfig };

@@ -1,10 +1,18 @@
 import { Config } from "@/configuration";
 import { OpenAiProvider } from "@/providers/openai";
-import { AgentResponse, Provider } from "@/types/providers";
+import { createToolRegistry, ToolContext, ToolRegistry } from "@/tools";
+import {
+  AgentResponse,
+  History,
+  Provider,
+  TokenUsage,
+  ToolCall,
+  ToolResult,
+} from "@/types/providers";
 import { SessionStatus, SessionUsage } from "@/types/session";
 import { generateSessionId } from "@/utils/session";
 import { logger } from "@/utils/logger";
-import { select } from "@/utils/stdin";
+import { input, select } from "@/utils/stdin";
 import { ClassifiedAction, classifyAction } from "./classifyAction";
 import { SessionRecord, SessionStore } from "./SessionStore";
 
@@ -72,6 +80,8 @@ class SessionManagerImpl implements SessionManager {
   model?: string;
   // Persistence layer for this session.
   store: SessionStore;
+  // Tools available to the ReAct loop.
+  tools: ToolRegistry;
   // Creation timestamp, preserved when resuming an existing session.
   createdAt: string;
   // Accumulated token usage for this session.
@@ -82,6 +92,7 @@ class SessionManagerImpl implements SessionManager {
   constructor(config = new Config(), store = new SessionStore()) {
     this.config = config;
     this.store = store;
+    this.tools = createToolRegistry(this.config);
     this.createdAt = new Date().toISOString();
   }
 
@@ -244,12 +255,123 @@ class SessionManagerImpl implements SessionManager {
     const response =
       action === "imageGeneration"
         ? await this.provider.generateImage(prompt)
-        : await this.provider.ask(prompt);
+        : await this.runAgentLoop(prompt);
 
     this.recordUsage(response);
     this.save();
     await this.maybeAutoCompact();
     return response;
+  }
+
+  // ReAct loop: LLM -> tool calls -> tool results -> repeat, capped by
+  // tools.maxIterations so a confused model cannot spin forever.
+  protected async runAgentLoop(prompt: string): Promise<AgentResponse> {
+    const provider = this.provider;
+    if (!provider) throw new Error("Session not initialized");
+
+    const toolsConfig = this.config.config.tools;
+    const maxIterations = Math.max(1, toolsConfig?.maxIterations ?? 8);
+    const specs = toolsConfig?.enabled === false ? [] : this.tools.specs();
+
+    provider.history.push({ role: "user", content: prompt });
+
+    const usage: TokenUsage = {
+      promptTokens: 0,
+      completionTokens: 0,
+      totalTokens: 0,
+    };
+    let costUsd = 0;
+    let lastText = "";
+
+    for (let iteration = 0; iteration < maxIterations; iteration++) {
+      const result = await provider.chat(provider.history, { tools: specs });
+
+      this.addUsage(usage, result.usage);
+      costUsd += result.costUsd ?? 0;
+      lastText = result.turn.text;
+      this.appendAssistant(result.turn.text, result.turn.toolCalls);
+
+      const readyToAnswer =
+        result.turn.finishReason !== "toolCalls" ||
+        result.turn.toolCalls.length === 0;
+
+      if (readyToAnswer) {
+        return { text: result.turn.text, usage, costUsd };
+      }
+
+      for (const call of result.turn.toolCalls) {
+        const toolResult = await this.runTool(call);
+        provider.history.push({
+          role: "tool",
+          toolCallId: call.id,
+          content: toolResult.output,
+        });
+      }
+    }
+
+    return {
+      text: lastText || "Stopped: maximum tool iterations reached",
+      usage,
+      costUsd,
+    };
+  }
+
+  // Tool calls run sequentially in v1 so ordering and logs stay predictable.
+  protected async runTool(call: ToolCall): Promise<ToolResult> {
+    logger.info(`Tool call: ${call.name} ${this.preview(call.args)}`);
+
+    const result = await this.tools.execute(this.toolContext(), call);
+
+    if (result.isError) {
+      logger.warn(`Tool ${call.name} failed: ${this.preview(result.output)}`);
+    }
+
+    return result;
+  }
+
+  protected appendAssistant(text: string, toolCalls: ToolCall[]) {
+    if (!this.provider) return;
+
+    const message: Extract<History, { role: "assistant" }> = {
+      role: "assistant",
+      content: text,
+    };
+    if (toolCalls.length) message.toolCalls = toolCalls;
+
+    this.provider.history.push(message);
+  }
+
+  protected toolContext(): ToolContext {
+    return {
+      cwd: this.config.config.tools?.workspace ?? process.cwd(),
+      sessionId: this.sessionId,
+      approve: (command) => this.approve(command),
+    };
+  }
+
+  // Approval gate for side effects. "auto" trusts the model (v1 default);
+  // "deny" blocks everything; "ask" prompts the user when a tool needs it.
+  protected async approve(command: string): Promise<boolean> {
+    const mode = this.config.config.tools?.approval ?? "auto";
+    if (mode === "auto") return true;
+    if (mode === "deny") return false;
+
+    const answer = await input(`Allow command? ${command} [y/N] `);
+    return /^y(es)?$/i.test(answer.trim());
+  }
+
+  protected preview(value: unknown) {
+    const text =
+      typeof value === "string" ? value : JSON.stringify(value ?? {});
+    return text.length > 200 ? `${text.slice(0, 200)}…` : text;
+  }
+
+  protected addUsage(total: TokenUsage, usage?: TokenUsage) {
+    if (!usage) return;
+
+    total.promptTokens += usage.promptTokens;
+    total.completionTokens += usage.completionTokens;
+    total.totalTokens += usage.totalTokens;
   }
 
   // Current session usage, cost and context occupancy.

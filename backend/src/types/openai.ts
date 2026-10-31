@@ -4,6 +4,59 @@ export interface OpenAIChatUsage {
   total_tokens?: number;
 }
 
+export interface OpenAIFunctionCall {
+  name?: string;
+  arguments?: string;
+}
+
+export interface OpenAIToolCallDelta {
+  index?: number;
+  id?: string;
+  type?: "function";
+  function?: OpenAIFunctionCall;
+}
+
+export interface OpenAIStreamDelta {
+  role?: string;
+  content?: string | null;
+  tool_calls?: OpenAIToolCallDelta[];
+}
+
+export interface OpenAIStreamChoice {
+  delta?: OpenAIStreamDelta;
+  finish_reason?: string | null;
+}
+
+export interface OpenAIStreamChunk {
+  choices?: OpenAIStreamChoice[];
+  usage?: OpenAIChatUsage;
+}
+
+export interface OpenAIToolCallPayload {
+  id: string;
+  type: "function";
+  function: {
+    name: string;
+    arguments: string;
+  };
+}
+
+export interface OpenAIChatMessage {
+  role: "system" | "user" | "assistant" | "tool";
+  content: string;
+  tool_calls?: OpenAIToolCallPayload[];
+  tool_call_id?: string;
+}
+
+export interface OpenAIToolSpec {
+  type: "function";
+  function: {
+    name: string;
+    description: string;
+    parameters: unknown;
+  };
+}
+
 export interface OpenAIModelsResponse {
   object: string;
   data: Datum[];

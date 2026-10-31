@@ -1,12 +1,58 @@
-import { History, Model, Provider, TokenUsage } from "@/types/providers";
+import {
+  AgentResponse,
+  AssistantTurn,
+  ChatOptions,
+  ChatResult,
+  FinishReason,
+  History,
+  Model,
+  Provider,
+  TokenUsage,
+  ToolCall,
+  ToolSpec,
+} from "@/types/providers";
 import { BasicProvider } from "./basic";
 import {
   Datum,
+  OpenAIChatMessage,
   OpenAIChatUsage,
   OpenAIImageResponse,
   OpenAIModelsResponse,
+  OpenAIStreamChunk,
+  OpenAIToolCallPayload,
+  OpenAIToolSpec,
 } from "@/types/openai";
 import { logger } from "@/utils/logger";
+
+const mapFinishReason = (reason?: string | null): FinishReason => {
+  switch (reason) {
+    case "stop":
+      return "stop";
+    case "tool_calls":
+      return "toolCalls";
+    case "length":
+      return "length";
+    case "content_filter":
+      return "contentFilter";
+    default:
+      return "other";
+  }
+};
+
+const parseArguments = (
+  raw: string,
+): { args: unknown; parseError?: string } => {
+  if (!raw.trim()) return { args: {} };
+
+  try {
+    return { args: JSON.parse(raw) as unknown };
+  } catch {
+    return { args: undefined, parseError: "Tool arguments are not valid JSON" };
+  }
+};
+
+// Accumulator for one streamed tool call, keyed by its delta index.
+type PartialToolCall = { id: string; name: string; rawArgs: string };
 
 enum Errors {
   NO_LIST_INITIALIZATED = "Please initialize model list first",
@@ -22,7 +68,8 @@ export class OpenAiProvider extends BasicProvider implements Provider {
   compactThreshold = 4;
   protected contextWindow?: number;
   protected lastContextTokens = 0;
-  protected _onChunk = async (_content: string, _done: boolean) => {};
+  protected _onChunk: (content: string, done: boolean) => Promise<void> =
+    async () => {};
 
   constructor(
     url: string,
@@ -90,8 +137,13 @@ export class OpenAiProvider extends BasicProvider implements Provider {
 
     if (conversation.length <= compactThreshold) return this.history;
 
-    const recentMessages = conversation.slice(-compactThreshold);
-    const olderMessages = conversation.slice(0, -compactThreshold);
+    // Never start the recent window with a tool result: it must stay paired
+    // with the assistant message that requested it.
+    let start = Math.max(0, conversation.length - compactThreshold);
+    while (start > 0 && conversation[start].role === "tool") start--;
+
+    const recentMessages = conversation.slice(start);
+    const olderMessages = conversation.slice(0, start);
     const summaryText = this.summarize(olderMessages);
 
     const memoryBlock: History = {
@@ -130,12 +182,16 @@ export class OpenAiProvider extends BasicProvider implements Provider {
     return parts.join(" | ");
   }
 
-  protected async _handleStream(response: Response) {
+  protected async _handleStream(
+    response: Response,
+  ): Promise<{ turn: AssistantTurn; usage?: TokenUsage }> {
     const reader = response.body!.getReader();
     const decoder = new TextDecoder("utf-8");
     let buffer = "";
     let fullAssistantResponse = "";
     let usage: TokenUsage | undefined;
+    let finishReason: string | null = null;
+    const partialCalls = new Map<number, PartialToolCall>();
 
     while (true) {
       const { value, done } = await reader.read();
@@ -152,23 +208,72 @@ export class OpenAiProvider extends BasicProvider implements Provider {
 
         if (trimmed.startsWith("data: ")) {
           try {
-            const json = JSON.parse(trimmed.replace("data: ", ""));
-            const content = json.choices?.[0]?.delta?.content;
+            const json = JSON.parse(
+              trimmed.replace("data: ", ""),
+            ) as OpenAIStreamChunk;
+            const choice = json.choices?.[0];
+            const content = choice?.delta?.content;
 
             if (content) {
               fullAssistantResponse += content;
               if (this._onChunk) this._onChunk?.(content, done); // Notificas al exterior en tiempo real
             }
 
+            if (choice?.finish_reason) finishReason = choice.finish_reason;
+
+            for (const delta of choice?.delta?.tool_calls ?? []) {
+              const index = delta.index ?? 0;
+              const current = partialCalls.get(index) ?? {
+                id: "",
+                name: "",
+                rawArgs: "",
+              };
+
+              if (delta.id) current.id = delta.id;
+              if (delta.function?.name)
+                current.name += delta.function.name;
+              if (delta.function?.arguments)
+                current.rawArgs += delta.function.arguments;
+
+              partialCalls.set(index, current);
+            }
+
             if (json.usage) usage = this.mapUsage(json.usage);
-          } catch (err) {
+          } catch {
             // Ignorar errores de parseo en chunks parciales
           }
         }
       }
     }
 
-    return { text: fullAssistantResponse, usage };
+    const toolCalls: ToolCall[] = [...partialCalls.entries()]
+      .sort(([left], [right]) => left - right)
+      .map(([index, partial]) => {
+        const { args, parseError } = parseArguments(partial.rawArgs);
+        const call: ToolCall = {
+          id: partial.id || `toolCall${index}`,
+          name: partial.name,
+          args,
+          rawArgs: partial.rawArgs,
+        };
+
+        if (parseError) call.parseError = parseError;
+
+        return call;
+      });
+
+    const effectiveFinishReason: FinishReason = toolCalls.length
+      ? "toolCalls"
+      : mapFinishReason(finishReason);
+
+    return {
+      turn: {
+        text: fullAssistantResponse,
+        toolCalls,
+        finishReason: effectiveFinishReason,
+      },
+      usage,
+    };
   }
 
   protected mapUsage(usage: OpenAIChatUsage): TokenUsage {
@@ -182,47 +287,113 @@ export class OpenAiProvider extends BasicProvider implements Provider {
     };
   }
 
-  async ask(input: string) {
-    if (!input) throw new Error(Errors.MISSING_INPUT);
-    if (!this.models.length) throw new Error(Errors.NO_LIST_INITIALIZATED);
-    const modelExist = this.finModel(this.model);
-
-    if (!modelExist) throw new Error(Errors.MODEL_NOT_FOUND);
-    if (!modelExist.capabilities.streaming)
-      throw new Error(Errors.MISSING_CAPABILITIES + "streaming");
-
-    this.history.push({ role: "user", content: input });
-
-    const messages = this.history.map((m) => ({
-      ...m,
-      content: this.format(m.content),
-    }));
+  // Transport primitive: sends the given messages (no history mutation) and
+  // returns the assistant turn with tool calls already mapped to the domain.
+  async chat(messages: History[], options: ChatOptions = {}): Promise<ChatResult> {
+    const model = this.assertReady();
 
     const response = (await this._fetcher(
       "/chat/completions",
       {
         method: "POST",
         body: JSON.stringify({
-          model: modelExist.id,
-          messages,
+          model: model.id,
+          messages: this.toWireMessages(messages),
           stream: true,
           stream_options: { include_usage: true },
+          ...(options.tools?.length
+            ? { tools: options.tools.map((tool) => this.toWireToolSpec(tool)) }
+            : {}),
         }),
       },
       true,
     )) as Response;
-    const { text, usage } = await this._handleStream(response);
+    const { turn, usage } = await this._handleStream(response);
 
     this.lastContextTokens = usage
       ? usage.promptTokens + usage.completionTokens
-      : this.estimateHistoryTokens();
-    this.history.push({ role: "assistant", content: text });
+      : this.estimateHistoryTokens(messages);
 
-    return { text, usage, costUsd: usage ? this.costOf(usage) : undefined };
+    return { turn, usage, costUsd: usage ? this.costOf(usage) : undefined };
   }
 
-  protected estimateHistoryTokens() {
-    const characters = this.history.reduce(
+  async ask(input: string): Promise<AgentResponse> {
+    if (!input) throw new Error(Errors.MISSING_INPUT);
+    this.assertReady();
+
+    this.history.push({ role: "user", content: input });
+
+    const { turn, usage, costUsd } = await this.chat(this.history);
+    const assistant: Extract<History, { role: "assistant" }> = {
+      role: "assistant",
+      content: turn.text,
+    };
+    if (turn.toolCalls.length) assistant.toolCalls = turn.toolCalls;
+    this.history.push(assistant);
+
+    return { text: turn.text, usage, costUsd };
+  }
+
+  protected assertReady(): Model {
+    if (!this.models.length) throw new Error(Errors.NO_LIST_INITIALIZATED);
+    const model = this.finModel(this.model);
+
+    if (!model) throw new Error(Errors.MODEL_NOT_FOUND);
+    if (!model.capabilities.streaming)
+      throw new Error(Errors.MISSING_CAPABILITIES + "streaming");
+
+    return model;
+  }
+
+  protected toWireMessages(messages: History[]): OpenAIChatMessage[] {
+    return messages.map((message) => {
+      if (message.role === "tool") {
+        return {
+          role: "tool",
+          tool_call_id: message.toolCallId,
+          content: this.format(message.content),
+        };
+      }
+
+      const wire: OpenAIChatMessage = {
+        role: message.role,
+        content: this.format(message.content),
+      };
+
+      if (message.role === "assistant" && message.toolCalls?.length) {
+        wire.tool_calls = message.toolCalls.map((call) =>
+          this.toWireToolCall(call),
+        );
+      }
+
+      return wire;
+    });
+  }
+
+  protected toWireToolCall(call: ToolCall): OpenAIToolCallPayload {
+    return {
+      id: call.id,
+      type: "function",
+      function: {
+        name: call.name,
+        arguments: call.rawArgs ?? JSON.stringify(call.args ?? {}),
+      },
+    };
+  }
+
+  protected toWireToolSpec(tool: ToolSpec): OpenAIToolSpec {
+    return {
+      type: "function",
+      function: {
+        name: tool.name,
+        description: tool.description,
+        parameters: tool.parameters,
+      },
+    };
+  }
+
+  protected estimateHistoryTokens(messages: History[] = this.history) {
+    const characters = messages.reduce(
       (total, message) => total + message.content.length,
       0,
     );
