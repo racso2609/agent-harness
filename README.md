@@ -108,6 +108,31 @@ Reglas de precedencia:
 En runtime: `/agent` lista los agentes disponibles y `/agent <id>` cambia el
 agente activo conservando la conversación. Ejemplos listos en `backend/agents/`.
 
+### `code-reviewer`
+
+Revisor de solo lectura (sin `writeFile`, `approval: deny`). Revisa cambios
+pendientes locales, comiteados sin revisar o un PR (`git diff`, `gh pr diff`),
+y reporta hallazgos con `file:line`:
+
+- Bugs, riesgos de seguridad, inconsistencias con las convenciones y blast
+  radius, priorizados como bloqueantes o advisory.
+- Mejoras concretas (DRY/KISS/YAGNI, workarounds = `critical`).
+- **Auditoría de tests**: detecta tests tautológicos/siempre-verdes,
+  over-mocked, sin asserts, asserts debilitados, escritos "para pasar" o que
+  prueban implementación, y flaky. Para cada uno dice qué afirma probar, qué
+  prueba de verdad, y cómo hacerlo significativo; además propone los tests
+  faltantes. Nunca modifica archivos.
+
+```md
+---
+name: Code Reviewer
+description: Revisa cambios (diff local o PR) sin editar nada; propone mejoras y audita que los tests sean significativos.
+tools: [readFile, listDir, shell]
+approval: deny
+maxIterations: 10
+---
+```
+
 ## Sesiones persistidas
 
 Cada sesión se guarda como JSON en `~/.racso-harness/sessions` (override con
