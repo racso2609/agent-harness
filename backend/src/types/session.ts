@@ -4,6 +4,18 @@ export interface SessionUsage {
   totalTokens: number;
 }
 
+export interface SessionSummary {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+  provider: string;
+  model: string;
+  agentId?: string;
+  messageCount: number;
+  // First user message, trimmed for the session list.
+  title?: string;
+}
+
 export interface SessionStatus {
   sessionId: string;
   agent?: string;

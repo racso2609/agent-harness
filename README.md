@@ -108,6 +108,19 @@ Reglas de precedencia:
 En runtime: `/agent` lista los agentes disponibles y `/agent <id>` cambia el
 agente activo conservando la conversación. Ejemplos listos en `backend/agents/`.
 
+## Sesiones persistidas
+
+Cada sesión se guarda como JSON en `~/.racso-harness/sessions` (override con
+`RACSO_HARNESS_SESSIONS_LOCATION`) con su historial, provider/modelo, agente,
+usage y coste.
+
+- `/sessions` (alias `/session`) — lista las sesiones por actividad reciente con
+  título, provider/modelo, agente y número de mensajes. La activa se marca con `*`.
+- `/resume <id|prefijo|índice>` (alias `/switch`) — cambia a esa sesión,
+  persistiendo antes la actual. Acepta el id completo, un prefijo único o el
+  número de la lista. Sin argumento abre un selector interactivo.
+- Al arrancar: `--session <id>` (o `--resume`) retoma una sesión concreta.
+
 ## Trampas conocidas (de picoclaw) — a evitar desde el principio
 
 - **Tool calls como texto plano:** algunos modelos (p.ej. DeepSeek) escupen el markup

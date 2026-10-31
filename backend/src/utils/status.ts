@@ -1,4 +1,4 @@
-import type { SessionStatus } from "@/types/session";
+import type { SessionStatus, SessionSummary } from "@/types/session";
 
 const numberFormat = new Intl.NumberFormat("en-US");
 
@@ -35,4 +35,22 @@ const formatSessionStatus = (status: SessionStatus) => {
   ].join("\n");
 };
 
-export { formatCost, formatSessionStatus, formatTokens };
+// Renders the persisted session list, marking the active one with "*".
+const formatSessionList = (sessions: SessionSummary[], currentId?: string) => {
+  if (!sessions.length) return "No sessions available";
+
+  return sessions
+    .map((session, index) => {
+      const marker = session.id === currentId ? "*" : " ";
+      const title = session.title ? ` — ${session.title}` : "";
+      const agent = session.agentId ? ` · agent ${session.agentId}` : "";
+
+      return [
+        `${marker} ${index + 1}) ${session.id}${title}`,
+        `    ${session.updatedAt} · ${session.provider}/${session.model}${agent} · ${session.messageCount} messages`,
+      ].join("\n");
+    })
+    .join("\n");
+};
+
+export { formatCost, formatSessionList, formatSessionStatus, formatTokens };

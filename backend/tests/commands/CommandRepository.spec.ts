@@ -14,6 +14,18 @@ const makeContext = (): CommandContext => ({
       { id: "default", name: "Default" },
       { id: "reviewer", name: "Reviewer" },
     ]),
+    listSessions: vi.fn(() => [
+      {
+        id: "session-1",
+        createdAt: "2024-01-01T00:00:00.000Z",
+        updatedAt: "2024-01-02T00:00:00.000Z",
+        provider: "openai",
+        model: "model",
+        messageCount: 3,
+        title: "hello",
+      },
+    ]),
+    changeSession: vi.fn(async () => true),
     compactSession: vi.fn(async () => true),
     status: vi.fn(() => ({
       sessionId: "session-1",
@@ -44,6 +56,8 @@ describe("CommandRepository", () => {
       "model",
       "provider",
       "agent",
+      "sessions",
+      "resume",
       "compact",
       "status",
     ]);
@@ -124,6 +138,42 @@ describe("CommandRepository", () => {
 
     expect(context.notify).toHaveBeenCalledWith(
       expect.stringContaining("Session session-1"),
+    );
+  });
+
+  it("lists persisted sessions marking the active one", async () => {
+    const repository = new CommandRepository();
+    const context = makeContext();
+
+    await repository.run("/sessions", context);
+
+    expect(context.session.listSessions).toHaveBeenCalledOnce();
+    expect(context.notify).toHaveBeenCalledWith(
+      expect.stringContaining("* 1) session-1 — hello"),
+    );
+  });
+
+  it("resumes a persisted session by id or index", async () => {
+    const repository = new CommandRepository();
+    const context = makeContext();
+
+    await repository.run("/resume 1", context);
+
+    expect(context.session.changeSession).toHaveBeenCalledWith("1");
+    expect(context.notify).toHaveBeenCalledWith(
+      expect.stringContaining("Session resumed"),
+    );
+  });
+
+  it("reports failed session switches", async () => {
+    const repository = new CommandRepository();
+    const context = makeContext();
+    context.session.changeSession = vi.fn(async () => false);
+
+    await repository.run("/resume missing", context);
+
+    expect(context.notify).toHaveBeenCalledWith(
+      "Session not changed: missing",
     );
   });
 });

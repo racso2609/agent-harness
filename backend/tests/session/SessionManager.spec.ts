@@ -13,6 +13,7 @@ const makeStore = () =>
   ({
     save: vi.fn(),
     load: vi.fn(() => null),
+    list: vi.fn(() => []),
   }) as unknown as SessionStore;
 
 const stopTurn = (
@@ -254,6 +255,74 @@ describe("SessionManager agent definition", () => {
 
     expect(session.history[0].content).toContain("new persona");
     expect(session.history).toHaveLength(1);
+  });
+});
+
+describe("SessionManager stored sessions", () => {
+  const record = (id: string, content = "hello") => ({
+    id,
+    createdAt: "2024-01-01T00:00:00.000Z",
+    updatedAt: "2024-01-02T00:00:00.000Z",
+    provider: "openai",
+    model: "model",
+    history: [
+      { role: "system" as const, content: "persona" },
+      { role: "user" as const, content },
+    ],
+  });
+
+  const makeSession = (records: ReturnType<typeof record>[]) => {
+    const store = makeStore();
+    store.list = vi.fn(() => records) as unknown as SessionStore["list"];
+    const session = new SessionManager(makeConfig(), store);
+    session.provider = new OpenAiProvider("https://api.example.com", "key", "model");
+    session.providerName = "openai";
+    session.model = "model";
+    return session;
+  };
+
+  it("summarizes stored sessions with a title and message count", () => {
+    const session = makeSession([record("session-1", "hello world")]);
+
+    expect(session.listSessions()).toEqual([
+      {
+        id: "session-1",
+        createdAt: "2024-01-01T00:00:00.000Z",
+        updatedAt: "2024-01-02T00:00:00.000Z",
+        provider: "openai",
+        model: "model",
+        agentId: undefined,
+        messageCount: 2,
+        title: "hello world",
+      },
+    ]);
+  });
+
+  it("resumes a session by list index, persisting the current one first", async () => {
+    const session = makeSession([record("session-1"), record("session-2")]);
+    const save = vi.spyOn(session, "save");
+    const load = vi.spyOn(session, "load").mockResolvedValue(true);
+
+    await expect(session.changeSession("2")).resolves.toBe(true);
+
+    expect(save).toHaveBeenCalled();
+    expect(load).toHaveBeenCalledWith("session-2");
+  });
+
+  it("resumes a session by unique id prefix", async () => {
+    const session = makeSession([record("session-aaa"), record("session-bbb")]);
+    const load = vi.spyOn(session, "load").mockResolvedValue(true);
+
+    await expect(session.changeSession("session-b")).resolves.toBe(true);
+
+    expect(load).toHaveBeenCalledWith("session-bbb");
+  });
+
+  it("rejects ambiguous prefixes and unknown sessions", async () => {
+    const session = makeSession([record("session-aaa"), record("session-aab")]);
+
+    await expect(session.changeSession("session-aa")).resolves.toBe(false);
+    await expect(session.changeSession("missing")).resolves.toBe(false);
   });
 });
 

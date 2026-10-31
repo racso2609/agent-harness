@@ -1,6 +1,9 @@
 import type { AgentSummary } from "@/agents";
-import type { SessionStatus } from "@/types/session";
-import { formatSessionStatus } from "@/utils/status";
+import type { SessionStatus, SessionSummary } from "@/types/session";
+import {
+  formatSessionList,
+  formatSessionStatus,
+} from "@/utils/status";
 
 export interface CommandOption {
   name: string;
@@ -13,6 +16,8 @@ export interface CommandSession {
   changeModel: (model?: string) => Promise<boolean>;
   changeAgent: (name?: string) => Promise<boolean>;
   listAgents: () => AgentSummary[];
+  listSessions: () => SessionSummary[];
+  changeSession: (target?: string) => Promise<boolean>;
   compactSession: () => Promise<boolean>;
   status: () => SessionStatus;
 }
@@ -82,6 +87,34 @@ const BUILT_IN_COMMANDS: CommandDefinition[] = [
       const changed = await context.session.changeAgent(name);
       context.notify(
         changed ? `Agent updated to ${name}` : `Agent not changed: ${name}`,
+      );
+    },
+  },
+  {
+    name: "sessions",
+    aliases: ["session"],
+    description: "List persisted sessions",
+    run: (context) => {
+      const current = context.session.status().sessionId;
+      context.notify(
+        formatSessionList(context.session.listSessions(), current),
+      );
+    },
+  },
+  {
+    name: "resume",
+    aliases: ["switch"],
+    description: "Switch to a persisted session by id or index",
+    run: async (context, args) => {
+      const [target] = args;
+      const changed = await context.session.changeSession(target);
+      if (!changed) {
+        context.notify(`Session not changed: ${target ?? "canceled"}`);
+        return;
+      }
+
+      context.notify(
+        `Session resumed\n${formatSessionStatus(context.session.status())}`,
       );
     },
   },

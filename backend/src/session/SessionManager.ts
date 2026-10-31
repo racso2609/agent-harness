@@ -19,7 +19,11 @@ import {
   ToolCall,
   ToolResult,
 } from "@/types/providers";
-import { SessionStatus, SessionUsage } from "@/types/session";
+import {
+  SessionStatus,
+  SessionSummary,
+  SessionUsage,
+} from "@/types/session";
 import { generateSessionId } from "@/utils/session";
 import { logger } from "@/utils/logger";
 import { input, select } from "@/utils/stdin";
@@ -65,6 +69,11 @@ interface SessionManager {
   initialize: (options?: SessionOptions) => Promise<void>;
   // Restores a previously persisted session by id. Returns false if missing.
   load: (sessionId: string) => Promise<boolean>;
+  // Lists persisted sessions, newest activity first.
+  listSessions: () => SessionSummary[];
+  // Switches to a persisted session by id, unique id prefix or list index.
+  // Prompts interactively when no target is given.
+  changeSession: (target?: string) => Promise<boolean>;
   // Persists the current session state to the store.
   save: () => void;
   // Swaps the active provider. Prompts interactively when name is omitted.
@@ -212,6 +221,85 @@ class SessionManagerImpl implements SessionManager {
     await this.initializeClassifier();
 
     return true;
+  }
+
+  // Lists persisted sessions, newest activity first.
+  listSessions(): SessionSummary[] {
+    return this.store.list().map((record) => ({
+      id: record.id,
+      createdAt: record.createdAt,
+      updatedAt: record.updatedAt,
+      provider: record.provider,
+      model: record.model,
+      agentId: record.agentId,
+      messageCount: record.history?.length ?? 0,
+      title: this.sessionTitle(record.history),
+    }));
+  }
+
+  // Switches to a stored session, persisting the current one first.
+  async changeSession(target?: string) {
+    if (!this.provider) throw new Error("Session not initialized");
+
+    const sessions = this.listSessions();
+    if (!sessions.length) {
+      logger.warn("No sessions available");
+      return false;
+    }
+
+    const id = target
+      ? this.resolveSessionId(target, sessions)
+      : await this.pickSession(sessions);
+
+    if (!id) {
+      logger.warn(`Unknown session: ${target}`);
+      return false;
+    }
+    if (id === this.sessionId) return true;
+
+    this.save();
+    const loaded = await this.load(id);
+    if (loaded) this.save();
+    return loaded;
+  }
+
+  // Prompts the user to pick one of the stored sessions.
+  protected async pickSession(sessions: SessionSummary[]) {
+    const labels = sessions.map((session, index) => {
+      const title = session.title ? ` — ${session.title}` : "";
+      return `${index + 1}) ${session.id}${title}`;
+    });
+    const choice = await select("Select the session:", labels);
+    const index = labels.indexOf(choice);
+    return index >= 0 ? sessions[index].id : undefined;
+  }
+
+  // Accepts a full id, a unique id prefix or a 1-based list index.
+  protected resolveSessionId(target: string, sessions: SessionSummary[]) {
+    const value = target.trim();
+    if (!value) return undefined;
+
+    const index = Number(value);
+    if (Number.isInteger(index) && index >= 1 && index <= sessions.length) {
+      return sessions[index - 1].id;
+    }
+
+    const exact = sessions.find((session) => session.id === value);
+    if (exact) return exact.id;
+
+    const matches = sessions.filter((session) => session.id.startsWith(value));
+    return matches.length === 1 ? matches[0].id : undefined;
+  }
+
+  // Builds a short title from the first user message of a session.
+  protected sessionTitle(history: History[]) {
+    const message = history.find(
+      (entry) => entry.role === "user" && entry.content.trim(),
+    );
+    if (!message) return undefined;
+
+    const text = message.content.replace(/\s+/g, " ").trim();
+    return text.length > 60 ? `${text.slice(0, 60)}…` : text;
   }
 
   // Serializes the current state into the store, refreshing updatedAt.
