@@ -11,6 +11,8 @@ interface MainLoopOptions {
   store?: SessionStore;
   // Id of a previously persisted session to resume on boot.
   sessionId?: string;
+  // Agent to use when starting a new session.
+  agent?: string;
   // Configuration source; defaults to a new Config.
   config?: Config;
 }
@@ -40,6 +42,7 @@ class MainLoop {
 
     await this.session.initialize({
       sessionId: options.sessionId,
+      agent: options.agent,
       store: this.store,
     });
 

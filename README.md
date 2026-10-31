@@ -76,6 +76,38 @@ ceremonia de cada uno.
 - **Contraste (qué NO hacer de primeras):** LangGraph, OpenHands, SWE-agent —
   orquestación pesada; mirar solo para decidir qué evitar en un harness ligero.
 
+## Agentes (personalidades en markdown)
+
+Un **agente** empaqueta personalidad + provider/modelo + tools permitidos +
+política de approval. Se define con un `.md` en `~/.racso-harness/agents`
+(override con `RACSO_HARNESS_AGENTS_LOCATION`). El frontmatter es opcional; el
+cuerpo del markdown es el system prompt del agente.
+
+```md
+---
+name: Reviewer
+description: Revisa código sin tocar archivos
+provider: openai
+model: deepseek-v4.1-flash-1017
+tools: [readFile, listDir]
+approval: deny
+maxIterations: 6
+---
+Eres un revisor de código senior. Analizas y propones diffs, no modificas archivos.
+```
+
+Reglas de precedencia:
+
+- Si falta `provider`/`model`, se hereda de `config.json`.
+- Sin `tools`, el agente hereda todos los tools habilitados; `[]` los desactiva.
+- `approval` de un agente **solo puede endurecer** el global (`auto → ask → deny`).
+- `maxIterations` de un agente **solo puede bajar** el global.
+- Archivo inválido: warning y se ignora; nunca rompe el arranque.
+- Sin archivos: agente `default` embebido, comportamiento previo intacto.
+
+En runtime: `/agent` lista los agentes disponibles y `/agent <id>` cambia el
+agente activo conservando la conversación. Ejemplos listos en `backend/agents/`.
+
 ## Trampas conocidas (de picoclaw) — a evitar desde el principio
 
 - **Tool calls como texto plano:** algunos modelos (p.ej. DeepSeek) escupen el markup

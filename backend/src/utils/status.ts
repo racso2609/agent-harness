@@ -18,6 +18,7 @@ const formatBar = (ratio: number, width = 16) => {
 };
 
 const formatSessionStatus = (status: SessionStatus) => {
+  const agent = status.agent ? ` · agent ${status.agent}` : "";
   const provider = [status.provider, status.model].filter(Boolean).join(" / ");
   const percent = Math.round(status.contextUsage * 100);
   const window = status.contextWindow
@@ -28,7 +29,7 @@ const formatSessionStatus = (status: SessionStatus) => {
     : "";
 
   return [
-    `Session ${status.sessionId}${provider ? ` · ${provider}` : ""}`,
+    `Session ${status.sessionId}${agent}${provider ? ` · ${provider}` : ""}`,
     `Tokens ${formatTokens(status.usage.inputTokens)} in · ${formatTokens(status.usage.outputTokens)} out · ${formatTokens(status.usage.totalTokens)} total · Cost ${formatCost(status.costUsd)}`,
     `Context ${formatBar(status.contextUsage)} ${percent}% (${window})${autoCompact}`,
   ].join("\n");

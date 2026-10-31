@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
-import { env, harnessHome } from "@/utils/env";
+import { agentsHome, env, harnessHome } from "@/utils/env";
+import { DEFAULT_AGENT_ID } from "@/agents/defaults";
 import { input, select } from "@/utils/stdin";
 
 interface ProviderConfig {
@@ -24,6 +25,13 @@ interface ToolsConfig {
   shell?: ShellToolsConfig;
 }
 
+interface AgentsConfig {
+  // Directory containing markdown agent definitions.
+  dir?: string;
+  // Agent used when no explicit one is requested.
+  default?: string;
+}
+
 interface HarnessConfig {
   model?: string;
   defaultProvider?: string;
@@ -38,6 +46,7 @@ interface HarnessConfig {
 
   providers: Record<string, ProviderConfig>;
   tools?: ToolsConfig;
+  agents?: AgentsConfig;
 }
 
 const applyDefaults = (config: HarnessConfig): HarnessConfig => {
@@ -52,6 +61,9 @@ const applyDefaults = (config: HarnessConfig): HarnessConfig => {
   config.tools.shell ??= {};
   config.tools.shell.timeoutMs ??= 30_000;
   config.tools.shell.maxOutputBytes ??= 32_768;
+  config.agents ??= {};
+  config.agents.dir ??= agentsHome();
+  config.agents.default ??= DEFAULT_AGENT_ID;
 
   return config;
 };
@@ -126,4 +138,10 @@ class Config {
 }
 
 export { Config };
-export type { HarnessConfig, ProviderConfig, ShellToolsConfig, ToolsConfig };
+export type {
+  AgentsConfig,
+  HarnessConfig,
+  ProviderConfig,
+  ShellToolsConfig,
+  ToolsConfig,
+};

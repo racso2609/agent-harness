@@ -140,6 +140,123 @@ describe("SessionManager status", () => {
   });
 });
 
+describe("SessionManager agent definition", () => {
+  let provider: OpenAiProvider;
+  let store: SessionStore;
+
+  beforeEach(() => {
+    provider = new OpenAiProvider("https://api.example.com", "key", "model");
+    store = makeStore();
+  });
+
+  const makeSession = (overrides: Record<string, unknown> = {}) => {
+    const session = new SessionManager(
+      makeConfig({ autoCompact: false, ...overrides }),
+      store,
+    );
+    session.provider = provider;
+    session.providerName = "openai";
+    session.model = "model";
+    vi.spyOn(session, "classifyAction").mockResolvedValue("textGeneration");
+    return session;
+  };
+
+  it("injects the agent persona as the first system message", async () => {
+    const session = makeSession();
+    session.agent = {
+      id: "reviewer",
+      name: "Reviewer",
+      personality: "Only review code.",
+    };
+    session.agentId = "reviewer";
+    session["applySystemPrompt"]();
+    provider.chat = vi.fn(async () => stopTurn("ok"));
+
+    await session.ask("hi");
+
+    expect(session.history[0]).toMatchObject({ role: "system" });
+    expect(session.history[0].content).toContain("Only review code.");
+  });
+
+  it("tightens approval using the agent policy", async () => {
+    const session = makeSession({ tools: { approval: "auto" } });
+    session.agent = {
+      id: "safe",
+      name: "Safe",
+      personality: "x",
+      approval: "deny",
+    };
+
+    await expect(session["approve"]("rm -rf /")).resolves.toBe(false);
+  });
+
+  it("lowers maxIterations to the agent cap", async () => {
+    const session = makeSession({ tools: { maxIterations: 8 } });
+    session.agent = {
+      id: "quick",
+      name: "Quick",
+      personality: "x",
+      maxIterations: 2,
+    };
+    session.tools.register({
+      name: "loop",
+      description: "loop",
+      parameters: { type: "object" },
+      execute: vi.fn(async () => ({ output: "again" })),
+    });
+    provider.chat = vi.fn(async () => ({
+      turn: {
+        text: "",
+        toolCalls: [{ id: "c", name: "loop", args: {} }],
+        finishReason: "toolCalls" as const,
+      },
+    }));
+
+    await session.ask("spin");
+
+    expect(provider.chat).toHaveBeenCalledTimes(2);
+  });
+
+  it("reports the active agent in status", () => {
+    const session = makeSession();
+    session.agentId = "reviewer";
+
+    expect(session.status().agent).toBe("reviewer");
+  });
+
+  it("switches agent tools when changing agent", async () => {
+    const session = makeSession();
+    session["agentsLoaded"] = true;
+    session.agentRegistry.register({
+      id: "reader",
+      name: "Reader",
+      personality: "read only",
+      tools: ["readFile"],
+    });
+
+    const changed = await session.changeAgent("reader");
+
+    expect(changed).toBe(true);
+    expect(session.status().agent).toBe("reader");
+    expect(session.tools.list().map((tool) => tool.name)).toEqual(["readFile"]);
+  });
+
+  it("keeps compacted memory when applying a new persona", async () => {
+    const session = makeSession();
+    session.history = [{ role: "system", content: "compacted memory" }];
+    session.agent = {
+      id: "reviewer",
+      name: "Reviewer",
+      personality: "new persona",
+    };
+
+    session["applySystemPrompt"](true);
+
+    expect(session.history[0].content).toContain("new persona");
+    expect(session.history).toHaveLength(1);
+  });
+});
+
 describe("SessionManager agent loop", () => {
   let provider: OpenAiProvider;
   let store: SessionStore;

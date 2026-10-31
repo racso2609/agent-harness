@@ -6,6 +6,7 @@ export interface SessionUsage {
 
 export interface SessionStatus {
   sessionId: string;
+  agent?: string;
   provider?: string;
   model?: string;
   usage: SessionUsage;

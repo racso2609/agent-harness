@@ -38,7 +38,7 @@ describe("SessionStore", () => {
       fs.readFileSync(path.join(dir, "session-1.json"), "utf8"),
     );
 
-    expect(raw.version).toBe(2);
+    expect(raw.version).toBe(3);
   });
 
   it("migrates legacy assistant messages stored as system", () => {
@@ -55,5 +55,28 @@ describe("SessionStore", () => {
       { role: "user", content: "hello" },
       { role: "assistant", content: "old assistant response" },
     ]);
+  });
+
+  it("preserves system messages for current-version sessions", () => {
+    const { store } = makeStore();
+    store.save({
+      ...baseRecord(),
+      version: 3,
+      history: [
+        { role: "system", content: "persona" },
+        { role: "user", content: "hello" },
+      ],
+    });
+
+    const loaded = store.load("session-1");
+
+    expect(loaded?.history[0]).toEqual({ role: "system", content: "persona" });
+  });
+
+  it("persists the agent id", () => {
+    const { store } = makeStore();
+    store.save({ ...baseRecord(), agentId: "reviewer" });
+
+    expect(store.load("session-1")?.agentId).toBe("reviewer");
   });
 });

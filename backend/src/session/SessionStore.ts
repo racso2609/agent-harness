@@ -4,7 +4,7 @@ import { env, harnessHome } from "@/utils/env";
 import { History } from "@/types/providers";
 import type { SessionUsage } from "@/types/session";
 
-const SESSION_VERSION = 2;
+const SESSION_VERSION = 3;
 
 export interface SessionRecord {
   version?: number;
@@ -17,6 +17,8 @@ export interface SessionRecord {
   provider: string;
   // Active model id.
   model: string;
+  // Agent definition used by the session.
+  agentId?: string;
   // Conversation history, restored into the provider on resume.
   history: History[];
   // Accumulated token usage for the session.
@@ -54,7 +56,9 @@ class SessionStore {
       const raw = fs.readFileSync(this.filePath(id), "utf8");
       const record = JSON.parse(raw) as SessionRecord;
 
-      if ((record.version ?? 1) < SESSION_VERSION) {
+      // v1 used the system role for assistant replies; later versions keep
+      // system messages (agent persona, compacted memory) intact.
+      if ((record.version ?? 1) < 2) {
         record.history = (record.history ?? []).map((message) =>
           message.role === "system"
             ? { ...message, role: "assistant" as const }

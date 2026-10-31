@@ -1,3 +1,4 @@
+import type { AgentSummary } from "@/agents";
 import type { SessionStatus } from "@/types/session";
 import { formatSessionStatus } from "@/utils/status";
 
@@ -10,6 +11,8 @@ export interface CommandOption {
 export interface CommandSession {
   changeProvider: (name?: string) => Promise<boolean>;
   changeModel: (model?: string) => Promise<boolean>;
+  changeAgent: (name?: string) => Promise<boolean>;
+  listAgents: () => AgentSummary[];
   compactSession: () => Promise<boolean>;
   status: () => SessionStatus;
 }
@@ -58,6 +61,28 @@ const BUILT_IN_COMMANDS: CommandDefinition[] = [
     run: async (context) => {
       const changed = await context.session.changeProvider();
       context.notify(changed ? "Provider updated" : "Provider not changed");
+    },
+  },
+  {
+    name: "agent",
+    description: "List agents or switch the active one",
+    run: async (context, args) => {
+      const [name] = args;
+      if (!name) {
+        const current = context.session.status().agent;
+        const lines = context.session.listAgents().map((agent) => {
+          const marker = agent.id === current ? "*" : " ";
+          const description = agent.description ? ` — ${agent.description}` : "";
+          return `${marker} ${agent.id} (${agent.name})${description}`;
+        });
+        context.notify(lines.join("\n") || "No agents available");
+        return;
+      }
+
+      const changed = await context.session.changeAgent(name);
+      context.notify(
+        changed ? `Agent updated to ${name}` : `Agent not changed: ${name}`,
+      );
     },
   },
   {

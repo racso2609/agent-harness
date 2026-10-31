@@ -1,3 +1,13 @@
+import {
+  AgentDefinition,
+  AgentLoader,
+  AgentRegistry,
+  AgentSummary,
+  builtInDefaultAgent,
+  composeSystemPrompt,
+  DEFAULT_AGENT_ID,
+  strictestApproval,
+} from "@/agents";
 import { Config } from "@/configuration";
 import { OpenAiProvider } from "@/providers/openai";
 import { createToolRegistry, ToolContext, ToolRegistry } from "@/tools";
@@ -25,6 +35,8 @@ import { SessionRecord, SessionStore } from "./SessionStore";
 export interface SessionOptions {
   // Id of a previously persisted session to resume.
   sessionId?: string;
+  // Agent to use when starting a new session.
+  agent?: string;
   // Store used for persistence; defaults to a new SessionStore.
   store?: SessionStore;
 }
@@ -44,6 +56,8 @@ const PROVIDER_FACTORIES: Record<
 interface SessionManager {
   provider?: Provider;
   sessionId: string;
+  agentId: string;
+  agent?: AgentDefinition;
   providerName?: string;
   model?: string;
   // load default config
@@ -57,6 +71,10 @@ interface SessionManager {
   changeProvider: (providerName?: string) => Promise<boolean>;
   // Swaps the model of the active provider. Prompts when model is omitted.
   changeModel: (model?: string) => Promise<boolean>;
+  // Lists the agents available from the agents directory.
+  listAgents: () => AgentSummary[];
+  // Swaps the active agent, its tools and its persona.
+  changeAgent: (agentId?: string) => Promise<boolean>;
   // TODO: placeholder for history compaction.
   compactSession: () => Promise<boolean>;
   // Returns the current session usage, cost and context status.
@@ -74,6 +92,12 @@ class SessionManagerImpl implements SessionManager {
   sessionId: string = this.id;
   // Configuration source (providers + default model).
   config: Config;
+  // Active agent id and definition.
+  agentId: string = DEFAULT_AGENT_ID;
+  agent?: AgentDefinition;
+  // Available agent definitions; starts with only the embedded default.
+  agentRegistry = new AgentRegistry([builtInDefaultAgent()]);
+  protected agentsLoaded = false;
   // Active provider instance, undefined until initialize() succeeds.
   provider?: Provider;
   // Conversation history owned by the session, replayed into the provider.
@@ -109,13 +133,22 @@ class SessionManagerImpl implements SessionManager {
   async initialize(options: SessionOptions = {}) {
     if (options.store) this.store = options.store;
 
-    const providerName = this.config.config.defaultProvider;
+    this.loadAgentRegistry();
+    const agent = this.resolveAgent(
+      options.agent ?? this.config.config.agents?.default,
+    );
+    this.agent = agent;
+    this.agentId = agent.id;
+    this.tools = createToolRegistry(this.config, agent.tools);
+
+    const providerName =
+      agent.provider ?? this.config.config.defaultProvider;
     if (!providerName) throw new Error("No default provider configured");
 
     const providerConfig = this.config.config.providers[providerName];
     if (!providerConfig) throw new Error(`Missing config for ${providerName}`);
 
-    const model = this.config.config.model;
+    const model = agent.model ?? this.config.config.model;
     if (!model) throw new Error("No default model configured");
 
     this.provider = this.createProvider(providerName, providerConfig, model);
@@ -128,7 +161,10 @@ class SessionManagerImpl implements SessionManager {
 
     const resumed = options.sessionId && (await this.load(options.sessionId));
 
-    if (!resumed) this.save();
+    if (!resumed) {
+      this.applySystemPrompt();
+      this.save();
+    }
   }
 
   // Restores a persisted session into this instance: rebuilds the provider,
@@ -148,7 +184,17 @@ class SessionManagerImpl implements SessionManager {
     await provider.initialize();
     if (!provider.setModel(record.model)) return false;
 
+    const agent = this.resolveAgent(
+      record.agentId ?? this.config.config.agents?.default,
+    );
+    this.agent = agent;
+    this.agentId = agent.id;
+    this.tools = createToolRegistry(this.config, agent.tools);
+
     this.history = record.history ?? [];
+    // Sessions persisted with an agent already start with its persona. Older
+    // sessions keep their system messages (e.g. compacted memory) untouched.
+    this.applySystemPrompt(Boolean(record.agentId));
 
     this.id = record.id;
     this.sessionId = record.id;
@@ -178,6 +224,7 @@ class SessionManagerImpl implements SessionManager {
       updatedAt: new Date().toISOString(),
       provider: this.providerName,
       model: this.model,
+      agentId: this.agentId,
       history: this.history,
       usage: this.usage,
       costUsd: this.costUsd,
@@ -241,6 +288,68 @@ class SessionManagerImpl implements SessionManager {
     return true;
   }
 
+  // Lists the agents discovered in the agents directory.
+  listAgents() {
+    this.ensureAgentRegistry();
+    return this.agentRegistry.summaries();
+  }
+
+  // Swaps the active agent and applies its provider, model, tools and persona.
+  // Returns false when the agent or its provider/model is unavailable.
+  async changeAgent(agentId?: string) {
+    if (!this.provider) throw new Error("Session not initialized");
+    this.ensureAgentRegistry();
+
+    const id =
+      agentId ??
+      (await select(
+        "Select the agent:",
+        this.agentRegistry.list().map((agent) => agent.id),
+      ));
+
+    const agent = this.agentRegistry.get(id);
+    if (!agent) {
+      logger.warn(`Unknown agent: ${id}`);
+      return false;
+    }
+
+    const providerName =
+      agent.provider ?? this.providerName ?? this.config.config.defaultProvider;
+    const model =
+      agent.model ??
+      (providerName === this.providerName ? this.model : undefined) ??
+      this.config.config.model;
+    if (!providerName || !model) return false;
+
+    if (providerName !== this.providerName || model !== this.model) {
+      const providerConfig = this.config.config.providers[providerName];
+      if (!providerConfig) return false;
+
+      try {
+        const provider = this.createProvider(providerName, providerConfig, model);
+        await provider.initialize();
+        if (!provider.setModel(model)) return false;
+
+        this.provider = provider;
+        this.providerName = providerName;
+        this.model = provider.getModel();
+      } catch (err) {
+        logger.warn({ err }, `Failed to switch to agent ${agent.id}`);
+        return false;
+      }
+    }
+
+    this.agent = agent;
+    this.agentId = agent.id;
+    this.tools = createToolRegistry(this.config, agent.tools);
+    this.applySystemPrompt(true);
+
+    await this.initializeClassifier();
+
+    this.save();
+    return true;
+  }
+
   // Compacts the session history using the configured threshold.
   async compactSession() {
     if (!this.provider) throw new Error("Session not initialized");
@@ -284,7 +393,10 @@ class SessionManagerImpl implements SessionManager {
     if (!provider) throw new Error("Session not initialized");
 
     const toolsConfig = this.config.config.tools;
-    const maxIterations = Math.max(1, toolsConfig?.maxIterations ?? 8);
+    const configuredMax = Math.max(1, toolsConfig?.maxIterations ?? 8);
+    const maxIterations = this.agent?.maxIterations
+      ? Math.min(configuredMax, this.agent.maxIterations)
+      : configuredMax;
     const specs = toolsConfig?.enabled === false ? [] : this.tools.specs();
 
     this.history.push({ role: "user", content: prompt });
@@ -364,7 +476,10 @@ class SessionManagerImpl implements SessionManager {
   // Approval gate for side effects. "auto" trusts the model (v1 default);
   // "deny" blocks everything; "ask" prompts the user when a tool needs it.
   protected async approve(command: string): Promise<boolean> {
-    const mode = this.config.config.tools?.approval ?? "auto";
+    const globalMode = this.config.config.tools?.approval ?? "auto";
+    const mode = this.agent?.approval
+      ? strictestApproval(globalMode, this.agent.approval)
+      : globalMode;
     if (mode === "auto") return true;
     if (mode === "deny") return false;
 
@@ -397,6 +512,7 @@ class SessionManagerImpl implements SessionManager {
 
     return {
       sessionId: this.sessionId,
+      agent: this.agentId,
       provider: this.providerName,
       model: this.model,
       usage: { ...this.usage },
@@ -479,6 +595,47 @@ class SessionManagerImpl implements SessionManager {
       logger.warn({ err }, "classifier provider init failed, using fallback");
       this.classifierProvider = undefined;
     }
+  }
+
+  // Loads markdown agent definitions from disk, replacing the embedded-only
+  // registry. Safe to call once per session initialization.
+  protected loadAgentRegistry() {
+    this.agentRegistry = new AgentLoader(
+      this.config.config.agents?.dir,
+    ).load();
+    this.agentsLoaded = true;
+  }
+
+  protected ensureAgentRegistry() {
+    if (!this.agentsLoaded) this.loadAgentRegistry();
+  }
+
+  // Resolves an agent id, warning and falling back to the default when the
+  // requested definition is missing.
+  protected resolveAgent(agentId?: string): AgentDefinition {
+    if (agentId && !this.agentRegistry.has(agentId)) {
+      logger.warn(`Unknown agent "${agentId}", using default`);
+    }
+
+    return this.agentRegistry.resolve(agentId) ?? builtInDefaultAgent();
+  }
+
+  // Injects the active agent persona as the first system message. When
+  // replacing, only an existing leading system message is overwritten so
+  // compacted-memory blocks are preserved.
+  protected applySystemPrompt(replace = false) {
+    const agent = this.agent ?? builtInDefaultAgent();
+    const message: History = {
+      role: "system",
+      content: composeSystemPrompt(agent),
+    };
+
+    if (replace && this.history[0]?.role === "system") {
+      this.history[0] = message;
+      return;
+    }
+
+    this.history.unshift(message);
   }
 
   // Resolves the factory for the given provider name and instantiates it.

@@ -9,6 +9,11 @@ const makeContext = (): CommandContext => ({
   session: {
     changeProvider: vi.fn(async () => true),
     changeModel: vi.fn(async () => true),
+    changeAgent: vi.fn(async () => true),
+    listAgents: vi.fn(() => [
+      { id: "default", name: "Default" },
+      { id: "reviewer", name: "Reviewer" },
+    ]),
     compactSession: vi.fn(async () => true),
     status: vi.fn(() => ({
       sessionId: "session-1",
@@ -38,6 +43,7 @@ describe("CommandRepository", () => {
       "clear",
       "model",
       "provider",
+      "agent",
       "compact",
       "status",
     ]);
