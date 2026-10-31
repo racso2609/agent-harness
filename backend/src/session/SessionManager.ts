@@ -737,11 +737,12 @@ class SessionManagerImpl implements SessionManager {
   }
 
   // Loads markdown agent definitions from disk, replacing the embedded-only
-  // registry. Safe to call once per session initialization.
+  // registry. Seeds the runtime directory with the bundled examples first so a
+  // clean install ships with the default agents. Safe to call once.
   protected loadAgentRegistry() {
-    this.agentRegistry = new AgentLoader(
-      this.config.config.agents?.dir,
-    ).load();
+    const loader = new AgentLoader(this.config.config.agents?.dir);
+    loader.seed();
+    this.agentRegistry = loader.load();
     this.agentsLoaded = true;
   }
 

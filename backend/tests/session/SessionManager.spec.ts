@@ -295,6 +295,73 @@ describe("SessionManager agent definition", () => {
     expect(session.tools.list().map((tool) => tool.name)).toEqual(["readFile"]);
   });
 
+  it("switches the effective provider and model when changing agent", async () => {
+    const session = makeSession({
+      providers: { openai: { url: "https://api.example.com", apikey: "key" } },
+    });
+    const created: Array<{ provider: string; model: string }> = [];
+    session["createProvider"] = ((
+      name: string,
+      _config: unknown,
+      model: string,
+    ) => {
+      created.push({ provider: name, model });
+      const fake = new OpenAiProvider("https://api.example.com", "key", model);
+      fake.initialize = vi.fn(async () => {});
+      fake.setModel = vi.fn(() => true);
+      fake.getModel = () => model;
+      return fake;
+    }) as unknown as typeof session["createProvider"];
+    session["agentsLoaded"] = true;
+    session.agentRegistry.register({
+      id: "coder",
+      name: "Coder",
+      personality: "code",
+      model: "cheap-model",
+    });
+
+    const changed = await session.changeAgent("coder");
+
+    expect(changed).toBe(true);
+    expect(created).toEqual([{ provider: "openai", model: "cheap-model" }]);
+    expect(session.status()).toMatchObject({
+      agent: "coder",
+      provider: "openai",
+      model: "cheap-model",
+    });
+  });
+
+  it("falls back to the current model when the agent has no override", async () => {
+    const session = makeSession({
+      providers: { openai: { url: "https://api.example.com", apikey: "key" } },
+    });
+    const created: Array<{ provider: string; model: string }> = [];
+    session["createProvider"] = ((
+      name: string,
+      _config: unknown,
+      model: string,
+    ) => {
+      created.push({ provider: name, model });
+      const fake = new OpenAiProvider("https://api.example.com", "key", model);
+      fake.initialize = vi.fn(async () => {});
+      fake.setModel = vi.fn(() => true);
+      fake.getModel = () => model;
+      return fake;
+    }) as unknown as typeof session["createProvider"];
+    session["agentsLoaded"] = true;
+    session.agentRegistry.register({
+      id: "plain",
+      name: "Plain",
+      personality: "x",
+    });
+
+    const changed = await session.changeAgent("plain");
+
+    expect(changed).toBe(true);
+    expect(created).toEqual([]);
+    expect(session.status().model).toBe("model");
+  });
+
   it("keeps compacted memory when applying a new persona", async () => {
     const session = makeSession();
     session.history = [{ role: "system", content: "compacted memory" }];

@@ -10,3 +10,4 @@ export {
 } from "./defaults";
 export { parseAgentFile, parseFrontmatter } from "./parseAgentFile";
 export type { ParsedAgentFile } from "./parseAgentFile";
+export { bundledAgentsDir, ensureAgentsDir } from "./seed";

@@ -5,12 +5,19 @@ import { logger } from "@/utils/logger";
 import { AgentRegistry } from "./AgentRegistry";
 import { builtInDefaultAgent } from "./defaults";
 import { parseAgentFile } from "./parseAgentFile";
+import { ensureAgentsDir } from "./seed";
 
 class AgentLoader {
   directory: string;
 
   constructor(directory = agentsHome()) {
     this.directory = directory;
+  }
+
+  // Copies the bundled example agents into the runtime directory on a clean
+  // install. No-op when the directory already holds at least one .md file.
+  seed(source?: string): boolean {
+    return ensureAgentsDir(this.directory, source);
   }
 
   // Loads every .md definition in the agents directory over the built-in
