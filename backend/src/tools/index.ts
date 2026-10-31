@@ -20,7 +20,7 @@ export const createToolRegistry = (
       maxOutputBytes: tools?.shell?.maxOutputBytes,
     }),
     new ReadFileTool(),
-    new WriteFileTool(),
+    new WriteFileTool({ deny: tools?.writeDeny }),
     new ListDirTool(),
   ];
 

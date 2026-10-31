@@ -1,9 +1,6 @@
 import fs from "node:fs/promises";
-import path from "node:path";
 import type { Tool, ToolContext, ToolResult } from "./Tool";
-
-const resolvePath = (ctx: ToolContext, raw: string) =>
-  path.isAbsolute(raw) ? raw : path.resolve(ctx.cwd, raw);
+import { resolveInWorkspace } from "./paths";
 
 class ListDirTool implements Tool {
   name = "listDir";
@@ -26,7 +23,7 @@ class ListDirTool implements Tool {
       throw new Error("listDir expects 'path' to be a string");
     }
 
-    const target = resolvePath(ctx, input?.path ?? ".");
+    const target = resolveInWorkspace(ctx.cwd, input?.path ?? ".");
     const entries = await fs.readdir(target, { withFileTypes: true });
     const lines = entries
       .map((entry) => `${entry.name}${entry.isDirectory() ? "/" : ""}`)

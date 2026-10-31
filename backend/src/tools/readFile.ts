@@ -1,11 +1,8 @@
 import fs from "node:fs/promises";
-import path from "node:path";
 import type { Tool, ToolContext, ToolResult } from "./Tool";
+import { resolveInWorkspace } from "./paths";
 
 const MAX_BYTES = 32_768;
-
-const resolvePath = (ctx: ToolContext, raw: string) =>
-  path.isAbsolute(raw) ? raw : path.resolve(ctx.cwd, raw);
 
 class ReadFileTool implements Tool {
   name = "readFile";
@@ -28,7 +25,7 @@ class ReadFileTool implements Tool {
       throw new Error("readFile expects a non-empty 'path' string");
     }
 
-    const filePath = resolvePath(ctx, input.path);
+    const filePath = resolveInWorkspace(ctx.cwd, input.path);
     const content = await fs.readFile(filePath, "utf8");
 
     if (Buffer.byteLength(content, "utf8") <= MAX_BYTES) {

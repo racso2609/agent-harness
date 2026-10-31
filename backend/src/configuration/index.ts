@@ -22,6 +22,10 @@ interface ToolsConfig {
   workspace?: string;
   // Hard cap applied to every tool output before it enters the history.
   maxOutputBytes?: number;
+  // Extra glob-ish paths (workspace-relative) that writeFile must refuse.
+  writeDeny?: string[];
+  // Reinterpret tool calls emitted as plain text markup (DeepSeek-style).
+  normalizeTextToolCalls?: boolean;
   shell?: ShellToolsConfig;
 }
 
@@ -58,6 +62,7 @@ const applyDefaults = (config: HarnessConfig): HarnessConfig => {
   config.tools.maxIterations ??= 8;
   config.tools.approval ??= "auto";
   config.tools.maxOutputBytes ??= 32_768;
+  config.tools.normalizeTextToolCalls ??= true;
   config.tools.shell ??= {};
   config.tools.shell.timeoutMs ??= 30_000;
   config.tools.shell.maxOutputBytes ??= 32_768;
