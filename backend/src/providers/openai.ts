@@ -1,6 +1,11 @@
-import { History, Model, Provider } from "@/types/providers";
+import { History, Model, Provider, TokenUsage } from "@/types/providers";
 import { BasicProvider } from "./basic";
-import { OpenAIImageResponse, OpenAIModelsResponse } from "@/types/openai";
+import {
+  Datum,
+  OpenAIChatUsage,
+  OpenAIImageResponse,
+  OpenAIModelsResponse,
+} from "@/types/openai";
 import { logger } from "@/utils/logger";
 
 enum Errors {
@@ -15,6 +20,8 @@ export class OpenAiProvider extends BasicProvider implements Provider {
   protected model = "";
   history: History[] = [];
   compactThreshold = 4;
+  protected contextWindow?: number;
+  protected lastContextTokens = 0;
   protected _onChunk = async (_content: string, _done: boolean) => {};
 
   constructor(
@@ -38,17 +45,38 @@ export class OpenAiProvider extends BasicProvider implements Provider {
       {},
       false,
     );
-    const mappedModels = models.data.map((m) => {
-      return {
-        name: m.id,
-        id: m.id,
-        capabilities: m.capabilities,
-      };
-    });
+    const mappedModels = models.data.map((model) => this.mapModel(model));
 
     this.models = mappedModels;
+    this.syncContextWindow();
 
-    return mappedModels as Model[];
+    return mappedModels;
+  }
+
+  protected mapModel(model: Datum): Model {
+    const mapped: Model = {
+      name: model.id,
+      id: model.id,
+      capabilities: model.capabilities,
+    };
+
+    if (model.context_length != null) mapped.contextLength = model.context_length;
+    if (model.max_output_tokens != null)
+      mapped.maxOutputTokens = model.max_output_tokens;
+
+    if (model.pricing) {
+      mapped.pricing = {
+        inputPerMillion: Number(model.pricing.input_per_million),
+        outputPerMillion: Number(model.pricing.output_per_million),
+        currency: model.pricing.currency,
+      };
+    }
+
+    return mapped;
+  }
+
+  protected syncContextWindow() {
+    this.contextWindow = this.finModel(this.model)?.contextLength;
   }
 
   compact(compactThreshold = this.compactThreshold) {
@@ -82,6 +110,7 @@ export class OpenAiProvider extends BasicProvider implements Provider {
     this.history = [...systemMessages, memoryBlock, ...recentMessages].filter(
       Boolean,
     ) as History[]; // Limpia nulos si no hay system prompt
+    this.lastContextTokens = 0;
 
     return this.history;
   }
@@ -91,6 +120,7 @@ export class OpenAiProvider extends BasicProvider implements Provider {
     const decoder = new TextDecoder("utf-8");
     let buffer = "";
     let fullAssistantResponse = "";
+    let usage: TokenUsage | undefined;
 
     while (true) {
       const { value, done } = await reader.read();
@@ -114,6 +144,8 @@ export class OpenAiProvider extends BasicProvider implements Provider {
               fullAssistantResponse += content;
               if (this._onChunk) this._onChunk?.(content, done); // Notificas al exterior en tiempo real
             }
+
+            if (json.usage) usage = this.mapUsage(json.usage);
           } catch (err) {
             // Ignorar errores de parseo en chunks parciales
           }
@@ -121,7 +153,18 @@ export class OpenAiProvider extends BasicProvider implements Provider {
       }
     }
 
-    return fullAssistantResponse;
+    return { text: fullAssistantResponse, usage };
+  }
+
+  protected mapUsage(usage: OpenAIChatUsage): TokenUsage {
+    const promptTokens = usage.prompt_tokens ?? 0;
+    const completionTokens = usage.completion_tokens ?? 0;
+
+    return {
+      promptTokens,
+      completionTokens,
+      totalTokens: usage.total_tokens ?? promptTokens + completionTokens,
+    };
   }
 
   async ask(input: string) {
@@ -148,15 +191,46 @@ export class OpenAiProvider extends BasicProvider implements Provider {
           model: modelExist.id,
           messages,
           stream: true,
+          stream_options: { include_usage: true },
         }),
       },
       true,
     )) as Response;
-    const responseText = await this._handleStream(response);
+    const { text, usage } = await this._handleStream(response);
 
-    this.history.push({ role: "system", content: responseText });
+    this.lastContextTokens = usage
+      ? usage.promptTokens + usage.completionTokens
+      : this.estimateHistoryTokens();
+    this.history.push({ role: "system", content: text });
 
-    return { text: responseText };
+    return { text, usage, costUsd: usage ? this.costOf(usage) : undefined };
+  }
+
+  protected estimateHistoryTokens() {
+    const characters = this.history.reduce(
+      (total, message) => total + message.content.length,
+      0,
+    );
+
+    return Math.ceil(characters / 4);
+  }
+
+  protected costOf(usage: TokenUsage) {
+    const pricing = this.finModel(this.model)?.pricing;
+    if (!pricing) return 0;
+
+    return (
+      (usage.promptTokens / 1_000_000) * pricing.inputPerMillion +
+      (usage.completionTokens / 1_000_000) * pricing.outputPerMillion
+    );
+  }
+
+  getContextWindow() {
+    return this.contextWindow;
+  }
+
+  getContextTokens() {
+    return this.lastContextTokens || this.estimateHistoryTokens();
   }
   async generateImage(prompt: string) {
     if (!prompt) throw new Error(Errors.MISSING_INPUT);
@@ -196,6 +270,7 @@ export class OpenAiProvider extends BasicProvider implements Provider {
     if (!modelExist) throw new Error(Errors.MODEL_NOT_FOUND);
 
     this.model = modelExist.id;
+    this.syncContextWindow();
 
     return true;
   }

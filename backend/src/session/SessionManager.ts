@@ -1,6 +1,7 @@
 import { Config } from "@/configuration";
 import { OpenAiProvider } from "@/providers/openai";
-import { Provider } from "@/types/providers";
+import { AgentResponse, Provider } from "@/types/providers";
+import { SessionStatus, SessionUsage } from "@/types/session";
 import { generateSessionId } from "@/utils/session";
 import { logger } from "@/utils/logger";
 import { select } from "@/utils/stdin";
@@ -45,6 +46,8 @@ interface SessionManager {
   changeModel: (model?: string) => Promise<boolean>;
   // TODO: placeholder for history compaction.
   compactSession: () => Promise<boolean>;
+  // Returns the current session usage, cost and context status.
+  status: () => SessionStatus;
   // Routes the prompt to text or image generation based on classification.
   ask: (prompt: string) => ReturnType<Provider["ask"]>;
   // internal
@@ -71,6 +74,10 @@ class SessionManagerImpl implements SessionManager {
   store: SessionStore;
   // Creation timestamp, preserved when resuming an existing session.
   createdAt: string;
+  // Accumulated token usage for this session.
+  usage: SessionUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+  // Accumulated cost in USD for this session.
+  costUsd = 0;
 
   constructor(config = new Config(), store = new SessionStore()) {
     this.config = config;
@@ -131,6 +138,12 @@ class SessionManagerImpl implements SessionManager {
     this.provider = provider;
     this.providerName = record.provider;
     this.model = provider.getModel();
+    this.usage = record.usage ?? {
+      inputTokens: 0,
+      outputTokens: 0,
+      totalTokens: 0,
+    };
+    this.costUsd = record.costUsd ?? 0;
 
     await this.initializeClassifier();
 
@@ -148,6 +161,8 @@ class SessionManagerImpl implements SessionManager {
       provider: this.providerName,
       model: this.model,
       history: this.provider.history,
+      usage: this.usage,
+      costUsd: this.costUsd,
     };
 
     this.store.save(record);
@@ -211,9 +226,13 @@ class SessionManagerImpl implements SessionManager {
   // Compacts the provider history using the configured threshold.
   async compactSession() {
     if (!this.provider) throw new Error("Session not initialized");
+
+    const before = this.provider.history;
     this.provider.compact(this.config.config.compactThreshold);
-    this.save();
-    return true;
+    const changed = this.provider.history !== before;
+
+    if (changed) this.save();
+    return changed;
   }
 
   // Classifies the prompt and dispatches it to text or image generation.
@@ -227,8 +246,61 @@ class SessionManagerImpl implements SessionManager {
         ? await this.provider.generateImage(prompt)
         : await this.provider.ask(prompt);
 
+    this.recordUsage(response);
     this.save();
+    await this.maybeAutoCompact();
     return response;
+  }
+
+  // Current session usage, cost and context occupancy.
+  status(): SessionStatus {
+    const contextWindow = this.provider?.getContextWindow();
+    const contextTokens = this.provider?.getContextTokens() ?? 0;
+    const contextUsage = contextWindow
+      ? Math.min(contextTokens / contextWindow, 1)
+      : 0;
+
+    return {
+      sessionId: this.sessionId,
+      provider: this.providerName,
+      model: this.model,
+      usage: { ...this.usage },
+      costUsd: this.costUsd,
+      contextTokens,
+      contextWindow,
+      contextUsage,
+      autoCompact: this.config.config.autoCompact ?? true,
+      autoCompactThreshold: this.config.config.autoCompactThreshold ?? 80,
+    };
+  }
+
+  protected recordUsage(response: AgentResponse) {
+    if (response.usage) {
+      this.usage.inputTokens += response.usage.promptTokens;
+      this.usage.outputTokens += response.usage.completionTokens;
+      this.usage.totalTokens += response.usage.totalTokens;
+    }
+
+    if (typeof response.costUsd === "number") {
+      this.costUsd += response.costUsd;
+    }
+  }
+
+  protected async maybeAutoCompact() {
+    const { autoCompact, autoCompactThreshold } = this.config.config;
+    if (autoCompact === false) return;
+
+    const threshold = autoCompactThreshold ?? 80;
+    const status = this.status();
+    if (!status.contextWindow) return;
+    if (status.contextUsage * 100 < threshold) return;
+
+    const compacted = await this.compactSession();
+    if (compacted) {
+      logger.info(
+        `Context at ${Math.round(status.contextUsage * 100)}% (threshold ${threshold}%), session compacted`,
+      );
+    }
   }
 
   // Determines whether the prompt is a text or image generation request.

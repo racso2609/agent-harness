@@ -1,5 +1,6 @@
 import { input, printImage, printLogo } from "@/utils/stdin";
 import { logger } from "@/utils/logger";
+import { formatSessionStatus } from "@/utils/status";
 import { Config } from "@/configuration";
 import { CommandContext, CommandRepository } from "@/commands/CommandRepository";
 import { SessionManager } from "./SessionManager";
@@ -42,6 +43,7 @@ class MainLoop {
       store: this.store,
     });
 
+    this.printStatus();
     this.installKeyHandlers();
     await this.loop();
   }
@@ -77,10 +79,15 @@ class MainLoop {
           const base64 = image.url.split(",").pop() ?? image.url;
           await printImage(base64);
         }
+        this.printStatus();
       } catch (err) {
         logger.error({ err }, "failed to handle prompt");
       }
     }
+  }
+
+  protected printStatus() {
+    logger.info(formatSessionStatus(this.session.status()));
   }
 
   // Dependencies exposed to slash command handlers.

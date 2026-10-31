@@ -1,3 +1,6 @@
+import type { SessionStatus } from "@/types/session";
+import { formatSessionStatus } from "@/utils/status";
+
 export interface CommandOption {
   name: string;
   description: string;
@@ -8,6 +11,7 @@ export interface CommandSession {
   changeProvider: (name?: string) => Promise<boolean>;
   changeModel: (model?: string) => Promise<boolean>;
   compactSession: () => Promise<boolean>;
+  status: () => SessionStatus;
 }
 
 export interface CommandContext {
@@ -63,6 +67,12 @@ const BUILT_IN_COMMANDS: CommandDefinition[] = [
       const compacted = await context.session.compactSession();
       context.notify(compacted ? "Session compacted" : "Nothing to compact");
     },
+  },
+  {
+    name: "status",
+    description: "Show session usage, cost and context",
+    run: (context) =>
+      context.notify(formatSessionStatus(context.session.status())),
   },
 ];
 

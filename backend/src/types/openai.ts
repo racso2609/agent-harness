@@ -1,3 +1,9 @@
+export interface OpenAIChatUsage {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  total_tokens?: number;
+}
+
 export interface OpenAIModelsResponse {
   object: string;
   data: Datum[];

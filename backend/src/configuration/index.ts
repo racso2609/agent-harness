@@ -12,6 +12,8 @@ interface HarnessConfig {
   model?: string;
   defaultProvider?: string;
   compactThreshold?: number;
+  autoCompact?: boolean;
+  autoCompactThreshold?: number;
 
   // Optional provider/model used only to classify prompts, so the cheap
   // classification call never pollutes the main conversation history.
@@ -84,6 +86,8 @@ class Config {
 
       // 10mensajes el max history message antes de compactar
       if (!parsed.compactThreshold) parsed.compactThreshold = 100;
+      if (parsed.autoCompact === undefined) parsed.autoCompact = true;
+      if (!parsed.autoCompactThreshold) parsed.autoCompactThreshold = 80;
       parsed.providers ??= {};
       return parsed;
     } catch {

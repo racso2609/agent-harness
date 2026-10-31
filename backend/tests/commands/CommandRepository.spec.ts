@@ -10,6 +10,15 @@ const makeContext = (): CommandContext => ({
     changeProvider: vi.fn(async () => true),
     changeModel: vi.fn(async () => true),
     compactSession: vi.fn(async () => true),
+    status: vi.fn(() => ({
+      sessionId: "session-1",
+      usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+      costUsd: 0,
+      contextTokens: 0,
+      contextUsage: 0,
+      autoCompact: true,
+      autoCompactThreshold: 80,
+    })),
   },
   exit: vi.fn(),
   clear: vi.fn(),
@@ -30,6 +39,7 @@ describe("CommandRepository", () => {
       "model",
       "provider",
       "compact",
+      "status",
     ]);
     expect(commands[0]).not.toHaveProperty("run");
   });
@@ -98,5 +108,16 @@ describe("CommandRepository", () => {
     await repository.run("/model", context);
 
     expect(context.notify).toHaveBeenCalledWith("Model not changed");
+  });
+
+  it("renders the current session status", async () => {
+    const repository = new CommandRepository();
+    const context = makeContext();
+
+    await repository.run("/status", context);
+
+    expect(context.notify).toHaveBeenCalledWith(
+      expect.stringContaining("Session session-1"),
+    );
   });
 });

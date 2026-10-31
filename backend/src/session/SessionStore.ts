@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { env, harnessHome } from "@/utils/env";
 import { History } from "@/types/providers";
+import type { SessionUsage } from "@/types/session";
 
 export interface SessionRecord {
   // Stable id, also used as the file name.
@@ -16,6 +17,10 @@ export interface SessionRecord {
   model: string;
   // Conversation history, restored into the provider on resume.
   history: History[];
+  // Accumulated token usage for the session.
+  usage?: SessionUsage;
+  // Accumulated cost in USD for the session.
+  costUsd?: number;
 }
 
 const DEFAULT_SESSIONS_DIR = path.join(

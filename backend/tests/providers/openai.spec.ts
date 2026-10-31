@@ -8,9 +8,20 @@ const DEFAULT_MODEL = "gemini-3.7-flash";
 
 type FetchMock = ReturnType<typeof vi.fn>;
 
-const modelsPayload = (models: Array<{ id: string }>) => ({
+const capabilities = {
+  vision: false,
+  video: false,
+  reasoning: false,
+  streaming: true,
+  image_generation: false,
+  image_edit: false,
+};
+
+const modelsPayload = (
+  models: Array<{ id: string; [key: string]: unknown }>,
+) => ({
   object: "list",
-  data: models,
+  data: models.map((model) => ({ capabilities, ...model })),
 });
 
 const mockResponse = (payload: unknown) =>
@@ -20,10 +31,33 @@ const mockFetchOnce = (fetchMock: FetchMock, payload: unknown) => {
   fetchMock.mockResolvedValueOnce(mockResponse(payload));
 };
 
+const streamResponse = (chunks: string[]) => {
+  const encoder = new TextEncoder();
+  const body = new ReadableStream({
+    start(controller) {
+      for (const chunk of chunks) controller.enqueue(encoder.encode(chunk));
+      controller.close();
+    },
+  });
+
+  return { ok: true, body } as Response;
+};
+
+const mockStreamOnce = (fetchMock: FetchMock, chunks: string[]) => {
+  fetchMock.mockResolvedValueOnce(streamResponse(chunks));
+};
+
+const expectedModel = (id: string, extra: Record<string, unknown> = {}) => ({
+  name: id,
+  id,
+  capabilities,
+  ...extra,
+});
+
 const loadModels = async (
   provider: OpenAiProvider,
   fetchMock: FetchMock,
-  models: Array<{ id: string }> = [
+  models: Array<{ id: string; [key: string]: unknown }> = [
     { id: DEFAULT_MODEL },
     { id: "another-model" },
   ],
@@ -76,7 +110,10 @@ describe("OpenAiProvider", () => {
 
       expect(fetchMock).toHaveBeenCalledTimes(1);
       expect(fetchMock).toHaveBeenCalledWith(`${url}/models`, {
-        headers: { Authorization: `Bearer ${apiKey}` },
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
       });
     });
 
@@ -84,8 +121,8 @@ describe("OpenAiProvider", () => {
       const models = await loadModels(provider, fetchMock);
 
       expect(models).toEqual([
-        { name: DEFAULT_MODEL, id: DEFAULT_MODEL },
-        { name: "another-model", id: "another-model" },
+        expectedModel(DEFAULT_MODEL),
+        expectedModel("another-model"),
       ]);
     });
 
@@ -96,20 +133,33 @@ describe("OpenAiProvider", () => {
       expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 
-    it("ignores extra fields returned by the API", async () => {
-      mockFetchOnce(fetchMock, {
-        data: [
-          {
-            id: DEFAULT_MODEL,
-            context_length: 128000,
-            pricing: { input_per_million: "0.10" },
+    it("maps context and pricing metadata returned by the API", async () => {
+      mockFetchOnce(fetchMock, modelsPayload([
+        {
+          id: DEFAULT_MODEL,
+          context_length: 128000,
+          max_output_tokens: 4096,
+          pricing: {
+            input_per_million: "0.10",
+            output_per_million: "0.40",
+            currency: "USD",
           },
-        ],
-      });
+        },
+      ]));
 
       const models = await provider.getAvailableModels();
 
-      expect(models).toEqual([{ name: DEFAULT_MODEL, id: DEFAULT_MODEL }]);
+      expect(models).toEqual([
+        expectedModel(DEFAULT_MODEL, {
+          contextLength: 128000,
+          maxOutputTokens: 4096,
+          pricing: {
+            inputPerMillion: 0.1,
+            outputPerMillion: 0.4,
+            currency: "USD",
+          },
+        }),
+      ]);
     });
 
     it("returns an empty list when the API has no models", async () => {
@@ -164,18 +214,78 @@ describe("OpenAiProvider", () => {
       );
     });
 
-    
-
     it("appends the user input and the response to the history", async () => {
       await loadModels(provider, fetchMock);
+      mockStreamOnce(fetchMock, [
+        `data: {"choices":[{"delta":{"content":"first "}}]}\n\n`,
+        `data: {"choices":[{"delta":{"content":"implementation"}}]}\n\n`,
+        `data: {"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":3,"total_tokens":13}}\n\n`,
+        "data: [DONE]\n\n",
+      ]);
 
       const response = await provider.ask("hello");
 
-      expect(response).toEqual({ text: "first implementation" });
+      expect(response).toEqual({
+        text: "first implementation",
+        usage: { promptTokens: 10, completionTokens: 3, totalTokens: 13 },
+        costUsd: 0,
+      });
       expect(provider.history).toEqual([
         { role: "user", content: "hello" },
         { role: "system", content: "first implementation" },
       ]);
+    });
+
+    it("requests token usage from the streaming endpoint", async () => {
+      await loadModels(provider, fetchMock);
+      mockStreamOnce(fetchMock, [
+        `data: {"choices":[{"delta":{"content":"ok"}}]}\n\n`,
+        "data: [DONE]\n\n",
+      ]);
+
+      await provider.ask("hello");
+
+      const [, init] = fetchMock.mock.calls[1] as [string, RequestInit];
+      expect(JSON.parse(String(init.body))).toMatchObject({
+        stream: true,
+        stream_options: { include_usage: true },
+      });
+    });
+
+    it("exposes prompt plus completion tokens as current context usage", async () => {
+      await loadModels(provider, fetchMock, [
+        { id: DEFAULT_MODEL, context_length: 1000 },
+      ]);
+      mockStreamOnce(fetchMock, [
+        `data: {"choices":[{"delta":{"content":"ok"}}],"usage":{"prompt_tokens":250,"completion_tokens":5,"total_tokens":255}}\n\n`,
+        "data: [DONE]\n\n",
+      ]);
+
+      await provider.ask("hello");
+
+      expect(provider.getContextWindow()).toBe(1000);
+      expect(provider.getContextTokens()).toBe(255);
+    });
+
+    it("computes the request cost from the model pricing", async () => {
+      await loadModels(provider, fetchMock, [
+        {
+          id: DEFAULT_MODEL,
+          pricing: {
+            input_per_million: "2",
+            output_per_million: "8",
+            currency: "USD",
+          },
+        },
+      ]);
+      mockStreamOnce(fetchMock, [
+        `data: {"choices":[{"delta":{"content":"ok"}}],"usage":{"prompt_tokens":1000000,"completion_tokens":500000,"total_tokens":1500000}}\n\n`,
+        "data: [DONE]\n\n",
+      ]);
+
+      const response = await provider.ask("hello");
+
+      expect(response.costUsd).toBeCloseTo(6);
     });
 
     it("does not modify the history when validation fails", async () => {

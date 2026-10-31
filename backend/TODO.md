@@ -5,9 +5,9 @@
   - archivos con apikeys hasheadas
 
 3. session manager
-   - send initial config params per session
+   - [x] send initial config params per session
      - maxMessage, autocompact: boolean, tokens limit etc
-   - prompt classification text generation or image generation
+   - [x] prompt classification text generation or image generation
 
 4. Tooling
 
