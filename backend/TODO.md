@@ -11,6 +11,21 @@
 - [x] `/sessions` (alias `/session`) lista sesiones persistidas con título, provider/modelo y conteo de mensajes
 - [x] `/resume <id|prefijo|índice>` (alias `/switch`) cambia de sesión persistiendo la actual; sin argumento abre un `select` interactivo
 
+3.1 agents
+- [x] `default` reescrito como organizador de problemas (clases basic/c1/c2/c3, lista de tareas atómica, gate de aprobación)
+- [x] `senior-architect`: solo lectura (`readFile`, `listDir`, `shell`), diseña y produce plan ejecutable, nunca escribe código
+- [x] `coder`: modelo barato (`deepseek-v4.1-flash-1017`), implementa un plan aprobado con cambios mínimos
+- [x] copiar `backend/agents/*.md` a `~/.racso-harness/agents/` (el loader en runtime solo lee `agentsHome()`, no `backend/agents/`)
+- [] **seed del directorio de agentes en runtime** — `backend/agents/` es solo el set de ejemplo versionado; al arrancar, si `agentsHome()` no existe (o está vacío) copiar `backend/agents/*.md` ahí para que una instalación limpia tenga los agentes por defecto
+  - review: `AgentLoader` carga `agentsHome()` (`{HOME}/.racso-harness/agents`, override `RACSO_HARNESS_AGENTS_LOCATION`) y cae al agente `default` embebido si no existe. Los `.md` de `backend/agents/` nunca se leen en runtime.
+  - propuesta: en `AgentLoader` (o en bootstrap), `ensureAgentsDir()` → si el directorio no existe o no tiene `.md`, copiar el contenido de `backend/agents/`. En build hay que decidir cómo viaja el set de ejemplo (hover sobre `dist/` o ruta relativa al paquete). Riesgo bajo; ~40 LOC + test.
+- [] **modelo por agente al cargar** — hoy `provider`/`model` se parsean (`parseAgentFile`) y se resuelven al arrancar/switch, pero hay que verificar y cerrar el cableado para que el agente activo use realmente su modelo en cada request
+  - review: `AgentDefinition.model`/`provider` existen; `SessionManager` resuelve el provider/model de la sesión. `coder.md` declara `model: deepseek-v4.1-flash-1017`; falta confirmar que cambiar de agente cambie el modelo sin reiniciar sesión.
+  - propuesta: resolver `agent.model ?? config.model` y `agent.provider ?? config.defaultProvider` en el punto donde se construye el request (no solo al crear la sesión); validar que el provider configurado soporte ese modelo; test de switch de agente → modelo efectivo. Riesgo bajo-medio.
+- [] **spawn de agentes en background para paralelizar** — lanzar agentes en sesiones secundarias y delegarles contexto
+  - review: hoy un turno bloquea la sesión; no hay forma de lanzar trabajo independiente ni de recolectar su resultado. `SessionManager.runAgentLoop` es síncrono por turno.
+  - propuesta: `spawn(agentId, prompt, { context })` → crea una `Session` hija (persistida, marcada con `parentId`) y la corre fuera del turno principal; el padre recibe un `spawnId` y puede `wait`/`poll`/`collect`. Reutilizar `SessionStore` para persistir hijas; aislar el contexto (sin compartir history mutable). Concurrencia acotada (`config.tools.parallel` o nuevo `config.sessions.maxChildren`). Comandos CLI (`/spawn`, `/children`, `/join`) después. Riesgo medio-alto: toca `SessionManager`, `SessionStore` y el modelo de sesión; hacerlo detrás de flag.
+
 4. Tooling
 - [x] diseño definido:
 - loop ReAct vive en `SessionManager`; el provider solo es transporte
