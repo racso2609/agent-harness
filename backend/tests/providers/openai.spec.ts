@@ -458,6 +458,45 @@ describe("OpenAiProvider", () => {
       });
     });
 
+    it("normalizes tool calls emitted as text markup", async () => {
+      await loadModels(provider, fetchMock);
+      mockStreamOnce(fetchMock, [
+        `data: {"choices":[{"delta":{"content":"<tool_call>{\\"name\\":\\"readFile\\",\\"arguments\\":{\\"path\\":\\"a.txt\\"}}</tool_call>"},"finish_reason":"stop"}]}\n\n`,
+        "data: [DONE]\n\n",
+      ]);
+
+      const result = await provider.chat([
+        { role: "user", content: "read a.txt" },
+      ]);
+
+      expect(result.turn.finishReason).toBe("toolCalls");
+      expect(result.turn.toolCalls).toEqual([
+        {
+          id: "textCall0",
+          name: "readFile",
+          args: { path: "a.txt" },
+          rawArgs: '{"path":"a.txt"}',
+        },
+      ]);
+      expect(result.turn.text).toBe("");
+    });
+
+    it("does not normalize text markup when the flag is disabled", async () => {
+      provider.normalizeTextToolCalls = false;
+      await loadModels(provider, fetchMock);
+      mockStreamOnce(fetchMock, [
+        `data: {"choices":[{"delta":{"content":"<tool_call>{\\"name\\":\\"readFile\\",\\"arguments\\":{\\"path\\":\\"a.txt\\"}}</tool_call>"},"finish_reason":"stop"}]}\n\n`,
+        "data: [DONE]\n\n",
+      ]);
+
+      const result = await provider.chat([
+        { role: "user", content: "read a.txt" },
+      ]);
+
+      expect(result.turn.toolCalls).toEqual([]);
+      expect(result.turn.finishReason).toBe("stop");
+    });
+
     it("flags malformed tool arguments instead of throwing", async () => {
       await loadModels(provider, fetchMock);
       mockStreamOnce(fetchMock, [

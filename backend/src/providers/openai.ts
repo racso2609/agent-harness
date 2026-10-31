@@ -1,4 +1,4 @@
-import {
+import type {
   AssistantTurn,
   ChatOptions,
   ChatResult,
@@ -11,7 +11,8 @@ import {
   ToolSpec,
 } from "@/types/providers";
 import { BasicProvider } from "./basic";
-import {
+import { normalizeToolMarkup } from "./normalizeToolMarkup";
+import type {
   Datum,
   OpenAIChatMessage,
   OpenAIChatUsage,
@@ -65,6 +66,9 @@ export class OpenAiProvider extends BasicProvider implements Provider {
   protected model = "";
   protected contextWindow?: number;
   protected lastContextTokens = 0;
+  // When true, tool calls emitted as text markup are normalized (see
+  // normalizeToolMarkup). Enabled by default; toggled via config.
+  normalizeTextToolCalls = true;
   protected _onChunk: (content: string, done: boolean) => Promise<void> =
     async () => {};
 
@@ -207,14 +211,21 @@ export class OpenAiProvider extends BasicProvider implements Provider {
       ? "toolCalls"
       : mapFinishReason(finishReason);
 
-    return {
-      turn: {
-        text: fullAssistantResponse,
-        toolCalls,
-        finishReason: effectiveFinishReason,
-      },
-      usage,
+    const turn: AssistantTurn = {
+      text: fullAssistantResponse,
+      toolCalls,
+      finishReason: effectiveFinishReason,
     };
+
+    if (this.normalizeTextToolCalls) {
+      const normalized = normalizeToolMarkup(turn);
+      if (normalized !== turn) {
+        logger.debug("Normalized tool calls emitted as text markup");
+        return { turn: normalized, usage };
+      }
+    }
+
+    return { turn, usage };
   }
 
   protected mapUsage(usage: OpenAIChatUsage): TokenUsage {
