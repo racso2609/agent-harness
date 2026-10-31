@@ -270,7 +270,7 @@ class SessionManagerImpl implements SessionManager {
       contextWindow,
       contextUsage,
       autoCompact: this.config.config.autoCompact ?? true,
-      autoCompactThreshold: this.config.config.autoCompactThreshold ?? 80,
+      autoCompactThreshold: this.config.config.autoCompactThreshold ?? 60,
     };
   }
 
@@ -290,7 +290,7 @@ class SessionManagerImpl implements SessionManager {
     const { autoCompact, autoCompactThreshold } = this.config.config;
     if (autoCompact === false) return;
 
-    const threshold = autoCompactThreshold ?? 80;
+    const threshold = autoCompactThreshold ?? 60;
     const status = this.status();
     if (!status.contextWindow) return;
     if (status.contextUsage * 100 < threshold) return;

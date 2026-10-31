@@ -80,39 +80,54 @@ export class OpenAiProvider extends BasicProvider implements Provider {
   }
 
   compact(compactThreshold = this.compactThreshold) {
-    const { systemMessages, nonSystemMessages } = this.history.reduce(
-      (acc, data) => {
-        if (!acc.systemMessages) acc.systemMessages = [];
-        if (!acc.nonSystemMessages) acc.nonSystemMessages = [];
+    const systemMessages: History[] = [];
+    const conversation: History[] = [];
 
-        if (data.role === "system") acc.systemMessages.push(data);
-        if (data.role === "user") acc.nonSystemMessages.push(data);
+    for (const message of this.history) {
+      if (message.role === "system") systemMessages.push(message);
+      else conversation.push(message);
+    }
 
-        return acc;
-      },
-      { systemMessages: [] as History[], nonSystemMessages: [] as History[] },
-    );
+    if (conversation.length <= compactThreshold) return this.history;
 
-    if (nonSystemMessages?.length <= compactThreshold) return this.history;
+    const recentMessages = conversation.slice(-compactThreshold);
+    const olderMessages = conversation.slice(0, -compactThreshold);
+    const summaryText = this.summarize(olderMessages);
 
-    const recentMessages = nonSystemMessages.slice(-compactThreshold);
-    const olderMessages = nonSystemMessages.slice(0, -compactThreshold);
-    const summaryText = olderMessages
-      .map((m) => `${m.role}: ${m.content}`)
-      .join(" | ");
-
-    const memoryBlock = {
+    const memoryBlock: History = {
       role: "system",
       content: `[Memoria previa compactada]: ${summaryText}`,
     };
 
-    // Reconstruimos el contexto optimizado
-    this.history = [...systemMessages, memoryBlock, ...recentMessages].filter(
-      Boolean,
-    ) as History[]; // Limpia nulos si no hay system prompt
+    this.history = [...systemMessages, memoryBlock, ...recentMessages];
     this.lastContextTokens = 0;
 
     return this.history;
+  }
+
+  protected summarize(messages: History[]) {
+    const budget = this.contextWindow
+      ? Math.min(Math.floor(this.contextWindow * 0.2), 200_000)
+      : 16_000;
+    const parts: string[] = [];
+    let used = 0;
+
+    for (const message of messages) {
+      const content =
+        message.content.length > 500
+          ? `${message.content.slice(0, 500)}…`
+          : message.content;
+      const part = `${message.role}: ${content}`;
+
+      if (used + part.length > budget) break;
+
+      parts.push(part);
+      used += part.length + 3;
+    }
+
+    if (parts.length < messages.length) parts.push("…");
+
+    return parts.join(" | ");
   }
 
   protected async _handleStream(response: Response) {
@@ -201,7 +216,7 @@ export class OpenAiProvider extends BasicProvider implements Provider {
     this.lastContextTokens = usage
       ? usage.promptTokens + usage.completionTokens
       : this.estimateHistoryTokens();
-    this.history.push({ role: "system", content: text });
+    this.history.push({ role: "assistant", content: text });
 
     return { text, usage, costUsd: usage ? this.costOf(usage) : undefined };
   }

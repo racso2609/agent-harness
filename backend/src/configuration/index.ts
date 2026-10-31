@@ -38,6 +38,9 @@ class Config {
     this.configLocation =
       env.RACSO_HARNESS_CONFIG_LOCATION ?? DEFAULT_CONFIG_LOCATION;
     this.config = this.readConfig() ?? { providers: {} };
+    this.config.compactThreshold ??= 350;
+    this.config.autoCompact ??= true;
+    this.config.autoCompactThreshold ??= 60;
   }
 
   async startSetup() {
@@ -84,10 +87,9 @@ class Config {
       const raw = fs.readFileSync(this.configLocation, "utf8");
       const parsed = JSON.parse(raw) as HarnessConfig;
 
-      // 10mensajes el max history message antes de compactar
-      if (!parsed.compactThreshold) parsed.compactThreshold = 100;
+      if (!parsed.compactThreshold) parsed.compactThreshold = 350;
       if (parsed.autoCompact === undefined) parsed.autoCompact = true;
-      if (!parsed.autoCompactThreshold) parsed.autoCompactThreshold = 80;
+      if (!parsed.autoCompactThreshold) parsed.autoCompactThreshold = 60;
       parsed.providers ??= {};
       return parsed;
     } catch {

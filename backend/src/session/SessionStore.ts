@@ -4,8 +4,10 @@ import { env, harnessHome } from "@/utils/env";
 import { History } from "@/types/providers";
 import type { SessionUsage } from "@/types/session";
 
+const SESSION_VERSION = 2;
+
 export interface SessionRecord {
-  // Stable id, also used as the file name.
+  version?: number;
   id: string;
   // Creation timestamp (ISO string).
   createdAt: string;
@@ -41,7 +43,7 @@ class SessionStore {
     fs.mkdirSync(this.sessionsLocation, { recursive: true });
     fs.writeFileSync(
       this.filePath(record.id),
-      JSON.stringify(record, null, 2),
+      JSON.stringify({ ...record, version: SESSION_VERSION }, null, 2),
       "utf8",
     );
   }
@@ -50,7 +52,17 @@ class SessionStore {
   load(id: string): SessionRecord | null {
     try {
       const raw = fs.readFileSync(this.filePath(id), "utf8");
-      return JSON.parse(raw) as SessionRecord;
+      const record = JSON.parse(raw) as SessionRecord;
+
+      if ((record.version ?? 1) < SESSION_VERSION) {
+        record.history = (record.history ?? []).map((message) =>
+          message.role === "system"
+            ? { ...message, role: "assistant" as const }
+            : message,
+        );
+      }
+
+      return record;
     } catch {
       return null;
     }

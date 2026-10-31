@@ -34,7 +34,10 @@ export type AgentResponse = {
   usage?: TokenUsage;
   costUsd?: number;
 };
-export type History = { role: "system" | "user"; content: string };
+export type History = {
+  role: "system" | "user" | "assistant";
+  content: string;
+};
 
 export type Provider = {
   url: string;

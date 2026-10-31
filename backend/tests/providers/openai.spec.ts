@@ -232,7 +232,7 @@ describe("OpenAiProvider", () => {
       });
       expect(provider.history).toEqual([
         { role: "user", content: "hello" },
-        { role: "system", content: "first implementation" },
+        { role: "assistant", content: "first implementation" },
       ]);
     });
 
@@ -396,6 +396,43 @@ describe("OpenAiProvider", () => {
       ]);
     });
 
+    it("compacts assistant messages alongside user messages", () => {
+      provider.history = [
+        { role: "user", content: "u1" },
+        { role: "assistant", content: "a1" },
+        { role: "user", content: "u2" },
+        { role: "assistant", content: "a2" },
+        { role: "user", content: "u3" },
+        { role: "assistant", content: "a3" },
+      ];
+
+      const compacted = provider.compact(2);
+
+      expect(compacted).toEqual([
+        {
+          role: "system",
+          content: "[Memoria previa compactada]: user: u1 | assistant: a1 | user: u2 | assistant: a2",
+        },
+        { role: "user", content: "u3" },
+        { role: "assistant", content: "a3" },
+      ]);
+    });
+
+    it("truncates older messages to keep the summary bounded", () => {
+      const long = "x".repeat(2000);
+      provider.history = [
+        { role: "user", content: long },
+        { role: "assistant", content: long },
+        ...userMessages("u1", "u2", "u3", "u4", "u5"),
+      ];
+
+      const compacted = provider.compact(4);
+      const memory = compacted[0].content;
+
+      expect(memory.length).toBeLessThan(4000);
+      expect(memory).toContain("…");
+    });
+
     it("uses a custom threshold", () => {
       provider.history = userMessages("u1", "u2", "u3");
 
@@ -485,7 +522,7 @@ describe("OpenAiProvider", () => {
       expect(Array.isArray(compacted)).toBe(true);
       for (const message of compacted) {
         expect(Array.isArray(message)).toBe(false);
-        expect(["system", "user"]).toContain(message.role);
+        expect(["system", "user", "assistant"]).toContain(message.role);
         expect(typeof message.content).toBe("string");
       }
     });

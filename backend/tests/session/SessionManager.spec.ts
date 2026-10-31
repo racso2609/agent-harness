@@ -43,7 +43,7 @@ describe("SessionManager status", () => {
       contextWindow: 1000,
       contextUsage: 0.9,
       autoCompact: true,
-      autoCompactThreshold: 80,
+      autoCompactThreshold: 60,
     });
   });
 
