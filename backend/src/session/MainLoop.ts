@@ -1,6 +1,7 @@
 import { input, printImage, printLogo } from "@/utils/stdin";
 import { logger } from "@/utils/logger";
 import { Config } from "@/configuration";
+import { CommandContext, CommandRepository } from "@/commands/CommandRepository";
 import { SessionManager } from "./SessionManager";
 import { SessionStore } from "./SessionStore";
 
@@ -17,6 +18,7 @@ class MainLoop {
   session: SessionManager;
   store: SessionStore;
   config: Config;
+  commands: CommandRepository;
   // Guard so the shutdown handler runs only once.
   private closing = false;
 
@@ -24,6 +26,7 @@ class MainLoop {
     this.config = options.config ?? new Config();
     this.store = options.store ?? new SessionStore();
     this.session = new SessionManager(this.config, this.store);
+    this.commands = new CommandRepository();
   }
 
   // Boots the session, wiring key handling and running the prompt loop.
@@ -51,9 +54,21 @@ class MainLoop {
   // Main prompt loop: reads, dispatches to the session and renders output.
   protected async loop() {
     while (true) {
-      const prompt = (await input("Type your prompt: ")).trim();
+      const prompt = (
+        await input("Type your prompt: ", { commands: this.commands.list() })
+      ).trim();
       if (!prompt) continue;
-      if (prompt === "/exit" || prompt === "/quit") this.shutdown(0);
+
+      if (prompt.startsWith("/")) {
+        const handled = await this.commands.run(
+          prompt,
+          this.commandContext(),
+        );
+        if (!handled) {
+          logger.warn(`Unknown command: ${prompt}. Type /help for a list.`);
+        }
+        continue;
+      }
 
       try {
         const { text, images } = await this.session.ask(prompt);
@@ -66,6 +81,17 @@ class MainLoop {
         logger.error({ err }, "failed to handle prompt");
       }
     }
+  }
+
+  // Dependencies exposed to slash command handlers.
+  protected commandContext(): CommandContext {
+    return {
+      session: this.session,
+      exit: () => this.shutdown(0),
+      clear: () => this.cleanup(),
+      notify: (message) => logger.info(message),
+      help: () => this.commands.helpText(),
+    };
   }
 
   // Clears the screen and redraws the logo without losing session state.
