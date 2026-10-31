@@ -11,6 +11,7 @@ import {
 import { Config } from "@/configuration";
 import { OpenAiProvider } from "@/providers/openai";
 import { createToolRegistry, ToolContext, ToolRegistry } from "@/tools";
+import type { ApprovalDecision, ApprovalRequest } from "@/tools";
 import {
   AgentResponse,
   History,
@@ -141,6 +142,8 @@ class SessionManagerImpl implements SessionManager {
   usage: SessionUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
   // Accumulated cost in USD for this session.
   costUsd = 0;
+  // Subjects the user chose to "always allow" for the rest of the session.
+  protected alwaysAllowed = new Set<string>();
 
   constructor(config = new Config(), store = new SessionStore()) {
     this.config = config;
@@ -573,22 +576,54 @@ class SessionManagerImpl implements SessionManager {
     return {
       cwd: this.config.config.tools?.workspace ?? process.cwd(),
       sessionId: this.sessionId,
-      approve: (command) => this.approve(command),
+      approve: (request) => this.approve(request),
     };
   }
 
-  // Approval gate for side effects. "auto" trusts the model (v1 default);
-  // "deny" blocks everything; "ask" prompts the user when a tool needs it.
-  protected async approve(command: string): Promise<boolean> {
+  // Approval gate. The effective mode is the strictest of the configured
+  // global policy and the active agent's policy:
+  //   auto  -> reads allowed, writes/exec allowed unless denied by policy
+  //   ask   -> reads allowed, writes/exec prompt the user
+  //   deny  -> only reads allowed
+  // Commands matching a deny pattern are always rejected.
+  protected async approve(request: ApprovalRequest): Promise<ApprovalDecision> {
     const globalMode = this.config.config.tools?.approval ?? "auto";
     const mode = this.agent?.approval
       ? strictestApproval(globalMode, this.agent.approval)
       : globalMode;
-    if (mode === "auto") return true;
-    if (mode === "deny") return false;
 
-    const answer = await input(`Allow command? ${command} [y/N] `);
-    return /^y(es)?$/i.test(answer.trim());
+    if (request.kind === "read") return "allow";
+    if (mode === "deny") return "deny";
+
+    const key = `${request.kind}:${request.subject}`;
+    if (this.alwaysAllowed.has(key)) return "allow";
+
+    if (mode === "auto") {
+      this.alwaysAllowed.add(key);
+      return "allow";
+    }
+
+    return this.promptApproval(request, key);
+  }
+
+  // Asks the user once per subject and remembers an "always" answer.
+  protected async promptApproval(
+    request: ApprovalRequest,
+    key: string,
+  ): Promise<ApprovalDecision> {
+    const answer = (
+      await input(
+        `Allow ${request.tool} [${request.kind}] ${request.subject}? ` +
+          `[y/N/a=always] `,
+      )
+    ).trim();
+
+    if (/^a(lways)?$/i.test(answer)) {
+      this.alwaysAllowed.add(key);
+      return "allow";
+    }
+
+    return /^y(es)?$/i.test(answer) ? "allow" : "deny";
   }
 
   protected preview(value: unknown) {

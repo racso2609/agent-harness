@@ -1,5 +1,19 @@
 import type { JsonSchema, ToolResult } from "@/types/providers";
 
+// What a tool is about to do, handed to the approval gate.
+export interface ApprovalRequest {
+  // Tool being executed (e.g. "shell", "writeFile").
+  tool: string;
+  // Side-effect class of the action.
+  kind: "read" | "write" | "exec";
+  // Human-readable subject: the command, the path, ...
+  subject: string;
+}
+
+// Outcome of an approval request. "always" allows the subject for the rest
+// of the session without prompting again.
+export type ApprovalDecision = "allow" | "deny" | "always";
+
 // Runtime dependencies handed to a tool on every execution.
 export interface ToolContext {
   // Working directory used to resolve relative paths.
@@ -8,8 +22,8 @@ export interface ToolContext {
   sessionId: string;
   // Aborted when the turn is cancelled.
   signal?: AbortSignal;
-  // Gate for side effects. Returns false when the user rejects the action.
-  approve: (command: string) => Promise<boolean>;
+  // Gate for side effects. Returns the decision for the requested action.
+  approve: (request: ApprovalRequest) => Promise<ApprovalDecision>;
 }
 
 export interface Tool {

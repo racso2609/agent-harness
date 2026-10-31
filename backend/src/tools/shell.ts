@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { classifyCommand, isDeniedCommand } from "./shellPolicy";
 import type { Tool, ToolContext, ToolResult } from "./Tool";
 
 interface ShellOptions {
@@ -70,7 +71,19 @@ class ShellTool implements Tool {
     }
 
     const command = input.command;
-    if (!(await ctx.approve(command))) {
+    if (isDeniedCommand(command)) {
+      return {
+        output: `Command refused by policy: ${command}`,
+        isError: true,
+      };
+    }
+
+    const decision = await ctx.approve({
+      tool: this.name,
+      kind: classifyCommand(command),
+      subject: command,
+    });
+    if (decision === "deny") {
       return { output: "Command rejected by the user", isError: true };
     }
 

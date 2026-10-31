@@ -5,7 +5,7 @@ import type { Tool, ToolContext } from "../../src/tools/Tool";
 const ctx: ToolContext = {
   cwd: process.cwd(),
   sessionId: "session",
-  approve: async () => true,
+  approve: async () => "allow",
 };
 
 const makeTool = (overrides: Partial<Tool> = {}): Tool => ({

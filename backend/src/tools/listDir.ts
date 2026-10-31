@@ -24,6 +24,19 @@ class ListDirTool implements Tool {
     }
 
     const target = resolveInWorkspace(ctx.cwd, input?.path ?? ".");
+
+    const decision = await ctx.approve({
+      tool: this.name,
+      kind: "read",
+      subject: target,
+    });
+    if (decision === "deny") {
+      return {
+        output: `Listing rejected by the user: ${input?.path ?? "."}`,
+        isError: true,
+      };
+    }
+
     const entries = await fs.readdir(target, { withFileTypes: true });
     const lines = entries
       .map((entry) => `${entry.name}${entry.isDirectory() ? "/" : ""}`)

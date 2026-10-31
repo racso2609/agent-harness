@@ -4,6 +4,13 @@ import { OpenAiProvider } from "../../src/providers/openai";
 import { SessionManager } from "../../src/session/SessionManager";
 import type { SessionStore } from "../../src/session/SessionStore";
 
+const { inputMock } = vi.hoisted(() => ({ inputMock: vi.fn() }));
+vi.mock("../../src/utils/stdin", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../src/utils/stdin")>();
+  return { ...actual, input: inputMock };
+});
+
 const makeConfig = (overrides: Record<string, unknown> = {}) =>
   ({
     config: { providers: {}, ...overrides },
@@ -188,7 +195,53 @@ describe("SessionManager agent definition", () => {
       approval: "deny",
     };
 
-    await expect(session["approve"]("rm -rf /")).resolves.toBe(false);
+    await expect(
+      session["approve"]({ tool: "shell", kind: "exec", subject: "rm -rf /" }),
+    ).resolves.toBe("deny");
+  });
+
+  it("allows reads without prompting in every mode", async () => {
+    const session = makeSession({ tools: { approval: "deny" } });
+
+    await expect(
+      session["approve"]({ tool: "readFile", kind: "read", subject: "/x" }),
+    ).resolves.toBe("allow");
+  });
+
+  it("allows exec in auto mode without prompting", async () => {
+    const session = makeSession({ tools: { approval: "auto" } });
+
+    await expect(
+      session["approve"]({
+        tool: "shell",
+        kind: "exec",
+        subject: "git push origin main",
+      }),
+    ).resolves.toBe("allow");
+  });
+
+  it("remembers an 'always' answer for the session", async () => {
+    const session = makeSession({ tools: { approval: "ask" } });
+    inputMock.mockResolvedValue("always");
+    const request = {
+      tool: "writeFile",
+      kind: "write" as const,
+      subject: "/x/file.txt",
+    };
+
+    await expect(session["approve"](request)).resolves.toBe("allow");
+    await expect(session["approve"](request)).resolves.toBe("allow");
+
+    expect(inputMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("denies a write in ask mode when the user says no", async () => {
+    const session = makeSession({ tools: { approval: "ask" } });
+    inputMock.mockResolvedValue("n");
+
+    await expect(
+      session["approve"]({ tool: "writeFile", kind: "write", subject: "/x" }),
+    ).resolves.toBe("deny");
   });
 
   it("lowers maxIterations to the agent cap", async () => {
@@ -428,7 +481,7 @@ describe("SessionManager agent loop", () => {
     expect(session.history).toContainEqual({
       role: "tool",
       toolCallId: "call_1",
-      content: "[tool error] Command rejected by the user",
+      content: "[tool error] Command refused by policy: rm -rf /",
     });
   });
 

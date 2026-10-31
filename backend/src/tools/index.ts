@@ -42,4 +42,10 @@ export const createToolRegistry = (
 };
 
 export { ToolRegistry };
-export type { Tool, ToolContext, ToolResult } from "./Tool";
+export type {
+  ApprovalDecision,
+  ApprovalRequest,
+  Tool,
+  ToolContext,
+  ToolResult,
+} from "./Tool";

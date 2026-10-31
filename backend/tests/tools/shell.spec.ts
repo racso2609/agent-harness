@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { ShellTool } from "../../src/tools/shell";
-import type { ToolContext } from "../../src/tools/Tool";
+import type { ApprovalDecision, ToolContext } from "../../src/tools/Tool";
 
-const makeContext = (approve = true): ToolContext => ({
+const makeContext = (decision: ApprovalDecision = "allow"): ToolContext => ({
   cwd: process.cwd(),
   sessionId: "session",
-  approve: async () => approve,
+  approve: async () => decision,
 });
 
 describe("ShellTool", () => {
@@ -24,7 +24,7 @@ describe("ShellTool", () => {
   it("does not execute when approval is denied", async () => {
     const tool = new ShellTool();
 
-    const result = await tool.execute(makeContext(false), {
+    const result = await tool.execute(makeContext("deny"), {
       command: "echo hello",
     });
 

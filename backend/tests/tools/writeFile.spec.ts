@@ -11,7 +11,7 @@ describe("WriteFileTool", () => {
 
   beforeEach(() => {
     workspace = fs.mkdtempSync(path.join(os.tmpdir(), "writefile-"));
-    ctx = { cwd: workspace, sessionId: "s", approve: async () => true };
+    ctx = { cwd: workspace, sessionId: "s", approve: async () => "allow" };
   });
 
   afterEach(() => {

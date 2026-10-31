@@ -62,6 +62,15 @@ class WriteFileTool implements Tool {
       throw new Error(`Refusing to write denied path: ${input.path}`);
     }
 
+    const decision = await ctx.approve({
+      tool: this.name,
+      kind: "write",
+      subject: filePath,
+    });
+    if (decision === "deny") {
+      return { output: `Write rejected by the user: ${input.path}`, isError: true };
+    }
+
     await fs.mkdir(path.dirname(filePath), { recursive: true });
     await fs.writeFile(filePath, input.content, "utf8");
 

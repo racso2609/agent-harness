@@ -26,6 +26,16 @@ class ReadFileTool implements Tool {
     }
 
     const filePath = resolveInWorkspace(ctx.cwd, input.path);
+
+    const decision = await ctx.approve({
+      tool: this.name,
+      kind: "read",
+      subject: filePath,
+    });
+    if (decision === "deny") {
+      return { output: `Read rejected by the user: ${input.path}`, isError: true };
+    }
+
     const content = await fs.readFile(filePath, "utf8");
 
     if (Buffer.byteLength(content, "utf8") <= MAX_BYTES) {
