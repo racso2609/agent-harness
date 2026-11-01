@@ -35,6 +35,9 @@ export type { SpawnHandle, SpawnStatus } from "./contract";
 export type { ApprovalDecision, ApprovalRequest } from "./tools";
 export type {
   AgentResponse,
+  ChatEvent,
+  ChatEventListener,
+  TurnOutcome,
   History,
   Model,
   Provider,

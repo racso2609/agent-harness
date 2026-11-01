@@ -15,27 +15,16 @@ Formato de este archivo: ver la skill `todo-format`.
 
 ## P0 — TUI de pantalla completa (bloquea P1)
 
-- [ ] **Elegir el stack de rendering y su costo de dependencias**
-  Hoy el CLI escribe líneas sobre la terminal y redibuja el prompt a mano en
-  `terminal/stdin.ts`; una TUI con paneles, scroll y estados en vivo necesita
-  layout y repintado incremental.
-  Done when: hay una decisión escrita (p. ej. `ink`/React vs. renderer propio sobre
-  ANSI + `readline`) con el peso en `npm install`, el soporte de Windows y un
-  prototipo mínimo que pinte dos paneles.
-  Depends on: nada.
+- [x] **Elegir el stack de rendering y su costo de dependencias** — DECIDIDO: ink
+decisión: **ink 8 + React 19** (`jsx: react-jsx`, sin `import React`). Coste real medido al instalarlo: `+26` paquetes en producción. Alternativa descartada: renderer propio sobre ANSI + `readline` — cero dependencias, pero obliga a reimplementar layout, scroll y repintado, que es justo donde `terminal/stdin.ts` ya acumula deuda.
+por qué encaja: ink da paneles, `useInput` y re-render incremental, y `MainLoop` ya no escribe a stdout directamente, así que los dos renderers conviven.
 
-- [ ] **Extraer la UI detrás de una interfaz de paneles**
-  `CliUiAdapter` y `MainLoop` mezclan I/O de terminal con lógica de turno; sin
-  separación, cambiar a pantalla completa obliga a tocar el loop.
-  Done when: `MainLoop` solo habla con una interfaz (`render(event)`) y existe una
-  implementación en modo líneas que conserva el comportamiento actual.
-  Depends on: elegir el stack de rendering.
+- [x] **Extraer la UI detrás de una interfaz de paneles**
+hecho: `src/ui/UiAdapter.ts` define `UiEvent` (status, notice, text, reasoning, toolStart/Output/End, turnStart/End, spawn, spawnSettled, reset) y `UiAdapter` (`render`, `promptApproval`, `renderImage`, `close`). `MainLoop` solo habla esa interfaz; `renderEvents.ts#toUiEvents` traduce `ChatEvent` del core a la misma. Ningún módulo del loop escribe a stdout.
 
-- [ ] **Portar la pantalla base (historial + input + status bar)**
-  Es el mínimo para que el resto de tareas tenga dónde pintar.
-  Done when: la TUI muestra historial con scroll, caja de input con el menú de
-  comandos (`/`) y una status bar con provider/modelo/agente/tokens.
-  Depends on: extraer la UI detrás de una interfaz de paneles.
+- [x] **Portar la pantalla base (historial + input + status bar)**
+hecho: `ui/tui/App.tsx` (dos paneles + caja de input con `useInput` + status bar + franja de hijos) y `ui/TuiUiAdapter.tsx`, que monta ink y re-renderiza por evento. Arranca con `--tui`; el modo líneas sigue siendo el default (`CliUiAdapter` implementa la misma interfaz).
+pendiente del prototipo: scroll real del historial (hoy muestra las últimas 40 líneas), menú de comandos `/` dentro del input, y approval interactivo — `promptApproval` **deniega** las operaciones con efectos secundarios porque ink es dueño de stdin; hay que resolverlo antes de usar `--tui` como modo diario.
 
 - [ ] **Definir el layout de progreso (franja de hijos + actividad)**
   Antigravity, Claude Code y opencode reservan espacio fijo para "qué está
