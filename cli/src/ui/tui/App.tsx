@@ -1,8 +1,7 @@
-import { Box, Text, useInput } from "ink";
+import { Box, Text, useInput, useStdout } from "ink";
 import { useEffect, useState } from "react";
 import type { UiStatus } from "../UiAdapter";
 import type {
-Alignment,
 Block,
 InlineSpan,
 StreamDocument,
@@ -11,6 +10,7 @@ TableBlock,
 import { colorFor, elapsedFor, iconFor, type SpawnEntry, visibleSpawns } from "./progress";
 import { GLYPH, resolveTheme, type Role, type Theme } from "./theme";
 import { collapse } from "./collapse";
+import { fitColumns, truncateCell, wrapText } from "./layout";
 
 // One rendered entry. `answer` and `reasoning` carry the live markdown
 // document; everything else is plain text.
@@ -49,6 +49,11 @@ onToggle: (kind: "reasoning" | "tool", index: number) => void;
 onToggleAll: (kind: "reasoning" | "tool") => void;
 }
 
+// Columns reserved for the pane border and its horizontal padding.
+const PANEL_CHROME = 6;
+// Below this the layout stops shrinking and lets the terminal scroll.
+const MIN_WIDTH = 20;
+
 const CHOICES = [
 { key: "allow" as const, label: "allow once" },
 { key: "always" as const, label: "always allow this" },
@@ -68,6 +73,7 @@ const [choice, setChoice] = useState(0);
 const [now, setNow] = useState(() => Date.now());
 const approval = state.approval;
 const theme = state.theme;
+const { stdout } = useStdout();
 
 const lingering = state.spawns.some(
 (spawn) => spawn.status !== "running" && spawn.finishedAt,
@@ -168,6 +174,12 @@ setDraft((current) => current + input);
 });
 
 const visible = visibleSpawns(state.spawns, now);
+// The panel frame and its padding eat a few columns; keep a floor so the
+// layout never collapses on a tiny terminal.
+const width = Math.max(
+MIN_WIDTH,
+((stdout as { columns?: number } | undefined)?.columns ?? 80) - PANEL_CHROME,
+);
 
 return (
 <Box flexDirection="column" height="100%">
@@ -179,6 +191,7 @@ line={line}
 theme={theme}
 running={state.running ?? false}
 expanded={state.expanded.has(index)}
+width={width}
 />
 ))}
 </Box>
@@ -235,11 +248,13 @@ line,
 theme,
 running,
 expanded,
+width,
 }: {
 line: TuiLine;
 theme: Theme;
 running: boolean;
 expanded: boolean;
+width: number;
 }) => {
 // A spawn entry is informational, so it borrows the notice style.
 const role: Role = line.role === "spawn" ? "notice" : line.role;
@@ -287,7 +302,13 @@ if (line.role === "answer") {
 return (
 <Box flexDirection="column">
 {line.doc.blocks.map((block, index) => (
-<Block key={index} block={block} role={line.role} style={style} />
+<Block
+key={index}
+block={block}
+role={line.role}
+style={style}
+width={width}
+/>
 ))}
 {line.doc.open ? <Text {...style}>{line.doc.open}</Text> : null}
 </Box>
@@ -364,10 +385,12 @@ const Block = ({
 block,
 role,
 style,
+width,
 }: {
 block: Block;
 role: Role;
 style: ReturnType<typeof resolveTheme>[Role];
+width: number;
 }) => {
 const glyph = role === "reasoning" ? GLYPH.reasoning : "";
 
@@ -401,7 +424,7 @@ return (
 );
 
 case "table":
-return <Table block={block} style={style} />;
+return <Table block={block} style={style} width={width} />;
 
 case "heading":
 return (
@@ -411,54 +434,101 @@ return (
 </Text>
 );
 
-default:
+default: {
+const text = block.spans.map((span) => span.text).join("");
+const lines = wrapText(text, leaveRoomFor(glyph, width));
+
 return (
-<Text {...style}>
-{glyph}
-<Spans spans={block.spans} style={style} />
+<Box flexDirection="column">
+{lines.map((line, index) => (
+<Text key={index} {...style}>
+{index === 0 ? glyph : " ".repeat(glyph.length)}
+{line}
 </Text>
+))}
+</Box>
 );
+}
 }
 };
 
-// Renders a markdown table as aligned columns. Borders are drawn with box
-// characters so the grid survives narrow terminals; each column is padded to
-// its widest cell and aligned as the separator row requested.
+// Keeps room for the role glyph so wrapped paragraphs stay aligned.
+const leaveRoomFor = (glyph: string, width: number): number =>
+Math.max(1, width - glyph.length);
+
+// Cuts inline spans to a plain-text width, preserving each span's styling.
+const truncateSpans = (spans: InlineSpan[], width: number): InlineSpan[] => {
+const result: InlineSpan[] = [];
+let remaining = width;
+
+for (const span of spans) {
+if (remaining <= 0) break;
+
+if (span.text.length <= remaining) {
+result.push(span);
+remaining -= span.text.length;
+continue;
+}
+
+result.push({ ...span, text: span.text.slice(0, remaining) });
+remaining = 0;
+}
+
+return result;
+};
+
+// Renders a markdown table as aligned columns. Columns shrink to fit the
+// terminal (widest first) and any cell that no longer fits is ellipsised, so a
+// wide table stays a grid instead of wrapping into noise.
 const Table = ({
 block,
 style,
+width,
 }: {
 block: TableBlock;
 style: ReturnType<typeof resolveTheme>[Role];
+width: number;
 }) => {
-const widths = block.header.map((cell, index) =>
+const plain = (cell: InlineSpan[]) => cell.map((span) => span.text).join("");
+const natural = block.header.map((cell, index) =>
 Math.max(
-cell.length,
-...block.rows.map((row) => (row[index] ?? "").length),
+plain(cell).length,
+...block.rows.map((row) => plain(row[index] ?? []).length),
 ),
 );
-
-const pad = (text: string, width: number, align: Alignment): string => {
-const gap = Math.max(0, width - text.length);
-
-if (align === "right") return " ".repeat(gap) + text;
-if (align === "center") {
-const left = Math.floor(gap / 2);
-return " ".repeat(left) + text + " ".repeat(gap - left);
-}
-
-return text + " ".repeat(gap);
-};
+const columns = fitColumns(natural, width);
 
 const rule = (left: string, mid: string, right: string) =>
-left + widths.map((width) => "─".repeat(width + 2)).join(mid) + right;
+left + columns.map((column) => "─".repeat(column.width + 2)).join(mid) + right;
 
-const row = (cells: string[]) =>
-"│ " +
-cells
-.map((cell, index) => pad(cell, widths[index]!, block.align[index]!))
-.join(" │ ") +
-" │";
+const row = (cells: InlineSpan[][]) => {
+const parts = cells.map((cell, index) => {
+const column = columns[index]!;
+const text = truncateCell(plain(cell), column.width);
+const gap = Math.max(0, column.width - text.length);
+const align = block.align[index]!;
+const left = align === "right" ? gap : align === "center" ? Math.floor(gap / 2) : 0;
+const right = gap - left;
+
+// Spans are truncated as plain text, so the styled content must follow
+// the same cut or the column would overflow its rule.
+return { spans: truncateSpans(cell, column.width), left, right };
+});
+
+return (
+<>
+{"│ "}
+{parts.map((part, index) => (
+<Text key={index}>
+{" ".repeat(part.left)}
+<Spans spans={part.spans} style={style} />
+{" ".repeat(part.right)}
+{index === parts.length - 1 ? " │" : " │ "}
+</Text>
+))}
+</>
+);
+};
 
 return (
 <Box flexDirection="column">

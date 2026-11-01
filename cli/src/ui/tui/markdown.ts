@@ -18,9 +18,9 @@ export type Alignment = "left" | "center" | "right";
 
 export interface TableBlock {
   kind: "table";
-  header: string[];
+  header: InlineSpan[][];
   align: Alignment[];
-  rows: string[][];
+  rows: InlineSpan[][][];
 }
 
 export interface ListItem {
@@ -167,9 +167,9 @@ export const parseTable = (lines: string[]): TableBlock | null => {
   if (!TABLE_SEPARATOR.test(lines[1]!)) return null;
   if (!lines[0]!.includes("|")) return null;
 
-  const header = splitRow(lines[0]!);
+  const header = splitRow(lines[0]!).map(parseInline);
   const align = splitRow(lines[1]!).map(alignOf);
-  const rows = lines.slice(2).map(splitRow);
+  const rows = lines.slice(2).map((line) => splitRow(line).map(parseInline));
 
   // Normalise row width so the renderer never reads past the header.
   const width = header.length;
@@ -179,7 +179,7 @@ export const parseTable = (lines: string[]): TableBlock | null => {
     header,
     align: header.map((_, index) => align[index] ?? "left"),
     rows: rows.map((row) =>
-      Array.from({ length: width }, (_, index) => row[index] ?? ""),
+      Array.from({ length: width }, (_, index) => row[index] ?? []),
     ),
   };
 };

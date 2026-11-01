@@ -155,11 +155,11 @@ const block = parseBlock(table.join("\n"));
 
 expect(block).toEqual({
 kind: "table",
-header: ["name", "qty"],
+header: [[{ text: "name" }], [{ text: "qty" }]],
 align: ["left", "right"],
 rows: [
-["apple", "3"],
-["pear", "12"],
+[[{ text: "apple" }], [{ text: "3" }]],
+[[{ text: "pear" }], [{ text: "12" }]],
 ],
 });
 });
@@ -174,7 +174,9 @@ expect((block as { align: string[] }).align).toEqual(["center", "left"]);
 it("pads short rows to the header width", () => {
 const block = parseBlock("| a | b |\n| --- | --- |\n| 1 |");
 
-expect((block as { rows: string[][] }).rows).toEqual([["1", ""]]);
+expect((block as { rows: unknown[][][] }).rows).toEqual([
+[[{ text: "1" }], []],
+]);
 });
 
 it("keeps a streamed table in one block", () => {
