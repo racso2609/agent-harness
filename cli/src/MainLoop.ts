@@ -1,14 +1,17 @@
-import { input, printImage, printLogo } from "@/utils/stdin";
-import { logger } from "@/utils/logger";
-import { formatSessionStatus } from "@/utils/status";
-import { Config } from "@/configuration";
+import {
+  Config,
+  createHarness,
+  createLogger,
+  type ApprovalRequest,
+  type IHarness,
+} from "@racso/core";
 import { CommandContext, CommandRepository } from "@/commands/CommandRepository";
-import { SessionManager } from "./SessionManager";
-import { SessionStore } from "./SessionStore";
+import { createFlows, type Flows } from "@/flows";
+import { startSetup } from "@/flows/startSetup";
+import { formatSessionStatus } from "@/render/status";
+import { clearPrompt, input, printImage, printLogo, restorePrompt } from "@/terminal/stdin";
 
 interface MainLoopOptions {
-  // Persistence layer shared with the session manager.
-  store?: SessionStore;
   // Id of a previously persisted session to resume on boot.
   sessionId?: string;
   // Agent to use when starting a new session.
@@ -17,33 +20,47 @@ interface MainLoopOptions {
   config?: Config;
 }
 
+// Renders one log line without clobbering the prompt the user is typing.
+const annotateLogger = () => {
+  const sink = (line: string) => {
+    clearPrompt();
+    process.stderr.write(`${line}\n`);
+    restorePrompt();
+  };
+  return createLogger(sink);
+};
+
 class MainLoop {
-  session: SessionManager;
-  store: SessionStore;
+  harness: IHarness;
   config: Config;
+  flows: Flows;
   commands: CommandRepository;
   // Guard so the shutdown handler runs only once.
   private closing = false;
 
   constructor(options: MainLoopOptions = {}) {
     this.config = options.config ?? new Config();
-    this.store = options.store ?? new SessionStore();
-    this.session = new SessionManager(this.config, this.store);
+    this.flows = createFlows();
     this.commands = new CommandRepository();
+    this.harness = createHarness({
+      config: this.config,
+      logger: annotateLogger(),
+      approval: (request: ApprovalRequest) =>
+        this.flows.promptApproval(request),
+    });
   }
 
   // Boots the session, wiring key handling and running the prompt loop.
   // Runs the interactive config setup first when no provider is configured.
   async start(options: MainLoopOptions = {}) {
-    if (!this.config.setupComplete()) {
-      logger.info("No provider configured, starting setup");
-      await this.config.startSetup();
+    if (this.config.needsSetup()) {
+      this.harness.status();
+      await startSetup(this.config);
     }
 
-    await this.session.initialize({
+    await this.harness.initialize({
       sessionId: options.sessionId,
       agent: options.agent,
-      store: this.store,
     });
 
     this.printStatus();
@@ -51,12 +68,12 @@ class MainLoop {
     await this.loop();
   }
 
-  // Ctrl-C triggers cleanup and exit; Ctrl-L redraws the screen.
+  // Ctrl-C triggers cleanup and exit.
   protected installKeyHandlers() {
     process.on("SIGINT", () => this.shutdown(130));
   }
 
-  // Main prompt loop: reads, dispatches to the session and renders output.
+  // Main prompt loop: reads, dispatches to the harness and renders output.
   protected async loop() {
     while (true) {
       const prompt = (
@@ -65,43 +82,50 @@ class MainLoop {
       if (!prompt) continue;
 
       if (prompt.startsWith("/")) {
-        const handled = await this.commands.run(
-          prompt,
-          this.commandContext(),
-        );
+        const handled = await this.commands.run(prompt, this.commandContext());
         if (!handled) {
-          logger.warn(`Unknown command: ${prompt}. Type /help for a list.`);
+          process.stderr.write(
+            `Unknown command: ${prompt}. Type /help for a list.\n`,
+          );
         }
         continue;
       }
 
       try {
-        const { text, images } = await this.session.ask(prompt);
-        if (text) logger.info(text);
+        const { text, images } = await this.harness.ask(prompt);
+        if (text) this.notify(text);
         for (const image of images ?? []) {
           const base64 = image.url.split(",").pop() ?? image.url;
           await printImage(base64);
         }
         this.printStatus();
       } catch (err) {
-        logger.error({ err }, "failed to handle prompt");
+        process.stderr.write(`failed to handle prompt: ${String(err)}\n`);
       }
     }
   }
 
   protected printStatus() {
-    logger.info(formatSessionStatus(this.session.status()));
+    this.notify(formatSessionStatus(this.harness.status()));
   }
 
   // Dependencies exposed to slash command handlers.
   protected commandContext(): CommandContext {
     return {
-      session: this.session,
+      harness: this.harness,
+      flows: this.flows,
       exit: () => this.shutdown(0),
       clear: () => this.cleanup(),
-      notify: (message) => logger.info(message),
+      notify: (message) => this.notify(message),
       help: () => this.commands.helpText(),
     };
+  }
+
+  // Writes a line above the prompt without corrupting it.
+  protected notify(message: string) {
+    clearPrompt();
+    process.stdout.write(`${message}\n`);
+    restorePrompt();
   }
 
   // Clears the screen and redraws the logo without losing session state.
@@ -116,9 +140,9 @@ class MainLoop {
     this.closing = true;
 
     try {
-      this.session.save();
+      this.harness.shutdown();
     } catch (err) {
-      logger.debug({ err }, "failed to persist session on shutdown");
+      process.stderr.write(`failed to persist session on shutdown: ${String(err)}\n`);
     }
 
     if (process.stdin.isTTY) process.stdin.setRawMode(false);

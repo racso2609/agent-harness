@@ -1,10 +1,9 @@
-import type { AgentSummary } from "@/agents";
-import type { SessionStatus, SessionSummary } from "@/types/session";
-import type { SpawnHandle } from "@/session/spawn";
+import type { IHarness, SpawnHandle } from "@racso/core";
+import type { Flows } from "@/flows";
 import {
   formatSessionList,
   formatSessionStatus,
-} from "@/utils/status";
+} from "@/render/status";
 
 export interface CommandOption {
   name: string;
@@ -12,22 +11,9 @@ export interface CommandOption {
   aliases?: string[];
 }
 
-export interface CommandSession {
-  changeProvider: (name?: string) => Promise<boolean>;
-  changeModel: (model?: string) => Promise<boolean>;
-  changeAgent: (name?: string) => Promise<boolean>;
-  listAgents: () => AgentSummary[];
-  listSessions: () => SessionSummary[];
-  changeSession: (target?: string) => Promise<boolean>;
-  compactSession: () => Promise<boolean>;
-  status: () => SessionStatus;
-  spawn: (agentId: string, prompt: string) => SpawnHandle;
-  listSpawns: () => SpawnHandle[];
-  waitSpawn: (spawnId: string) => Promise<SpawnHandle | undefined>;
-}
-
 export interface CommandContext {
-  session: CommandSession;
+  harness: IHarness;
+  flows: Flows;
   exit: () => void;
   clear: () => void;
   notify: (message: string) => void;
@@ -60,7 +46,7 @@ const BUILT_IN_COMMANDS: CommandDefinition[] = [
     name: "model",
     description: "Switch the active model",
     run: async (context) => {
-      const changed = await context.session.changeModel();
+      const changed = await context.flows.changeModel(context.harness);
       context.notify(changed ? "Model updated" : "Model not changed");
     },
   },
@@ -68,7 +54,7 @@ const BUILT_IN_COMMANDS: CommandDefinition[] = [
     name: "provider",
     description: "Switch the active provider",
     run: async (context) => {
-      const changed = await context.session.changeProvider();
+      const changed = await context.flows.changeProvider(context.harness);
       context.notify(changed ? "Provider updated" : "Provider not changed");
     },
   },
@@ -78,8 +64,8 @@ const BUILT_IN_COMMANDS: CommandDefinition[] = [
     run: async (context, args) => {
       const [name] = args;
       if (!name) {
-        const current = context.session.status().agent;
-        const lines = context.session.listAgents().map((agent) => {
+        const current = context.harness.status().agent;
+        const lines = context.harness.listAgents().map((agent) => {
           const marker = agent.id === current ? "*" : " ";
           const description = agent.description ? ` — ${agent.description}` : "";
           return `${marker} ${agent.id} (${agent.name})${description}`;
@@ -88,7 +74,7 @@ const BUILT_IN_COMMANDS: CommandDefinition[] = [
         return;
       }
 
-      const changed = await context.session.changeAgent(name);
+      const changed = await context.flows.changeAgent(context.harness, name);
       context.notify(
         changed ? `Agent updated to ${name}` : `Agent not changed: ${name}`,
       );
@@ -99,9 +85,9 @@ const BUILT_IN_COMMANDS: CommandDefinition[] = [
     aliases: ["session"],
     description: "List persisted sessions",
     run: (context) => {
-      const current = context.session.status().sessionId;
+      const current = context.harness.status().sessionId;
       context.notify(
-        formatSessionList(context.session.listSessions(), current),
+        formatSessionList(context.harness.listSessions(), current),
       );
     },
   },
@@ -111,14 +97,14 @@ const BUILT_IN_COMMANDS: CommandDefinition[] = [
     description: "Switch to a persisted session by id or index",
     run: async (context, args) => {
       const [target] = args;
-      const changed = await context.session.changeSession(target);
+      const changed = await context.flows.changeSession(context.harness, target);
       if (!changed) {
         context.notify(`Session not changed: ${target ?? "canceled"}`);
         return;
       }
 
       context.notify(
-        `Session resumed\n${formatSessionStatus(context.session.status())}`,
+        `Session resumed\n${formatSessionStatus(context.harness.status())}`,
       );
     },
   },
@@ -126,7 +112,7 @@ const BUILT_IN_COMMANDS: CommandDefinition[] = [
     name: "compact",
     description: "Compact the conversation history",
     run: async (context) => {
-      const compacted = await context.session.compactSession();
+      const compacted = await context.harness.compactSession();
       context.notify(compacted ? "Session compacted" : "Nothing to compact");
     },
   },
@@ -134,7 +120,7 @@ const BUILT_IN_COMMANDS: CommandDefinition[] = [
     name: "status",
     description: "Show session usage, cost and context",
     run: (context) =>
-      context.notify(formatSessionStatus(context.session.status())),
+      context.notify(formatSessionStatus(context.harness.status())),
   },
   {
     name: "spawn",
@@ -148,7 +134,7 @@ const BUILT_IN_COMMANDS: CommandDefinition[] = [
       }
 
       try {
-        const handle = context.session.spawn(agent, prompt);
+        const handle = context.harness.spawn(agent, prompt);
         context.notify(
           `Spawned ${handle.spawnId} (agent ${handle.agentId})`,
         );
@@ -163,7 +149,7 @@ const BUILT_IN_COMMANDS: CommandDefinition[] = [
     name: "children",
     description: "List spawned background agents",
     run: (context) => {
-      const spawns = context.session.listSpawns();
+      const spawns = context.harness.listSpawns();
       context.notify(formatSpawnList(spawns));
     },
   },
@@ -177,7 +163,7 @@ const BUILT_IN_COMMANDS: CommandDefinition[] = [
         return;
       }
 
-      const handle = await context.session.waitSpawn(spawnId);
+      const handle = await context.harness.waitSpawn(spawnId);
       if (!handle) {
         context.notify(`Unknown spawn: ${spawnId}`);
         return;
