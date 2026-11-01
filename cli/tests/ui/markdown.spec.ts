@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { MarkdownStream, parseBlock, parseInline } from "../../src/ui/tui/markdown";
+import {
+MarkdownStream,
+parseBlock,
+parseInline,
+} from "../../src/ui/tui/markdown";
 
 describe("parseInline", () => {
 it("keeps plain text as a single span", () => {
@@ -140,5 +144,83 @@ const doc = stream.finish();
 expect(doc.blocks).toEqual([
 { kind: "paragraph", spans: [{ text: "just " }, { text: "text", bold: true }] },
 ]);
+});
+});
+
+describe("tables", () => {
+const table = ["| name | qty |", "| :--- | ---: |", "| apple | 3 |", "| pear | 12 |"];
+
+it("parses a table with alignment from the separator row", () => {
+const block = parseBlock(table.join("\n"));
+
+expect(block).toEqual({
+kind: "table",
+header: ["name", "qty"],
+align: ["left", "right"],
+rows: [
+["apple", "3"],
+["pear", "12"],
+],
+});
+});
+
+it("supports center alignment and missing outer pipes", () => {
+const block = parseBlock("a | b\n:---: | ---\n1 | 2");
+
+expect(block?.kind).toBe("table");
+expect((block as { align: string[] }).align).toEqual(["center", "left"]);
+});
+
+it("pads short rows to the header width", () => {
+const block = parseBlock("| a | b |\n| --- | --- |\n| 1 |");
+
+expect((block as { rows: string[][] }).rows).toEqual([["1", ""]]);
+});
+
+it("keeps a streamed table in one block", () => {
+const stream = new MarkdownStream();
+const doc = stream.push(`${table.join("\n")}\nafter`);
+
+// The table closes as soon as a non-row line arrives; the trailing text is
+// still streaming, so it stays open until finish().
+expect(doc.blocks.map((block) => block.kind)).toEqual(["table"]);
+expect(doc.open).toBe("after");
+expect(stream.finish().blocks.map((block) => block.kind)).toEqual([
+"table",
+"paragraph",
+]);
+});
+
+it("does not mistake a pipe inside a paragraph for a table", () => {
+expect(parseBlock("a | b is just text")).toEqual({
+kind: "paragraph",
+spans: [{ text: "a | b is just text" }],
+});
+});
+});
+
+describe("lists", () => {
+it("keeps ordinal numbers", () => {
+const block = parseBlock("1. first\n2. second");
+
+expect(block?.kind).toBe("list");
+expect((block as { ordered: boolean }).ordered).toBe(true);
+expect((block as { items: { marker: string }[] }).items.map((i) => i.marker)).toEqual([
+"1.",
+"2.",
+]);
+});
+
+it("keeps nesting depth from indentation", () => {
+const block = parseBlock("- top\n  - nested\n    - deeper");
+
+const items = (block as { items: { depth: number }[] }).items;
+expect(items.map((item) => item.depth)).toEqual([0, 1, 2]);
+});
+
+it("uses bullets for unordered lists", () => {
+const block = parseBlock("- a\n- b");
+
+expect((block as { items: { marker: string }[] }).items[0]?.marker).toBe("-");
 });
 });

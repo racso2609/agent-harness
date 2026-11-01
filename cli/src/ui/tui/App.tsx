@@ -1,7 +1,13 @@
 import { Box, Text, useInput } from "ink";
 import { useEffect, useState } from "react";
 import type { UiStatus } from "../UiAdapter";
-import type { Block, InlineSpan, StreamDocument } from "./markdown";
+import type {
+Alignment,
+Block,
+InlineSpan,
+StreamDocument,
+TableBlock,
+} from "./markdown";
 import { colorFor, elapsedFor, iconFor, type SpawnEntry, visibleSpawns } from "./progress";
 import { GLYPH, resolveTheme, type Role, type Theme } from "./theme";
 import { collapse } from "./collapse";
@@ -337,7 +343,13 @@ switch (block.kind) {
 case "code":
 return block.lines.join("\n");
 case "list":
-return block.items.map((item) => `• ${spans(item)}`).join("\n");
+return block.items
+.map((item) => `${" ".repeat(item.depth * 2)}${item.marker} ${spans(item.spans)}`)
+.join("\n");
+case "table":
+return [block.header, ...block.rows]
+.map((row) => row.join(" | "))
+.join("\n");
 case "rule":
 return "───";
 case "heading":
@@ -378,12 +390,18 @@ case "list":
 return (
 <Box flexDirection="column">
 {block.items.map((item, index) => (
-<Text key={index} {...style}>
-{glyph} • <Spans spans={item} style={style} />
+<Box key={index} paddingLeft={item.depth * 2}>
+<Text {...style}>
+{glyph}
+{item.marker === "-" ? "•" : item.marker} <Spans spans={item.spans} style={style} />
 </Text>
+</Box>
 ))}
 </Box>
 );
+
+case "table":
+return <Table block={block} style={style} />;
 
 case "heading":
 return (
@@ -401,6 +419,64 @@ return (
 </Text>
 );
 }
+};
+
+// Renders a markdown table as aligned columns. Borders are drawn with box
+// characters so the grid survives narrow terminals; each column is padded to
+// its widest cell and aligned as the separator row requested.
+const Table = ({
+block,
+style,
+}: {
+block: TableBlock;
+style: ReturnType<typeof resolveTheme>[Role];
+}) => {
+const widths = block.header.map((cell, index) =>
+Math.max(
+cell.length,
+...block.rows.map((row) => (row[index] ?? "").length),
+),
+);
+
+const pad = (text: string, width: number, align: Alignment): string => {
+const gap = Math.max(0, width - text.length);
+
+if (align === "right") return " ".repeat(gap) + text;
+if (align === "center") {
+const left = Math.floor(gap / 2);
+return " ".repeat(left) + text + " ".repeat(gap - left);
+}
+
+return text + " ".repeat(gap);
+};
+
+const rule = (left: string, mid: string, right: string) =>
+left + widths.map((width) => "─".repeat(width + 2)).join(mid) + right;
+
+const row = (cells: string[]) =>
+"│ " +
+cells
+.map((cell, index) => pad(cell, widths[index]!, block.align[index]!))
+.join(" │ ") +
+" │";
+
+return (
+<Box flexDirection="column">
+<Text {...style} bold>
+{rule("┌", "┬", "┐")}
+</Text>
+<Text {...style} bold>
+{row(block.header)}
+</Text>
+<Text {...style}>{rule("├", "┼", "┤")}</Text>
+{block.rows.map((cells, index) => (
+<Text key={index} {...style}>
+{row(cells)}
+</Text>
+))}
+<Text {...style}>{rule("└", "┴", "┘")}</Text>
+</Box>
+);
 };
 
 const Spans = ({
