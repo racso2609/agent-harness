@@ -1,5 +1,5 @@
-import type { ApprovalDecision, ApprovalRequest, IHarness } from "@racso/core";
-import { input, select } from "@/terminal/stdin";
+import type { IHarness } from "@racso/core";
+import { select } from "@/terminal/stdin";
 
 // Interactive flows layered on top of the non-interactive harness primitives.
 // Each flow owns the prompting; core only receives the resolved choice.
@@ -9,7 +9,6 @@ export interface Flows {
   changeModel(harness: IHarness, model?: string): Promise<boolean>;
   changeAgent(harness: IHarness, name?: string): Promise<boolean>;
   changeSession(harness: IHarness, target?: string): Promise<boolean>;
-  promptApproval(request: ApprovalRequest): Promise<ApprovalDecision>;
 }
 
 const pick = (
@@ -61,17 +60,5 @@ export const createFlows = (): Flows => ({
     const selector = labeled ? labeled[1] : resolved;
 
     return harness.loadSession(selector);
-  },
-
-  async promptApproval(request) {
-    const answer = (
-      await input(
-        `Allow ${request.tool} [${request.kind}] ${request.subject}? ` +
-          `[y/N/a=always] `,
-      )
-    ).trim();
-
-    if (/^a(lways)?$/i.test(answer)) return "always";
-    return /^y(es)?$/i.test(answer) ? "allow" : "deny";
   },
 });

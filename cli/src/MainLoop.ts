@@ -1,7 +1,6 @@
 import {
   Config,
   createHarness,
-  createLogger,
   type ApprovalRequest,
   type IHarness,
 } from "@racso/core";
@@ -9,7 +8,8 @@ import { CommandContext, CommandRepository } from "@/commands/CommandRepository"
 import { createFlows, type Flows } from "@/flows";
 import { startSetup } from "@/flows/startSetup";
 import { formatSessionStatus } from "@/render/status";
-import { clearPrompt, input, printImage, printLogo, restorePrompt } from "@/terminal/stdin";
+import { input } from "@/terminal/stdin";
+import { CliUiAdapter } from "@/ui/CliUiAdapter";
 
 interface MainLoopOptions {
   // Id of a previously persisted session to resume on boot.
@@ -20,21 +20,12 @@ interface MainLoopOptions {
   config?: Config;
 }
 
-// Renders one log line without clobbering the prompt the user is typing.
-const annotateLogger = () => {
-  const sink = (line: string) => {
-    clearPrompt();
-    process.stderr.write(`${line}\n`);
-    restorePrompt();
-  };
-  return createLogger(sink);
-};
-
 class MainLoop {
   harness: IHarness;
   config: Config;
   flows: Flows;
   commands: CommandRepository;
+  ui: CliUiAdapter;
   // Guard so the shutdown handler runs only once.
   private closing = false;
 
@@ -42,11 +33,11 @@ class MainLoop {
     this.config = options.config ?? new Config();
     this.flows = createFlows();
     this.commands = new CommandRepository();
+    this.ui = new CliUiAdapter();
     this.harness = createHarness({
       config: this.config,
-      logger: annotateLogger(),
-      approval: (request: ApprovalRequest) =>
-        this.flows.promptApproval(request),
+      logger: this.ui.logger(),
+      approval: (request: ApprovalRequest) => this.ui.promptApproval(request),
     });
   }
 
@@ -54,7 +45,6 @@ class MainLoop {
   // Runs the interactive config setup first when no provider is configured.
   async start(options: MainLoopOptions = {}) {
     if (this.config.needsSetup()) {
-      this.harness.status();
       await startSetup(this.config);
     }
 
@@ -84,29 +74,26 @@ class MainLoop {
       if (prompt.startsWith("/")) {
         const handled = await this.commands.run(prompt, this.commandContext());
         if (!handled) {
-          process.stderr.write(
-            `Unknown command: ${prompt}. Type /help for a list.\n`,
-          );
+          this.ui.notify(`Unknown command: ${prompt}. Type /help for a list.`);
         }
         continue;
       }
 
       try {
         const { text, images } = await this.harness.ask(prompt);
-        if (text) this.notify(text);
+        if (text) this.ui.notify(text);
         for (const image of images ?? []) {
-          const base64 = image.url.split(",").pop() ?? image.url;
-          await printImage(base64);
+          await this.ui.renderImage(image.url);
         }
         this.printStatus();
       } catch (err) {
-        process.stderr.write(`failed to handle prompt: ${String(err)}\n`);
+        this.ui.notify(`failed to handle prompt: ${String(err)}`);
       }
     }
   }
 
   protected printStatus() {
-    this.notify(formatSessionStatus(this.harness.status()));
+    this.ui.notify(formatSessionStatus(this.harness.status()));
   }
 
   // Dependencies exposed to slash command handlers.
@@ -115,23 +102,10 @@ class MainLoop {
       harness: this.harness,
       flows: this.flows,
       exit: () => this.shutdown(0),
-      clear: () => this.cleanup(),
-      notify: (message) => this.notify(message),
+      clear: () => this.ui.reset(),
+      notify: (message) => this.ui.notify(message),
       help: () => this.commands.helpText(),
     };
-  }
-
-  // Writes a line above the prompt without corrupting it.
-  protected notify(message: string) {
-    clearPrompt();
-    process.stdout.write(`${message}\n`);
-    restorePrompt();
-  }
-
-  // Clears the screen and redraws the logo without losing session state.
-  protected cleanup() {
-    process.stdout.write("\x1Bc");
-    printLogo();
   }
 
   // Persists the session, restores the terminal and exits.
@@ -142,7 +116,7 @@ class MainLoop {
     try {
       this.harness.shutdown();
     } catch (err) {
-      process.stderr.write(`failed to persist session on shutdown: ${String(err)}\n`);
+      this.ui.notify(`failed to persist session on shutdown: ${String(err)}`);
     }
 
     if (process.stdin.isTTY) process.stdin.setRawMode(false);
