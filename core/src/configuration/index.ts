@@ -2,7 +2,6 @@ import fs from "node:fs";
 import path from "node:path";
 import { agentsHome, env, harnessHome } from "@/utils/env";
 import { DEFAULT_AGENT_ID } from "@/agents/defaults";
-import { input, select } from "@/utils/stdin";
 
 interface ProviderConfig {
   url: string;
@@ -107,33 +106,50 @@ class Config {
     this.config = applyDefaults(this.readConfig() ?? { providers: {} });
   }
 
-  async startSetup() {
-    const provider = await select(
-      "Select the provider to configure:",
-      SUPPORTED_PROVIDERS,
-    );
-
-    let url = (await input(`[${provider}] Base URL: `)).trim();
-    if (!url) throw new Error("Base URL is required");
-    url = url.replace(/\/+$/, "");
-
-    const apikey = (await input(`[${provider}] API key: `)).trim();
-    if (!apikey) throw new Error("API key is required");
-
-    this.config.providers[provider] = { url, apikey };
-    this.config.defaultProvider ??= provider;
-
-    const model = (await input("Default model (optional): ")).trim();
-    if (model) this.config.model = model;
-
-    this.writeConfig();
-
-    return this.config;
+  // True when the config cannot boot a session yet.
+  needsSetup() {
+    return !this.validateConfig().ok;
   }
 
-  setupComplete() {
+  // Checks that a default provider is configured and usable.
+  validateConfig() {
+    const errors: string[] = [];
     const provider = this.config.defaultProvider;
-    return Boolean(provider && this.config.providers[provider]);
+
+    if (!provider) {
+      errors.push("No default provider configured");
+    } else {
+      const providerConfig = this.config.providers[provider];
+      if (!providerConfig) {
+        errors.push(`Missing config for provider: ${provider}`);
+      } else {
+        if (!providerConfig.url?.trim()) {
+          errors.push(`Provider ${provider} is missing a base URL`);
+        }
+        if (!providerConfig.apikey?.trim()) {
+          errors.push(`Provider ${provider} is missing an API key`);
+        }
+      }
+    }
+
+    return { ok: errors.length === 0, errors };
+  }
+
+  // Stores a provider definition without prompting. Used by the CLI setup flow.
+  configureProvider(
+    name: string,
+    provider: ProviderConfig,
+    options: { makeDefault?: boolean; model?: string } = {},
+  ) {
+    this.config.providers[name] = {
+      url: provider.url.replace(/\/+$/, ""),
+      apikey: provider.apikey,
+    };
+
+    if (options.makeDefault || !this.config.defaultProvider) {
+      this.config.defaultProvider = name;
+    }
+    if (options.model) this.config.model = options.model;
   }
 
   writeConfig() {
@@ -159,7 +175,7 @@ class Config {
   }
 }
 
-export { Config };
+export { Config, SUPPORTED_PROVIDERS };
 export type {
   AgentsConfig,
   HarnessConfig,
