@@ -9,16 +9,15 @@
   },
   "main": "./dist/main.js",
   "scripts": {
-    "start": "node --import ./loader.mjs ./dist/main.js",
-    "dev": "pnpm dlx tsx ./src/main.ts",
-    "build": "tsc",
+    "start": "node ./dist/main.js",
+    "dev": "tsx ./src/main.ts",
+    "build": "tsc && tsc-alias -f",
     "lint": "eslint .",
     "test": "vitest"
   },
   "dependencies": {
     "@racso/core": "workspace:*",
-    "terminal-image": "^5.0.1",
-    "tsconfig-paths": "^4.2.0"
+    "terminal-image": "^5.0.1"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -26,6 +25,7 @@
     "eslint": "^10.12.0",
     "globals": "^17.13.0",
     "jiti": "^2.7.0",
+    "tsc-alias": "^1.9.9",
     "tsx": "^4.20.6",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.71.1",
