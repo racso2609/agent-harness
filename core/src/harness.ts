@@ -1,0 +1,126 @@
+import type {
+  ApprovalHandler,
+  HarnessDeps,
+  HarnessOptions,
+  IHarness,
+  SpawnOptions,
+} from "@/contract";
+import { Config } from "@/configuration";
+import { SessionManager } from "@/session/SessionManager";
+import { SessionStore } from "@/session/SessionStore";
+import type { SpawnHandle } from "@/session/spawn";
+import type { ApprovalRequest } from "@/tools";
+import type { AgentResponse } from "@/types/providers";
+import { createLogger, setLogger } from "@/utils/logger";
+
+class Harness implements IHarness {
+  constructor(protected session: SessionManager) {}
+
+  initialize(options: HarnessOptions = {}) {
+    return this.session.initialize(options);
+  }
+
+  ask(prompt: string): Promise<AgentResponse> {
+    return this.session.ask(prompt);
+  }
+
+  status() {
+    return this.session.status();
+  }
+
+  listSessions() {
+    return this.session.listSessions();
+  }
+
+  resolveSession(target: string) {
+    return this.session.resolveSession(target);
+  }
+
+  // Persists the current session and resumes the resolved target.
+  async loadSession(target: string) {
+    const id = this.session.resolveSession(target);
+    if (!id) return false;
+    if (id === this.session.sessionId) return true;
+
+    this.session.save();
+    const loaded = await this.session.load(id);
+    if (loaded) this.session.save();
+    return loaded;
+  }
+
+  save() {
+    this.session.save();
+  }
+
+  listProviders() {
+    return this.session.listProviders();
+  }
+
+  setProvider(name: string) {
+    return this.session.setProvider(name);
+  }
+
+  listModels() {
+    return this.session.provider?.listModels?.() ?? [];
+  }
+
+  setModel(model: string) {
+    return this.session.setModel(model);
+  }
+
+  listAgents() {
+    return this.session.listAgents();
+  }
+
+  setAgent(agentId: string) {
+    return this.session.setAgent(agentId);
+  }
+
+  approveWith(handler: ApprovalHandler) {
+    this.session.approveWith(handler);
+  }
+
+  spawn(agentId: string, prompt: string, options: SpawnOptions = {}) {
+    return this.session.spawn(agentId, prompt, options);
+  }
+
+  pollSpawn(spawnId: string): SpawnHandle | undefined {
+    return this.session.pollSpawn(spawnId);
+  }
+
+  listSpawns(): SpawnHandle[] {
+    return this.session.listSpawns();
+  }
+
+  waitSpawn(spawnId: string) {
+    return this.session.waitSpawn(spawnId);
+  }
+
+  collectSpawns(spawnIds?: string[]) {
+    return this.session.collectSpawns(spawnIds);
+  }
+
+  compactSession() {
+    return this.session.compactSession();
+  }
+
+  // Persists the session; process lifecycle belongs to the CLI.
+  shutdown() {
+    this.session.save();
+  }
+}
+
+export const createHarness = (deps: HarnessDeps = {}): IHarness => {
+  const logger = deps.logger ?? createLogger();
+  setLogger(logger);
+
+  const config = deps.config ?? new Config();
+  const store = deps.store ?? new SessionStore();
+  const session = new SessionManager(config, store);
+
+  if (deps.approval) session.approveWith(deps.approval);
+
+  return new Harness(session);
+};
+
+export type { ApprovalRequest };

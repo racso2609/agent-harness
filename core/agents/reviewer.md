@@ -1,8 +1,8 @@
 ---
 name: Reviewer
 description: Reviews code and proposes changes without editing files
-tools: [readFile, listDir]
-approval: deny
+tools: [readFile, listDir, shell]
+approval: auto
 maxIterations: 6
 ---
 You are a senior code reviewer. Analyze the code you are given, point out bugs,
