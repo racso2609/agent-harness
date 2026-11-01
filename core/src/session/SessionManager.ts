@@ -14,6 +14,8 @@ import {
   ProviderDetail,
 } from "@/configuration";
 import { OpenAiProvider } from "@/providers/openai";
+import { SkillLoader, SkillRegistry } from "@/skills";
+import type { SkillSummary } from "@/skills";
 import { createToolRegistry, ToolContext, ToolRegistry } from "@/tools";
 import type { ApprovalDecision, ApprovalRequest } from "@/tools";
 import {
@@ -164,6 +166,8 @@ class SessionManagerImpl implements SessionManager {
   agent?: AgentDefinition;
   // Available agent definitions; starts with only the embedded default.
   agentRegistry = new AgentRegistry([builtInDefaultAgent()]);
+	// Skill definitions loaded from config.skills.dirs; undefined when disabled.
+	skillRegistry?: SkillRegistry;
   protected agentsLoaded = false;
   // Active provider instance, undefined until initialize() succeeds.
   provider?: Provider;
@@ -209,6 +213,9 @@ class SessionManagerImpl implements SessionManager {
     if (options.store) this.store = options.store;
 
     this.loadAgentRegistry();
+
+this.loadSkillRegistry();
+
     const agent = this.resolveAgent(
       options.agent ?? this.config.config.agents?.default,
     );
@@ -259,6 +266,8 @@ class SessionManagerImpl implements SessionManager {
     );
     await provider.initialize();
     if (!provider.setModel(record.model)) return false;
+
+this.loadSkillRegistry();
 
     const agent = this.resolveAgent(
       record.agentId ?? this.config.config.agents?.default,
@@ -428,6 +437,19 @@ class SessionManagerImpl implements SessionManager {
     this.ensureAgentRegistry();
     return this.agentRegistry.summaries();
   }
+
+// Skills visible to this session, for CLI listings and diagnostics.
+listSkills(): SkillSummary[] {
+	return this.skillRegistry?.summaries() ?? [];
+}
+
+// Re-scans the skills directories and recomposes the system prompt so a
+// reload is visible without restarting the session.
+reloadSkills(): SkillSummary[] {
+	this.loadSkillRegistry();
+	if (this.agent) this.applySystemPrompt(true);
+	return this.listSkills();
+}
 
   // Swaps the active agent and applies its provider, model, tools and persona.
   // Returns false when the agent or its provider/model is unavailable.
@@ -858,6 +880,17 @@ class SessionManagerImpl implements SessionManager {
     this.agentsLoaded = true;
   }
 
+// Loads the skill registry from config.skills.dirs. Disabled skills leave it
+// undefined, which keeps the system prompt byte-identical to older builds.
+protected loadSkillRegistry() {
+	if (this.config.config.skills?.enabled === false) {
+		this.skillRegistry = undefined;
+		return;
+	}
+
+	this.skillRegistry = new SkillLoader(this.config.config.skills?.dirs).load();
+}
+
   protected ensureAgentRegistry() {
     if (!this.agentsLoaded) this.loadAgentRegistry();
   }
@@ -879,7 +912,10 @@ class SessionManagerImpl implements SessionManager {
     const agent = this.agent ?? builtInDefaultAgent();
     const message: History = {
       role: "system",
-      content: composeSystemPrompt(agent),
+content: composeSystemPrompt(
+	agent,
+	this.skillRegistry?.indexText(this.config.config.skills?.maxIndexChars),
+),
     };
 
     if (replace && this.history[0]?.role === "system") {
