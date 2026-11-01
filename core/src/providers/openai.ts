@@ -1,5 +1,6 @@
 import type {
   AssistantTurn,
+  ChatEventListener,
   ChatOptions,
   ChatResult,
   FinishReason,
@@ -129,11 +130,13 @@ export class OpenAiProvider extends BasicProvider implements Provider {
 
   protected async _handleStream(
     response: Response,
+    onEvent?: ChatEventListener,
   ): Promise<{ turn: AssistantTurn; usage?: TokenUsage }> {
     const reader = response.body!.getReader();
     const decoder = new TextDecoder("utf-8");
     let buffer = "";
     let fullAssistantResponse = "";
+    let fullReasoning = "";
     let usage: TokenUsage | undefined;
     let finishReason: string | null = null;
     const partialCalls = new Map<number, PartialToolCall>();
@@ -162,7 +165,18 @@ export class OpenAiProvider extends BasicProvider implements Provider {
             if (content) {
               fullAssistantResponse += content;
               if (this._onChunk) this._onChunk?.(content, done); // Notificas al exterior en tiempo real
+    onEvent?.({ type: "text", delta: content });
+
             }
+
+    // Reasoning is streamed by DeepSeek-style gateways and stays out of the
+    // answer text; it is emitted live and kept on the turn for the UI.
+    const reasoningDelta =
+    choice?.delta?.reasoning_content ?? choice?.delta?.reasoning;
+    if (reasoningDelta) {
+    fullReasoning += reasoningDelta;
+    onEvent?.({ type: "reasoning", delta: reasoningDelta });
+    }
 
             if (choice?.finish_reason) finishReason = choice.finish_reason;
 
@@ -217,12 +231,18 @@ export class OpenAiProvider extends BasicProvider implements Provider {
       finishReason: effectiveFinishReason,
     };
 
+if (fullReasoning) turn.reasoning = fullReasoning;
+
     if (this.normalizeTextToolCalls) {
       const normalized = normalizeToolMarkup(turn);
       if (normalized !== turn) {
         logger.debug("Normalized tool calls emitted as text markup");
         return { turn: normalized, usage };
       }
+    }
+
+    for (const call of turn.toolCalls) {
+    onEvent?.({ type: "toolCallEnd", id: call.id, name: call.name });
     }
 
     return { turn, usage };
@@ -260,7 +280,10 @@ export class OpenAiProvider extends BasicProvider implements Provider {
       },
       true,
     )) as Response;
-    const { turn, usage } = await this._handleStream(response);
+    const { turn, usage } = await this._handleStream(
+    response,
+    options.onEvent,
+  );
 
     this.lastContextTokens = usage
       ? usage.promptTokens + usage.completionTokens

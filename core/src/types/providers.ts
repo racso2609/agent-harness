@@ -77,12 +77,28 @@ export type FinishReason =
 
 export type AssistantTurn = {
   text: string;
+  // Reasoning produced before the answer, when the provider exposes it.
+  // Never sent back as conversation history.
+  reasoning?: string;
   toolCalls: ToolCall[];
   finishReason: FinishReason;
 };
 
+// Events emitted while a turn is being produced. The UI consumes them to
+// render live progress; consumers that only want the final result ignore them.
+export type ChatEvent =
+  | { type: "text"; delta: string }
+  | { type: "reasoning"; delta: string }
+  | { type: "toolCallStart"; id: string; name: string }
+  | { type: "toolCallEnd"; id: string; name: string };
+
+export type ChatEventListener = (event: ChatEvent) => void;
+
 export type ChatOptions = {
   tools?: ToolSpec[];
+  // Called as the turn is produced. Optional: omitting it preserves the
+  // existing non-streaming behaviour of chat().
+  onEvent?: ChatEventListener;
 };
 
 export type ChatResult = {

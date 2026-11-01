@@ -19,7 +19,9 @@ export interface OpenAIToolCallDelta {
 export interface OpenAIStreamDelta {
   role?: string;
   content?: string | null;
-  tool_calls?: OpenAIToolCallDelta[];
+  reasoning_content?: string | null;
+reasoning?: string | null;
+tool_calls?: OpenAIToolCallDelta[];
 }
 
 export interface OpenAIStreamChoice {

@@ -2,6 +2,7 @@ import type {
   ApprovalHandler,
   HarnessDeps,
   HarnessOptions,
+AskOptions,
   IHarness,
   SpawnOptions,
 } from "@/contract";
@@ -20,8 +21,8 @@ class Harness implements IHarness {
     return this.session.initialize(options);
   }
 
-  ask(prompt: string): Promise<AgentResponse> {
-    return this.session.ask(prompt);
+ask(prompt: string, options: AskOptions = {}): Promise<AgentResponse> {
+return this.session.ask(prompt, options.onEvent);
   }
 
   status() {

@@ -20,6 +20,7 @@ import { createToolRegistry, ToolContext, ToolRegistry } from "@/tools";
 import type { ApprovalDecision, ApprovalRequest } from "@/tools";
 import {
   AgentResponse,
+ChatEventListener,
   History,
   Provider,
   TokenUsage,
@@ -628,7 +629,7 @@ return this.spawnManager().on(listener);
   }
 
   // Classifies the prompt and dispatches it to text or image generation.
-  async ask(prompt: string) {
+  async ask(prompt: string, onEvent?: ChatEventListener) {
     if (!this.provider) throw new Error("Session not initialized");
 
     const action = await this.classifyAction(prompt);
@@ -636,7 +637,7 @@ return this.spawnManager().on(listener);
     const response =
       action === "imageGeneration"
         ? await this.provider.generateImage(prompt)
-        : await this.runAgentLoop(prompt);
+        : await this.runAgentLoop(prompt, onEvent);
 
     this.recordUsage(response);
     this.save();
@@ -646,7 +647,7 @@ return this.spawnManager().on(listener);
 
   // ReAct loop: LLM -> tool calls -> tool results -> repeat, capped by
   // tools.maxIterations so a confused model cannot spin forever.
-  protected async runAgentLoop(prompt: string): Promise<AgentResponse> {
+  protected async runAgentLoop(prompt: string, onEvent?: ChatEventListener): Promise<AgentResponse> {
     const provider = this.provider;
     if (!provider) throw new Error("Session not initialized");
 
@@ -668,7 +669,7 @@ return this.spawnManager().on(listener);
     let lastText = "";
 
     for (let iteration = 0; iteration < maxIterations; iteration++) {
-      const result = await provider.chat(this.history, { tools: specs });
+      const result = await provider.chat(this.history, { tools: specs, onEvent });
 
       this.addUsage(usage, result.usage);
       costUsd += result.costUsd ?? 0;

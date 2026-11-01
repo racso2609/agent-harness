@@ -150,10 +150,10 @@ Depends on: exponer `SpawnEvent` y `SpawnStatus` en el contrato público. [x]
   Done when: `SessionRecord` guarda los handles (o sus eventos) y `/resume` los reconstruye; la versión de `SessionStore` sube con su migración.
   Depends on: devolver estado consultable de los hijos.
 
-- [ ] **Emitir progreso del turno desde `ask()`**
-  `ask()` devuelve solo el `AgentResponse` final; el loop ReAct y el streaming no exponen nada intermedio, así que la UI no puede pintar tokens ni la tool en curso.
-  Done when: `ask()` acepta un `onEvent` opcional (`text`, `reasoning`, `toolCallStart`, `toolCallEnd`) y la suite actual pasa sin pasarlo.
-  Depends on: nada.
+- [x] **Emitir progreso del turno desde `ask()`**
+review: `ask()` devolvía solo el `AgentResponse` final y, aunque `OpenAiProvider` ya tenía un `_onChunk` en el constructor, era global del provider (no por llamada) y solo transportaba texto: no había forma de atribuir eventos a un turno ni de ver tool calls o razonamiento.
+hecho: `ChatEvent`/`ChatEventListener` en `types/providers.ts` (`text`, `reasoning`, `toolCallStart`, `toolCallEnd`). `_handleStream(response, onEvent?)` emite texto y razonamiento por delta y `toolCallEnd` por llamada; `chat()` reenvía `options.onEvent`. `AssistantTurn.reasoning` guarda el razonamiento, nunca vuelve al history. `ask(prompt, onEvent?)` y `runAgentLoop` lo propagan; `IHarness.ask(prompt, { onEvent })` vía `AskOptions`. El `_onChunk` del constructor se deja intacto (dos caminos en paralelo, documentado). 6 tests en `openai.spec.ts` (texto, `reasoning_content`, fallback `reasoning`, sin razonamiento, `toolCallEnd`, y que omitir `onEvent` no cambia nada). Build + 205 tests (core) + 49 (cli) + lint verdes.
+Bug encontrado por los tests: la captura de razonamiento había quedado dentro del `if (content)`, así que se perdía en chunks que solo traían razonamiento.
 
 - [ ] **Emitir salida viva de `shell` vía `ToolContext.onOutput`**
   Es el nivel 2 de §4.2: un `shell` largo no muestra nada hasta terminar.
@@ -168,7 +168,7 @@ Depends on: exponer `SpawnEvent` y `SpawnStatus` en el contrato público. [x]
 ### 9.1 orden sugerido
 1. [x] Contrato: `SpawnEvent`/`SpawnStatus` reexportados + `listSpawns()` ya expuesto en `IHarness`.
 2. [x] Listener de spawn en `IHarness`.
-3. [ ] `onEvent` en `ask()`.
+3. [x] `onEvent` en `ask()` + `reasoning` en el provider.
 4. [ ] Persistencia de handles + migración de `SessionStore`.
 5. [ ] `ToolContext.onOutput` (shell vivo).
 6. [ ] Resumen de cierre estructurado.

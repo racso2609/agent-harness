@@ -70,7 +70,10 @@ export interface IHarness {
   initialize(options?: HarnessOptions): Promise<void>;
 
   // Turno principal. `images` es dato de dominio; el CLI decide cómo pintarlo.
-  ask(prompt: string): Promise<AgentResponse>;
+  ask(prompt: string, options?: AskOptions): Promise<AgentResponse>;
+// AskOptions.onEvent recibe el progreso del turno mientras se produce:
+// { type: "text" | "reasoning", delta } y { type: "toolCallStart" | "toolCallEnd", id, name }.
+// Omitirlo mantiene el comportamiento bloqueante de siempre.
 
   // Snapshot de uso/coste/contexto y del agente/provider activos.
   status(): SessionStatus;

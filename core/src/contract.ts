@@ -9,7 +9,11 @@ SpawnStatus,
 } from "@/session/spawn";
 import type { SessionStore } from "@/session/SessionStore";
 import type { ApprovalDecision, ApprovalRequest } from "@/tools";
-import type { AgentResponse, Model } from "@/types/providers";
+import type {
+ChatEventListener,
+AgentResponse,
+Model,
+} from "@/types/providers";
 import type { SessionStatus, SessionSummary } from "@/types/session";
 
 // Structured logger handed to the harness. Compatible with pino call shapes:
@@ -51,6 +55,12 @@ export interface HarnessOptions {
   agent?: string;
 }
 
+export interface AskOptions {
+ // Receives progress as the turn is produced (text, reasoning, tool calls).
+ // Optional: omitting it keeps the existing blocking behaviour.
+ onEvent?: ChatEventListener;
+}
+
 export interface SpawnOptions {
   // Extra context prepended to the child's prompt.
   context?: string;
@@ -62,7 +72,7 @@ export interface IHarness {
   initialize(options?: HarnessOptions): Promise<void>;
 
   // Runs one turn. Images are domain data; the caller decides how to render.
-  ask(prompt: string): Promise<AgentResponse>;
+  ask(prompt: string, options?: AskOptions): Promise<AgentResponse>;
 
   // Snapshot of usage, cost, context and active agent/provider.
   status(): SessionStatus;

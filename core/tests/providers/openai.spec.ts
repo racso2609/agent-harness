@@ -517,6 +517,111 @@ describe("OpenAiProvider", () => {
     });
   });
 
+describe("chat events", () => {
+it("emits text deltas as they stream", async () => {
+await loadModels(provider, fetchMock);
+mockStreamOnce(fetchMock, [
+`data: {"choices":[{"delta":{"content":"hel"}}]}\n\n`,
+`data: {"choices":[{"delta":{"content":"lo"},"finish_reason":"stop"}]}\n\n`,
+"data: [DONE]\n\n",
+]);
+
+const events: Array<{ type: string; delta: string }> = [];
+await provider.chat([{ role: "user", content: "hi" }], {
+onEvent: (event) => {
+if (event.type === "text") events.push({ type: event.type, delta: event.delta });
+},
+});
+
+expect(events).toEqual([
+{ type: "text", delta: "hel" },
+{ type: "text", delta: "lo" },
+]);
+});
+
+it("captures reasoning_content and keeps it out of the answer text", async () => {
+await loadModels(provider, fetchMock);
+mockStreamOnce(fetchMock, [
+`data: {"choices":[{"delta":{"reasoning_content":"thinking"}}]}\n\n`,
+`data: {"choices":[{"delta":{"reasoning_content":" harder"}}]}\n\n`,
+`data: {"choices":[{"delta":{"content":"answer"},"finish_reason":"stop"}]}\n\n`,
+"data: [DONE]\n\n",
+]);
+
+const reasoning: string[] = [];
+const result = await provider.chat([{ role: "user", content: "hi" }], {
+onEvent: (event) => {
+if (event.type === "reasoning") reasoning.push(event.delta);
+},
+});
+
+expect(reasoning).toEqual(["thinking", " harder"]);
+expect(result.turn.text).toBe("answer");
+expect(result.turn.reasoning).toBe("thinking harder");
+});
+
+it("falls back to the reasoning field used by other gateways", async () => {
+await loadModels(provider, fetchMock);
+mockStreamOnce(fetchMock, [
+`data: {"choices":[{"delta":{"reasoning":"plan"}}]}\n\n`,
+`data: {"choices":[{"delta":{"content":"done"},"finish_reason":"stop"}]}\n\n`,
+"data: [DONE]\n\n",
+]);
+
+const result = await provider.chat([{ role: "user", content: "hi" }]);
+
+expect(result.turn.reasoning).toBe("plan");
+expect(result.turn.text).toBe("done");
+});
+
+it("omits reasoning on the turn when the provider sends none", async () => {
+await loadModels(provider, fetchMock);
+mockStreamOnce(fetchMock, [
+`data: {"choices":[{"delta":{"content":"plain"},"finish_reason":"stop"}]}\n\n`,
+"data: [DONE]\n\n",
+]);
+
+const result = await provider.chat([{ role: "user", content: "hi" }]);
+
+expect(result.turn.reasoning).toBeUndefined();
+expect("reasoning" in result.turn).toBe(false);
+});
+
+it("emits toolCallEnd once per tool call with the final id", async () => {
+await loadModels(provider, fetchMock);
+mockStreamOnce(fetchMock, [
+`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"readFile","arguments":"{}"}}]}}]}\n\n`,
+`data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}\n\n`,
+"data: [DONE]\n\n",
+]);
+
+const ends: string[] = [];
+await provider.chat([{ role: "user", content: "read" }], {
+onEvent: (event) => {
+if (event.type === "toolCallEnd") ends.push(`${event.id}:${event.name}`);
+},
+});
+
+expect(ends).toEqual(["call_1:readFile"]);
+});
+
+it("behaves exactly the same when onEvent is omitted", async () => {
+await loadModels(provider, fetchMock);
+mockStreamOnce(fetchMock, [
+`data: {"choices":[{"delta":{"reasoning_content":"r"}}]}\n\n`,
+`data: {"choices":[{"delta":{"content":"answer"},"finish_reason":"stop"}]}\n\n`,
+"data: [DONE]\n\n",
+]);
+
+const result = await provider.chat([{ role: "user", content: "hi" }]);
+
+expect(result.turn.text).toBe("answer");
+expect(result.turn.finishReason).toBe("stop");
+expect(result.turn.toolCalls).toEqual([]);
+});
+});
+
+
   describe("model aliasing", () => {
     it("matches models by name and by id", async () => {
       mockFetchOnce(
