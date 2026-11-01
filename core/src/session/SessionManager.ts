@@ -27,7 +27,7 @@ import {
 } from "@/types/session";
 import { generateSessionId } from "@/utils/session";
 import { logger } from "@/utils/logger";
-import { input, select } from "@/utils/stdin";
+import type { ApprovalHandler } from "@/contract";
 import { ClassifiedAction, classifyAction } from "./classifyAction";
 import {
   compactHistory,
@@ -96,19 +96,22 @@ interface SessionManager {
   load: (sessionId: string) => Promise<boolean>;
   // Lists persisted sessions, newest activity first.
   listSessions: () => SessionSummary[];
-  // Switches to a persisted session by id, unique id prefix or list index.
-  // Prompts interactively when no target is given.
-  changeSession: (target?: string) => Promise<boolean>;
+  // Resolves a full id, a unique id prefix or a 1-based list index.
+  resolveSession: (target: string) => string | undefined;
   // Persists the current session state to the store.
   save: () => void;
-  // Swaps the active provider. Prompts interactively when name is omitted.
-  changeProvider: (providerName?: string) => Promise<boolean>;
-  // Swaps the model of the active provider. Prompts when model is omitted.
-  changeModel: (model?: string) => Promise<boolean>;
+  // Lists the providers keyed in the config.
+  listProviders: () => string[];
+  // Swaps the active provider, keeping the current model when possible.
+  setProvider: (name: string) => Promise<boolean>;
+  // Swaps the model of the active provider.
+  setModel: (model: string) => boolean;
   // Lists the agents available from the agents directory.
   listAgents: () => AgentSummary[];
   // Swaps the active agent, its tools and its persona.
-  changeAgent: (agentId?: string) => Promise<boolean>;
+  setAgent: (agentId: string) => Promise<boolean>;
+  // Installs the handler used when the approval policy is "ask".
+  approveWith: (handler: ApprovalHandler) => void;
   // Launches a background child agent. Returns a handle immediately.
   spawn: (agentId: string, prompt: string, options?: SpawnOptions) => SpawnHandle;
   // Returns a snapshot of a background child, or undefined when unknown.
@@ -167,6 +170,8 @@ class SessionManagerImpl implements SessionManager {
   costUsd = 0;
   // Subjects the user chose to "always allow" for the rest of the session.
   protected alwaysAllowed = new Set<string>();
+  // Injected handler for interactive approvals. Undefined means deny.
+  protected approvalHandler?: ApprovalHandler;
   // Background child agents launched by this session. Created lazily.
   protected spawns?: SpawnManager;
 
@@ -279,45 +284,9 @@ class SessionManagerImpl implements SessionManager {
     }));
   }
 
-  // Switches to a stored session, persisting the current one first.
-  async changeSession(target?: string) {
-    if (!this.provider) throw new Error("Session not initialized");
-
-    const sessions = this.listSessions();
-    if (!sessions.length) {
-      logger.warn("No sessions available");
-      return false;
-    }
-
-    const id = target
-      ? this.resolveSessionId(target, sessions)
-      : await this.pickSession(sessions);
-
-    if (!id) {
-      logger.warn(`Unknown session: ${target}`);
-      return false;
-    }
-    if (id === this.sessionId) return true;
-
-    this.save();
-    const loaded = await this.load(id);
-    if (loaded) this.save();
-    return loaded;
-  }
-
-  // Prompts the user to pick one of the stored sessions.
-  protected async pickSession(sessions: SessionSummary[]) {
-    const labels = sessions.map((session, index) => {
-      const title = session.title ? ` — ${session.title}` : "";
-      return `${index + 1}) ${session.id}${title}`;
-    });
-    const choice = await select("Select the session:", labels);
-    const index = labels.indexOf(choice);
-    return index >= 0 ? sessions[index].id : undefined;
-  }
-
   // Accepts a full id, a unique id prefix or a 1-based list index.
-  protected resolveSessionId(target: string, sessions: SessionSummary[]) {
+  resolveSession(target: string) {
+    const sessions = this.listSessions();
     const value = target.trim();
     if (!value) return undefined;
 
@@ -364,17 +333,15 @@ class SessionManagerImpl implements SessionManager {
     this.store.save(record);
   }
 
+  // Lists the providers keyed in the config.
+  listProviders() {
+    return Object.keys(this.config.config.providers);
+  }
+
   // Replaces the active provider, keeping the current model when possible.
   // Returns false when the target provider or model is unavailable.
-  async changeProvider(providerName?: string) {
+  async setProvider(name: string) {
     if (!this.provider) throw new Error("Session not initialized");
-
-    const name =
-      providerName ??
-      (await select(
-        "Select the provider:",
-        Object.keys(this.config.config.providers),
-      ));
 
     const providerConfig = this.config.config.providers[name];
     if (!providerConfig) return false;
@@ -399,17 +366,10 @@ class SessionManagerImpl implements SessionManager {
 
   // Changes the model of the active provider and persists it to the config.
   // Returns false when the model is not offered by the provider.
-  async changeModel(model?: string) {
+  setModel(model: string) {
     if (!this.provider) throw new Error("Session not initialized");
 
-    const name =
-      model ??
-      (await select(
-        "Select the model:",
-        this.provider.listModels?.().map((m) => m.id) ?? [],
-      ));
-
-    if (!this.provider.setModel(name)) return false;
+    if (!this.provider.setModel(model)) return false;
 
     this.model = this.provider.getModel();
     this.config.config.model = this.model;
@@ -427,20 +387,13 @@ class SessionManagerImpl implements SessionManager {
 
   // Swaps the active agent and applies its provider, model, tools and persona.
   // Returns false when the agent or its provider/model is unavailable.
-  async changeAgent(agentId?: string) {
+  async setAgent(agentId: string) {
     if (!this.provider) throw new Error("Session not initialized");
     this.ensureAgentRegistry();
 
-    const id =
-      agentId ??
-      (await select(
-        "Select the agent:",
-        this.agentRegistry.list().map((agent) => agent.id),
-      ));
-
-    const agent = this.agentRegistry.get(id);
+    const agent = this.agentRegistry.get(agentId);
     if (!agent) {
-      logger.warn(`Unknown agent: ${id}`);
+      logger.warn(`Unknown agent: ${agentId}`);
       return false;
     }
 
@@ -528,6 +481,7 @@ class SessionManagerImpl implements SessionManager {
         const child = new SessionManagerImpl(this.config, this.store);
         child.parentId = sessionId;
         await child.initialize({ agent: agentId, store: this.store });
+        if (this.approvalHandler) child.approveWith(this.approvalHandler);
 
         if (signal.aborted) throw new Error("Spawn aborted");
 
@@ -712,27 +666,22 @@ class SessionManagerImpl implements SessionManager {
       return "allow";
     }
 
-    return this.promptApproval(request, key);
-  }
+    if (!this.approvalHandler) {
+      logger.warn("Approval required but no handler installed; denying");
+      return "deny";
+    }
 
-  // Asks the user once per subject and remembers an "always" answer.
-  protected async promptApproval(
-    request: ApprovalRequest,
-    key: string,
-  ): Promise<ApprovalDecision> {
-    const answer = (
-      await input(
-        `Allow ${request.tool} [${request.kind}] ${request.subject}? ` +
-          `[y/N/a=always] `,
-      )
-    ).trim();
-
-    if (/^a(lways)?$/i.test(answer)) {
+    const decision = await this.approvalHandler(request);
+    if (decision === "always") {
       this.alwaysAllowed.add(key);
       return "allow";
     }
+    return decision;
+  }
 
-    return /^y(es)?$/i.test(answer) ? "allow" : "deny";
+  // Installs the handler used when the approval policy is "ask".
+  approveWith(handler: ApprovalHandler) {
+    this.approvalHandler = handler;
   }
 
   protected preview(value: unknown) {
