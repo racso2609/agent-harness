@@ -5,13 +5,13 @@ repos:
       - id: trailing-whitespace
       - id: end-of-file-fixer
 
-  # backend
+  # core
   # TypeScript type check
   - repo: local
     hooks:
       - id: tsc
         name: TypeScript Build
-        entry: bash -c 'cd backend && exec pnpm build'
+        entry: bash -c 'cd core && exec pnpm build'
         language: system
         pass_filenames: false
 
@@ -20,7 +20,7 @@ repos:
     hooks:
       - id: eslint
         name: ESLint
-        entry: bash -c 'cd backend && exec pnpm lint'
+        entry: bash -c 'cd core && exec pnpm lint'
         language: system
         args: ["--fix"]
 
@@ -29,6 +29,6 @@ repos:
     hooks:
       - id: tests
         name: Run Tests
-        entry: bash -c 'cd backend && exec pnpm test'
+        entry: bash -c 'cd core && exec pnpm test'
         language: system
         pass_filenames: false

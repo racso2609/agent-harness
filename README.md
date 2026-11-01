@@ -106,7 +106,7 @@ Reglas de precedencia:
 - Sin archivos: agente `default` embebido, comportamiento previo intacto.
 
 En runtime: `/agent` lista los agentes disponibles y `/agent <id>` cambia el
-agente activo conservando la conversación. Ejemplos listos en `backend/agents/`.
+agente activo conservando la conversación. Ejemplos listos en `core/agents/`.
 
 ### `code-reviewer`
 
