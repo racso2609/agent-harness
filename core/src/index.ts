@@ -5,7 +5,11 @@ export {
   DEFAULT_PROVIDER_TYPE,
   SUPPORTED_PROVIDERS,
 } from "./configuration";
-export type { ProviderConfig, ProviderDetail } from "./configuration";
+export type {
+	ProviderConfig,
+	ProviderDetail,
+	SkillsConfig,
+} from "./configuration";
 export { SessionStore } from "./session/SessionStore";
 export { SessionManager } from "./session/SessionManager";
 
@@ -24,6 +28,7 @@ export type {
   AgentSummary,
 } from "./agents";
 export type { SessionRecord } from "./session/SessionStore";
+export type { Skill, SkillSummary } from "./skills/Skill";
 export type { SpawnHandle, SpawnStatus } from "./session/spawn";
 export type { ApprovalDecision, ApprovalRequest } from "./tools";
 export type {

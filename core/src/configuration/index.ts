@@ -1,109 +1,127 @@
 import fs from "node:fs";
 import path from "node:path";
-import { agentsHome, env, harnessHome } from "@/utils/env";
+import { agentsHome, env, harnessHome, skillsHome } from "@/utils/env";
 import { DEFAULT_AGENT_ID } from "@/agents/defaults";
 
 interface ProviderConfig {
-  // Backend that interprets url/apikey. Defaults to "openai" so configs
-  // written before instance ids existed keep working unchanged.
-  type?: string;
-  url: string;
-  apikey: string;
-  // Preferred model for this instance; used as the fallback when the active
-  // model does not exist on the target instance.
-  model?: string;
+	// Backend that interprets url/apikey. Defaults to "openai" so configs
+	// written before instance ids existed keep working unchanged.
+	type?: string;
+	url: string;
+	apikey: string;
+	// Preferred model for this instance; used as the fallback when the active
+	// model does not exist on the target instance.
+	model?: string;
 }
 
 // Provider entry as listed by Config, with its instance id resolved.
 interface ProviderDetail extends ProviderConfig {
-  id: string;
-  isDefault: boolean;
+	id: string;
+	isDefault: boolean;
 }
 
 interface ShellToolsConfig {
-  timeoutMs?: number;
-  maxOutputBytes?: number;
+	timeoutMs?: number;
+	maxOutputBytes?: number;
 }
 
 interface ToolsConfig {
-  enabled?: boolean;
-  maxIterations?: number;
-  approval?: "ask" | "auto" | "deny";
-  // Root directory where tools resolve relative paths.
-  workspace?: string;
-  // Hard cap applied to every tool output before it enters the history.
-  maxOutputBytes?: number;
-  // Extra glob-ish paths (workspace-relative) that writeFile must refuse.
-  writeDeny?: string[];
-  // Reinterpret tool calls emitted as plain text markup (DeepSeek-style).
-  normalizeTextToolCalls?: boolean;
-  shell?: ShellToolsConfig;
+	enabled?: boolean;
+	maxIterations?: number;
+	approval?: "ask" | "auto" | "deny";
+	// Root directory where tools resolve relative paths.
+	workspace?: string;
+	// Hard cap applied to every tool output before it enters the history.
+	maxOutputBytes?: number;
+	// Extra glob-ish paths (workspace-relative) that writeFile must refuse.
+	writeDeny?: string[];
+	// Reinterpret tool calls emitted as plain text markup (DeepSeek-style).
+	normalizeTextToolCalls?: boolean;
+	shell?: ShellToolsConfig;
 }
 
 interface AgentsConfig {
-  // Directory containing markdown agent definitions.
-  dir?: string;
-  // Agent used when no explicit one is requested.
-  default?: string;
+	// Directory containing markdown agent definitions.
+	dir?: string;
+	// Agent used when no explicit one is requested.
+	default?: string;
+}
+
+interface SkillsConfig {
+	// Master switch for the lazy skill registry and the use_skill tool.
+	enabled?: boolean;
+	// Directories scanned for SKILL.md or <id>.md. Earlier dirs win on clashes.
+	dirs?: string[];
+	// Cap applied to each description in the system prompt index.
+	maxIndexChars?: number;
+	// Cap applied to a skill body returned by use_skill.
+	maxBodyChars?: number;
+	// Skill ids loaded eagerly (reserved; unused by the MVP).
+	preload?: string[];
 }
 
 interface SessionsConfig {
-  // Master switch for spawning background child agents.
-  spawnEnabled?: boolean;
-  // Cap on concurrent child sessions a parent may run.
-  maxChildren?: number;
-  // Wall-clock budget for a child turn before it is abandoned.
-  childTimeoutMs?: number;
-  // Cap on the child result injected back into the parent history.
-  childResultMaxChars?: number;
+	// Master switch for spawning background child agents.
+	spawnEnabled?: boolean;
+	// Cap on concurrent child sessions a parent may run.
+	maxChildren?: number;
+	// Wall-clock budget for a child turn before it is abandoned.
+	childTimeoutMs?: number;
+	// Cap on the child result injected back into the parent history.
+	childResultMaxChars?: number;
 }
 
 interface HarnessConfig {
-  model?: string;
-  defaultProvider?: string;
-  compactThreshold?: number;
-  autoCompact?: boolean;
-  autoCompactThreshold?: number;
+	model?: string;
+	defaultProvider?: string;
+	compactThreshold?: number;
+	autoCompact?: boolean;
+	autoCompactThreshold?: number;
 
-  // Optional provider/model used only to classify prompts, so the cheap
-  // classification call never pollutes the main conversation history.
-  classificationProvider?: string;
-  classificationModel?: string;
+	// Optional provider/model used only to classify prompts, so the cheap
+	// classification call never pollutes the main conversation history.
+	classificationProvider?: string;
+	classificationModel?: string;
 
-  // Provider instances keyed by a free-form id (cheap, openrouter, work...).
-  providers: Record<string, ProviderConfig>;
-  tools?: ToolsConfig;
-  agents?: AgentsConfig;
-  sessions?: SessionsConfig;
+	// Provider instances keyed by a free-form id (cheap, openrouter, work...).
+	providers: Record<string, ProviderConfig>;
+	tools?: ToolsConfig;
+	agents?: AgentsConfig;
+	sessions?: SessionsConfig;
+	skills?: SkillsConfig;
 }
 
 const applyDefaults = (config: HarnessConfig): HarnessConfig => {
-  config.compactThreshold ??= 350;
-  config.autoCompact ??= true;
-  config.autoCompactThreshold ??= 60;
-  config.tools ??= {};
-  config.tools.enabled ??= true;
-  config.tools.maxIterations ??= 8;
-  config.tools.approval ??= "auto";
-  config.tools.maxOutputBytes ??= 32_768;
-  config.tools.normalizeTextToolCalls ??= true;
-  config.tools.shell ??= {};
-  config.tools.shell.timeoutMs ??= 30_000;
-  config.tools.shell.maxOutputBytes ??= 32_768;
-  config.agents ??= {};
-  config.agents.dir ??= agentsHome();
-  config.agents.default ??= DEFAULT_AGENT_ID;
-  config.sessions ??= {};
-  config.sessions.spawnEnabled ??= true;
-  config.sessions.maxChildren ??= 4;
-  config.sessions.childTimeoutMs ??= 300_000;
-  config.sessions.childResultMaxChars ??= 2000;
+	config.compactThreshold ??= 350;
+	config.autoCompact ??= true;
+	config.autoCompactThreshold ??= 60;
+	config.tools ??= {};
+	config.tools.enabled ??= true;
+	config.tools.maxIterations ??= 8;
+	config.tools.approval ??= "auto";
+	config.tools.maxOutputBytes ??= 32_768;
+	config.tools.normalizeTextToolCalls ??= true;
+	config.tools.shell ??= {};
+	config.tools.shell.timeoutMs ??= 30_000;
+	config.tools.shell.maxOutputBytes ??= 32_768;
+	config.agents ??= {};
+	config.agents.dir ??= agentsHome();
+	config.agents.default ??= DEFAULT_AGENT_ID;
+	config.sessions ??= {};
+	config.sessions.spawnEnabled ??= true;
+	config.sessions.maxChildren ??= 4;
+	config.sessions.childTimeoutMs ??= 300_000;
+	config.sessions.childResultMaxChars ??= 2000;
+	config.skills ??= {};
+	config.skills.enabled ??= true;
+	config.skills.dirs ??= [skillsHome()];
+	config.skills.maxIndexChars ??= 160;
+	config.skills.maxBodyChars ??= 16_000;
+	config.skills.preload ??= [];
 
-  return config;
+	return config;
 };
 
-// Backend types a provider entry may declare through its `type` field. This
-// is not a list of ids: any number of entries can share the same type.
 const SUPPORTED_PROVIDERS = ["openai"];
 
 const DEFAULT_PROVIDER_TYPE = "openai";
@@ -248,11 +266,12 @@ class Config {
 
 export { Config, DEFAULT_PROVIDER_TYPE, SUPPORTED_PROVIDERS };
 export type {
-  AgentsConfig,
-  HarnessConfig,
-  ProviderConfig,
-  ProviderDetail,
-  SessionsConfig,
-  ShellToolsConfig,
-  ToolsConfig,
+AgentsConfig,
+HarnessConfig,
+ProviderConfig,
+ProviderDetail,
+SessionsConfig,
+ShellToolsConfig,
+SkillsConfig,
+ToolsConfig,
 };
