@@ -1,15 +1,13 @@
 # TODO — CLI (racso-harness)
 
 ## Contexto
-El CLI hoy es síncrono por turno: `MainLoop.loop()` hace `await harness.ask(prompt)`
-y no pinta nada hasta tener la respuesta completa. El core ya tiene lo necesario
-para la parte difícil —`SpawnManager` con `SpawnStatus` (`running/done/error`) y
-eventos `started/settled`, y un mensaje `system` que `formatSpawnResult` inyecta
-en el padre cuando un hijo termina— pero el CLI no consume esos eventos.
+Dos renderers sobre un mismo contrato (`UiAdapter`/`UiEvent`), decidido en `P0`:
+`CliUiAdapter` (líneas, **default**) y `TuiUiAdapter` (ink, `--tui`). `MainLoop` no
+escribe a stdout: solo emite eventos, así que la lógica del turno es idéntica en ambos.
 
-Decidido: la UI será una **TUI de pantalla completa** inspirada en Antigravity CLI,
-Claude Code y opencode. Las tareas de `P1` están escritas para funcionar en el modo
-actual, pero se implementan dentro de esa TUI, así que `P0` va primero.
+Hecho hasta hoy: `P0`, `P1` y `P3` cerrados y el core (§9.1) completo. Quedan el contrato
+de retorno de los subagentes (`P2`), pintar los hijos persistidos al reanudar, la deuda
+del TUI (`P5`) y la instalación (`P4`).
 
 Formato de este archivo: ver la skill `todo-format`.
 
@@ -45,6 +43,16 @@ nota: el caso `working` usa texto plano, no spinner animado; un spinner necesita
 
 - [x] **Mostrar estado por subagente**
 hecho: cada hijo aparece con `agentId`, `spawnId`, tiempo transcurrido e icono (`◐` corriendo, `✓` done, `✗` error), y se marca al hacer `settled`; desaparece 5 s después (`progress.ts`).
+
+- [ ] **Pintar los hijos restaurados al reanudar una sesión**
+  El core ya persiste el histórico (`SessionRecord.spawns`, `SESSION_VERSION` 4) pero
+  `listSpawns()` solo devuelve los del proceso actual, así que tras `/resume` la franja
+  arranca vacía y el usuario pierde el rastro de qué hijos corrieron.
+  Done when: al reanudar, la franja muestra los hijos persistidos atenuados (sin tiempo
+  corriendo, con su `status` final) y un contador cuando son muchos, sin mezclarse con
+  los que estén vivos.
+  Depends on: persistencia de handles (`core/TODO.md` §9.1.4, ya hecho).
+
 
 ## P2 — Contrato de retorno de los subagentes
 
@@ -123,6 +131,34 @@ arrancar por primera vez (setup de config, seed de `agents/` y `skills/`).
 Done when: el README tiene una sección de instalación con el comando exacto, la
 versión de Node requerida y qué ficheros crea en `~/.racso-harness/`.
 Depends on: fijar un smoke test de instalación limpia.
+
+## P5 — Deuda conocida del TUI
+
+- [ ] **Probar la interacción real por teclado**
+  Los tests cubren la lógica pura (colapso, markdown, layout, tema) pero **nadie ha
+  probado las teclas**: `ctrl+r`, `ctrl+t`, `enter` sobre entrada vacía, y las flechas
+  del approval. Ink captura stdin y aquí no hay TTY interactivo.
+  Done when: un test monta `App` con stdin simulado y verifica al menos el approval y
+  los dos toggles; si ink no lo permite, se documenta como verificación manual.
+
+- [ ] **Portar el setup interactivo a la TUI**
+  Si `config.needsSetup()` es verdadero, `startSetup` corre **antes** de montar ink y
+  compite por stdin con el renderer. Riesgo latente en instalación nueva.
+  Done when: existe una instalación sin config que arranca con `--tui` sin conflicto de
+  stdin (o el setup se fuerza en modo líneas y se documenta).
+
+
+- [ ] **Truncar tablas es agresivo en terminales estrechas**
+  Con `MIN_COLUMN_WIDTH = 3` una tabla de cuatro columnas en 50 columnas deja celdas
+  de tres caracteres (`pro`, `mod`), legibles pero poco útiles. Falta decidir si se
+  colapsa a una lista vertical cuando el ancho no alcanza.
+  Done when: está escrito el umbral (p. ej. < 40 columnas → lista) y aplicado.
+
+- [ ] **Los tests de lógica pura no cubren el cableado al render**
+  Dos bugs del TUI salieron en prueba visual y no en tests: la captura de razonamiento
+  dentro de un `if (content)`, y el truncado de tablas calculado pero no aplicado al
+  render. Es el mismo tipo de error (lo que se calcula no es lo que se pinta).
+  Done when: al menos un test renderiza un componente con ink y compara la salida.
 
 ## Descartados
 

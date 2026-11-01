@@ -128,6 +128,7 @@
 - [ ] **`~/.racso-harness/agents/*.md` divergió del repo** (`coder` y `default` con `approval: auto` allí y `ask` en `core/agents/`, más diferencias de texto). `seed.ts` no pisa ficheros existentes, así que ambas copias hay que editarlas a mano — ya pasó con `use_skill`. Decidir si se sincroniza o se documenta el ritual.
 
 9. session reporting (lo que necesita la UI)
+ESTADO: **§9.1 cerrado** (6/6). Lo que queda es la superficie que consume el histórico desde el CLI, no core.
 Formato de esta sección: ver la skill `todo-format`. Las secciones 0–8 se dejan como están (histórico de decisiones).
 Contexto: el CLI va a una TUI de pantalla completa (ver `cli/TODO.md` §P0) que necesita saber *qué está corriendo ahora mismo* y *qué pasó*. Hoy `SpawnManager` emite `started`/`settled` in-memory y `SessionManager` inyecta el resultado al padre en el turno siguiente, pero no hay forma pública de reconstruir el estado ni de recibir eventos sin acoplarse a `SessionManagerImpl`.
 
