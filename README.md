@@ -25,7 +25,8 @@ Cuatro piezas y ya tienes un agente de verdad:
    sola tool: `shell`.
 4. **Context budget** — política de qué recortar/resumir cuando revientas la ventana.
 
-Todo lo demás (canales, cron, skills, MCP, memoria, subagentes) es encima de eso.
+Todo lo demás (canales, cron, MCP, memoria, subagentes) es encima de eso. Las
+skills ya están dentro: ver [Skills](#skills-recetas-en-markdown).
 
 ## Estructura del repositorio
 
@@ -68,7 +69,7 @@ Orden pensado para tener algo funcional cuanto antes y no perderse:
 5. **Registry genérico de tools** — schemas + validación de argumentos.
 6. **Un canal (Telegram)** por bus de eventos, desacoplado del loop.
 7. **Cron / recordatorios.**
-8. **Skills** (SKILL.md + discovery) y **MCP**.
+8. ~~**Skills** (SKILL.md + discovery)~~ ✅ hecho — ver [Skills](#skills-recetas-en-markdown); queda **MCP**.
 9. **Multi-proveedor** — openai-compat + anthropic messages.
 
 ## Dónde investigar
@@ -212,6 +213,89 @@ usage y coste.
   persistiendo antes la actual. Acepta el id completo, un prefijo único o el
   número de la lista. Sin argumento abre un selector interactivo.
 - Al arrancar: `--session <id>` (o `--resume`) retoma una sesión concreta.
+
+## Skills (recetas en markdown)
+
+Una *skill* es una receta reutilizable: un `SKILL.md` con instrucciones que el
+modelo carga **solo cuando la tarea encaja**. No se meten todas en el prompt:
+se indexan por nombre y el cuerpo se pide bajo demanda.
+
+### Formato
+
+```markdown
+---
+name: Deploy Checklist
+description: Cómo publicar un release sin romper nada.
+tags: [ops, release]
+---
+
+1. Corre los smoke tests en staging.
+2. Etiqueta el commit.
+3. ...
+```
+
+`:name` y `description` son obligatorios; `tags` es opcional. El **id** sale
+del nombre del directorio (o del fichero).
+
+### Dónde se buscan
+
+En `~/.racso-harness/skills` (override con `RACSO_HARNESS_SKILLS_LOCATION`),
+admitiendo dos layouts:
+
+```
+~/.racso-harness/skills/deploy/SKILL.md
+~/.racso-harness/skills/deploy.md
+```
+
+Se pueden añadir más directorios con `skills.dirs` en la config, con `skills`
+opcional (si no existe se usan los defaults). Gana el primer directorio en
+caso de ids repetidos; dentro de un mismo directorio gana `SKILL.md`.
+
+```json
+{
+  "skills": {
+    "enabled": true,
+    "dirs": ["/ruta/a/mis-skills"],
+    "maxIndexChars": 160,
+    "maxBodyChars": 16000
+  }
+}
+```
+
+### Cómo llega al modelo
+
+1. Al arrancar, el índice (`- <id> — <descripción>`, una línea por skill) se
+añade al final del system prompt, bajo `## Skills`. Sin skills, el system
+prompt es **idéntico** al de antes: no hay coste.
+2. El modelo llama a la tool `use_skill(id)` cuando la tarea encaja.
+3. Solo entonces el cuerpo entra en la conversación, como resultado de la
+tool. El system prompt nunca contiene bodies.
+
+### Allowlist de tools
+
+`use_skill` se ofrece **solo a los agentes que no declaran `tools:`**. Un
+agente con lista propia recibe exactamente esa lista, así que para darle
+skills se añade `use_skill` a su frontmatter. Es intencionado: la decisión
+queda escrita en el agente y no se mete nada por detrás. `senior-architect`,
+`code-reviewer` y `coder` ya la declaran.
+
+### Comandos
+
+- `/skills` — lista id, nombre, tags y descripción.
+- `/skill <id>` — imprime la skill directamente en la terminal, **sin llamar
+al modelo** y sin tocar el historial. Útil para depurar una definición.
+- `/skill reload` — re-escanea los directorios y refresca el system prompt
+sin reiniciar la sesión.
+
+### Límites
+
+- Una skill inválida (sin descripción o sin body) se avisa con un warning y se
+ignora; el arranque nunca falla por una skill rota.
+- `maxBodyChars` (16k por defecto) recorta bodies desmesurados; el recorte duro
+de 32k de las tools sigue aplicando por encima.
+- El índice crece con el número de skills: por eso cada descripción se recorta a
+`maxIndexChars`.
+
 
 ## Trampas conocidas (de picoclaw) — a evitar desde el principio
 

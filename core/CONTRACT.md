@@ -102,6 +102,12 @@ setProvider(name: string): Promise<boolean>;
   listAgents(): AgentSummary[];
   setAgent(agentId: string): Promise<boolean>;
 
+// --- skills ---
+// Skills cargadas en la sesion activa. Solo el indice: nunca el body.
+listSkills(): SkillSummary[];
+// Re-escanea config.skills.dirs y recompone el system prompt.
+reloadSkills(): SkillSummary[];
+
   // --- aprobaciones ---
   // Instala el handler que el CLI usa para preguntar (y/N/always).
   approveWith(handler: ApprovalHandler): void;
