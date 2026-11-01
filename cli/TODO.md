@@ -24,7 +24,9 @@ hecho: `src/ui/UiAdapter.ts` define `UiEvent` (status, notice, text, reasoning, 
 
 - [x] **Portar la pantalla base (historial + input + status bar)**
 hecho: `ui/tui/App.tsx` (dos paneles + caja de input con `useInput` + status bar + franja de hijos) y `ui/TuiUiAdapter.tsx`, que monta ink y re-renderiza por evento. Arranca con `--tui`; el modo líneas sigue siendo el default (`CliUiAdapter` implementa la misma interfaz).
-pendiente del prototipo: scroll real del historial (hoy muestra las últimas 40 líneas), menú de comandos `/` dentro del input, y approval interactivo — `promptApproval` **deniega** las operaciones con efectos secundarios porque ink es dueño de stdin; hay que resolverlo antes de usar `--tui` como modo diario.
+hecho (approval): `TuiUiAdapter.promptApproval` muestra la petición como pregunta seleccionable dentro del panel (`approval` en el estado) y resuelve la promesa al pulsar `y` (allow), `a` (always), `n`/`esc` (deny) o `←/→` + enter. El core ya aceptaba una promesa (`approvalHandler`), así que no hizo falta tocarlo; `always` sigue cacheándose en `SessionManager`. Una segunda petición mientras hay una en pantalla se **deniega** en vez de encolarse, para que el usuario siempre sepa qué está contestando. `close()` resuelve como `deny` cualquier approval abierta antes de desmontar.
+pendiente (approval): no hay test de interacción real (los tests fijan el estado que recibe `App`, no las teclas). Probar a mano: `/spawn` o una tool `shell` en `--tui` debe abrir la pregunta y bloquear el turno hasta responder.
+riesgo conocido: si `config.needsSetup()` es verdadero, `startSetup` corre **antes** de montar ink y compite por stdin con el renderer. Hoy no se dispara con una config existente, pero hay que decidir si el setup se pide en modo líneas aun con `--tui`, o se porta a la TUI.
 
 - [ ] **Definir el layout de progreso (franja de hijos + actividad)**
   Antigravity, Claude Code y opencode reservan espacio fijo para "qué está

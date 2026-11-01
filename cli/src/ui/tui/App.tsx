@@ -7,27 +7,85 @@ kind: "user" | "assistant" | "tool" | "notice" | "spawn";
 text: string;
 }
 
+// Pending approval shown as a selectable question instead of a prompt read
+// from stdin: ink owns stdin, so the answer is resolved from the key handler.
+export interface TuiApproval {
+tool: string;
+kind: string;
+subject: string;
+}
+
 export interface TuiState {
 lines: TuiLine[];
 status: UiStatus;
 activity?: string;
 spawns: Array<{ id: string; agent: string; status: string }>;
+approval?: TuiApproval;
 }
 
 interface AppProps {
 state: TuiState;
 onSubmit: (prompt: string) => void;
 onExit: () => void;
+onDecision: (decision: "allow" | "deny" | "always") => void;
 }
+
+const CHOICES = [
+{ key: "allow" as const, label: "allow once" },
+{ key: "always" as const, label: "always allow this" },
+{ key: "deny" as const, label: "deny" },
+];
 
 // Two panes: the conversation fills the top, the input and status bar are
 // pinned at the bottom. Rendering only reads state; the loop owns it.
-export const App = ({ state, onSubmit, onExit }: AppProps) => {
+export const App = ({ state, onSubmit, onExit, onDecision }: AppProps) => {
 const [draft, setDraft] = useState("");
+const [choice, setChoice] = useState(0);
+const approval = state.approval;
 
 useInput((input, key) => {
 if (key.ctrl && input === "c") {
 onExit();
+return;
+}
+
+// While an approval is pending, every keystroke belongs to the question.
+if (approval) {
+if (key.leftArrow || key.upArrow) {
+setChoice((current) => (current + CHOICES.length - 1) % CHOICES.length);
+return;
+}
+
+if (key.rightArrow || key.downArrow || key.tab) {
+setChoice((current) => (current + 1) % CHOICES.length);
+return;
+}
+
+if (key.return) {
+onDecision(CHOICES[choice]!.key);
+setChoice(0);
+return;
+}
+
+// Shortcuts: y = allow, a = always, n/esc = deny.
+if (input === "y") {
+onDecision("allow");
+setChoice(0);
+return;
+}
+
+if (input === "a") {
+onDecision("always");
+setChoice(0);
+return;
+}
+
+if (input === "n" || key.escape) {
+onDecision("deny");
+setChoice(0);
+return;
+}
+
 return;
 }
 
@@ -68,11 +126,33 @@ return (
 </Box>
 )}
 
+{approval ? (
+<Box flexDirection="column" borderStyle="round" paddingX={1}>
+<Text color="yellow">
+Allow {approval.tool} [{approval.kind}]
+</Text>
+<Text>{approval.subject}</Text>
+<Box marginTop={1}>
+{CHOICES.map((option, index) => (
+<Text
+key={option.key}
+color={index === choice ? "green" : undefined}
+inverse={index === choice}
+>
+{index === choice ? "› " : "  "}
+{option.label}
+</Text>
+))}
+</Box>
+<Text dimColor>[y] allow · [a] always · [n] deny · ←/→ + enter</Text>
+</Box>
+) : (
 <Box borderStyle="round" paddingX={1}>
 <Text color="green">{"> "}</Text>
 <Text>{draft}</Text>
 <Text dimColor>{state.activity ? ` ${state.activity}` : ""}</Text>
 </Box>
+)}
 
 <Box paddingX={1}>
 <Text dimColor>{statusLine(state.status)}</Text>
