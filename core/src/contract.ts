@@ -1,7 +1,7 @@
 import type { AgentSummary } from "@/agents";
 import type { SkillSummary } from "@/skills";
 import type { Config, ProviderConfig, ProviderDetail } from "@/configuration";
-import type { SpawnHandle } from "@/session/spawn";
+import type { SpawnEvent, SpawnHandle, SpawnStatus } from "@/session/spawn";
 import type { SessionStore } from "@/session/SessionStore";
 import type { ApprovalDecision, ApprovalRequest } from "@/tools";
 import type { AgentResponse, Model } from "@/types/providers";
@@ -116,4 +116,7 @@ export type {
   ApprovalRequest,
   ProviderConfig,
   ProviderDetail,
+SpawnEvent,
+SpawnHandle,
+SpawnStatus,
 };

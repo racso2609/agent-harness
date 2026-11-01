@@ -20,6 +20,7 @@ export type {
   IHarness,
   ILogger,
   LoggerSink,
+  SpawnEvent,
   SpawnOptions,
 } from "./contract";
 export type {
@@ -29,7 +30,7 @@ export type {
 } from "./agents";
 export type { SessionRecord } from "./session/SessionStore";
 export type { Skill, SkillSummary } from "./skills/Skill";
-export type { SpawnHandle, SpawnStatus } from "./session/spawn";
+export type { SpawnHandle, SpawnStatus } from "./contract";
 export type { ApprovalDecision, ApprovalRequest } from "./tools";
 export type {
   AgentResponse,

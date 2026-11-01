@@ -126,3 +126,51 @@
 - [ ] **limitación conocida de `SkillLoader`.** Solo lee `.md`; ignora ficheros ocultos; no sigue symlinks de directorio (`withFileTypes` los reporta como symlink, no como dir, así que se saltan). Si alguien organiza skills con symlinks no se cargan y no hay warn.
 - [ ] **orden de commits:** `ea4bcb3` (agentes declaran `use_skill`) va antes que `da747e9` (la tool existe). Durante ese hueco, un binario ya instalado loguea `Agent requested unknown tool: use_skill` al arrancar. Inofensivo, pero si se quiere historia limpia hay que reordenar con un rebase interactivo.
 - [ ] **`~/.racso-harness/agents/*.md` divergió del repo** (`coder` y `default` con `approval: auto` allí y `ask` en `core/agents/`, más diferencias de texto). `seed.ts` no pisa ficheros existentes, así que ambas copias hay que editarlas a mano — ya pasó con `use_skill`. Decidir si se sincroniza o se documenta el ritual.
+
+9. session reporting (lo que necesita la UI)
+Formato de esta sección: ver la skill `todo-format`. Las secciones 0–8 se dejan como están (histórico de decisiones).
+Contexto: el CLI va a una TUI de pantalla completa (ver `cli/TODO.md` §P0) que necesita saber *qué está corriendo ahora mismo* y *qué pasó*. Hoy `SpawnManager` emite `started`/`settled` in-memory y `SessionManager` inyecta el resultado al padre en el turno siguiente, pero no hay forma pública de reconstruir el estado ni de recibir eventos sin acoplarse a `SessionManagerImpl`.
+
+- [x] **Exponer `SpawnEvent` y `SpawnStatus` en el contrato público**
+review: `IHarness` ya exponía `spawn`/`pollSpawn`/`listSpawns`/`waitSpawn`/`collectSpawns` y `SpawnHandle` ya se importaba de `session/spawn.ts`; lo que faltaba era `SpawnEvent` y `SpawnStatus` fuera del módulo interno.
+hecho: `contract.ts` reexporta `SpawnEvent`/`SpawnHandle`/`SpawnStatus`, `index.ts` los publica desde `./contract` (ya no desde `./session/spawn`) y `tests/session/spawnContract.spec.ts` fija el shape de `started`/`settled`. Build + 195 tests (core) + 49 (cli) + lint verdes.
+
+- [ ] **Añadir un listener de spawn al `IHarness`**
+  Sin esto el CLI solo puede hacer polling; la UI en vivo necesita push.
+  Done when: `IHarness` expone `onSpawnEvent(listener)` (o equivalente) y hay test de `started` → `settled` a través del harness, no del `SpawnManager`.
+  Depends on: exponer `SpawnEvent` y `SpawnStatus` en el contrato público.
+
+- [ ] **Devolver estado consultable de los hijos**
+  `SessionManager.listSpawns()` existe, pero hay que confirmar que devuelve lo que la UI necesita: `agentId`, `status`, `startedAt`, `finishedAt` y un resumen del prompt.
+  Done when: un test fija exactamente ese shape y `listSpawns()` está en `IHarness`.
+  Depends on: añadir un listener de spawn al `IHarness`.
+
+- [ ] **Persistir eventos de spawn en la sesión**
+  Los eventos viven solo en memoria: al reabrir una sesión con `/resume` no hay rastro de qué hijos corrieron ni cómo terminaron.
+  Done when: `SessionRecord` guarda los handles (o sus eventos) y `/resume` los reconstruye; la versión de `SessionStore` sube con su migración.
+  Depends on: devolver estado consultable de los hijos.
+
+- [ ] **Emitir progreso del turno desde `ask()`**
+  `ask()` devuelve solo el `AgentResponse` final; el loop ReAct y el streaming no exponen nada intermedio, así que la UI no puede pintar tokens ni la tool en curso.
+  Done when: `ask()` acepta un `onEvent` opcional (`text`, `reasoning`, `toolCallStart`, `toolCallEnd`) y la suite actual pasa sin pasarlo.
+  Depends on: nada.
+
+- [ ] **Emitir salida viva de `shell` vía `ToolContext.onOutput`**
+  Es el nivel 2 de §4.2: un `shell` largo no muestra nada hasta terminar.
+  Done when: `ShellTool` llama `ctx.onOutput` con throttle (~100 ms) y el truncado sigue aplicando solo al resultado final.
+  Depends on: emitir progreso del turno desde `ask()`.
+
+- [ ] **Incluir un resumen de cierre en `AgentResponse`**
+  La UI debe decir qué pasó, qué falta y qué sigue sin parsear texto libre ni gastar un turno extra.
+  Done when: `AgentResponse` gana un campo estructurado opcional (`status`, `pending[]`, `next`) que `SessionManager` rellena y los providers ignoran si no lo producen.
+  Depends on: emitir progreso del turno desde `ask()`.
+
+### 9.1 orden sugerido
+1. [x] Contrato: `SpawnEvent`/`SpawnStatus` reexportados + `listSpawns()` ya expuesto en `IHarness`.
+2. [ ] Listener de spawn en `IHarness`.
+3. [ ] `onEvent` en `ask()`.
+4. [ ] Persistencia de handles + migración de `SessionStore`.
+5. [ ] `ToolContext.onOutput` (shell vivo).
+6. [ ] Resumen de cierre estructurado.
+
+Nota: los puntos 1–2 desbloquean `cli/TODO.md` §P1; el 3 desbloquea §P3.
