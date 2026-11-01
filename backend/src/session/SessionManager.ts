@@ -35,6 +35,7 @@ import {
   estimateHistoryTokens,
 } from "./history";
 import { SessionRecord, SessionStore } from "./SessionStore";
+import { SpawnHandle, SpawnManager } from "./spawn";
 
 // Options accepted by initialize/load to resume an existing session.
 export interface SessionOptions {
@@ -44,6 +45,12 @@ export interface SessionOptions {
   agent?: string;
   // Store used for persistence; defaults to a new SessionStore.
   store?: SessionStore;
+}
+
+// Options for spawning a background child agent.
+export interface SpawnOptions {
+  // Extra context prepended to the child's prompt.
+  context?: string;
 }
 
 // Registry mapping a provider name (as used in the config) to a factory
@@ -68,6 +75,10 @@ const applyProviderOptions = (
     config.config.tools?.normalizeTextToolCalls ?? true;
   return provider;
 };
+
+// Caps a string for injection into history, marking the elision.
+const truncateText = (text: string, max: number) =>
+  text.length > max ? `${text.slice(0, max)}…` : text;
 
 // Public contract of the session manager.
 // Concrete implementation is SessionManagerImpl below.
@@ -98,6 +109,16 @@ interface SessionManager {
   listAgents: () => AgentSummary[];
   // Swaps the active agent, its tools and its persona.
   changeAgent: (agentId?: string) => Promise<boolean>;
+  // Launches a background child agent. Returns a handle immediately.
+  spawn: (agentId: string, prompt: string, options?: SpawnOptions) => SpawnHandle;
+  // Returns a snapshot of a background child, or undefined when unknown.
+  pollSpawn: (spawnId: string) => SpawnHandle | undefined;
+  // Lists every background child spawned by this session.
+  listSpawns: () => SpawnHandle[];
+  // Waits for a background child to settle.
+  waitSpawn: (spawnId: string) => Promise<SpawnHandle | undefined>;
+  // Waits for every child (or the given ids) and returns their handles.
+  collectSpawns: (spawnIds?: string[]) => Promise<SpawnHandle[]>;
   // TODO: placeholder for history compaction.
   compactSession: () => Promise<boolean>;
   // Returns the current session usage, cost and context status.
@@ -138,12 +159,16 @@ class SessionManagerImpl implements SessionManager {
   tools: ToolRegistry;
   // Creation timestamp, preserved when resuming an existing session.
   createdAt: string;
+  // Parent session id when this session is a background-spawned child.
+  parentId?: string;
   // Accumulated token usage for this session.
   usage: SessionUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
   // Accumulated cost in USD for this session.
   costUsd = 0;
   // Subjects the user chose to "always allow" for the rest of the session.
   protected alwaysAllowed = new Set<string>();
+  // Background child agents launched by this session. Created lazily.
+  protected spawns?: SpawnManager;
 
   constructor(config = new Config(), store = new SessionStore()) {
     this.config = config;
@@ -224,6 +249,7 @@ class SessionManagerImpl implements SessionManager {
     this.id = record.id;
     this.sessionId = record.id;
     this.createdAt = record.createdAt;
+    this.parentId = record.parentId;
     this.provider = provider;
     this.providerName = record.provider;
     this.model = provider.getModel();
@@ -329,6 +355,7 @@ class SessionManagerImpl implements SessionManager {
       provider: this.providerName,
       model: this.model,
       agentId: this.agentId,
+      parentId: this.parentId,
       history: this.history,
       usage: this.usage,
       costUsd: this.costUsd,
@@ -452,6 +479,87 @@ class SessionManagerImpl implements SessionManager {
 
     this.save();
     return true;
+  }
+
+  // Launches a background child agent that runs its own isolated session and
+  // persists with parentId pointing back here. Returns a handle immediately;
+  // use pollSpawn/waitSpawn/collectSpawns to observe the result.
+  spawn(agentId: string, prompt: string, options: SpawnOptions = {}): SpawnHandle {
+    if (this.config.config.sessions?.spawnEnabled === false) {
+      throw new Error("Spawning is disabled (sessions.spawnEnabled = false)");
+    }
+
+    return this.spawnManager().spawn({
+      agentId,
+      sessionId: this.sessionId,
+      prompt,
+      context: options.context,
+    });
+  }
+
+  pollSpawn(spawnId: string) {
+    return this.spawns?.poll(spawnId);
+  }
+
+  listSpawns() {
+    return this.spawns?.list() ?? [];
+  }
+
+  waitSpawn(spawnId: string) {
+    if (!this.spawns) return Promise.resolve(undefined);
+    return this.spawns.wait(spawnId);
+  }
+
+  collectSpawns(spawnIds?: string[]) {
+    if (!this.spawns) return Promise.resolve([]);
+    return this.spawns.collect(spawnIds);
+  }
+
+  // Builds the spawn manager on first use. The runner spins up a fresh child
+  // SessionManager per spawn so history, usage and provider state stay
+  // isolated from the parent turn.
+  protected spawnManager(): SpawnManager {
+    if (this.spawns) return this.spawns;
+
+    this.spawns = new SpawnManager({
+      maxChildren: this.config.config.sessions?.maxChildren,
+      timeoutMs: this.config.config.sessions?.childTimeoutMs,
+      runner: async ({ sessionId, agentId, prompt, context, signal }) => {
+        const child = new SessionManagerImpl(this.config, this.store);
+        child.parentId = sessionId;
+        await child.initialize({ agent: agentId, store: this.store });
+
+        if (signal.aborted) throw new Error("Spawn aborted");
+
+        const fullPrompt = context ? `${context}\n\n${prompt}` : prompt;
+        return child.ask(fullPrompt);
+      },
+    });
+
+    // When a child settles, surface only its final answer to the parent as a
+    // system message so the next turn can take it into account. The full child
+    // history is never shared; the text is capped to avoid inflating context.
+    this.spawns.on((event) => {
+      if (event.type !== "settled") return;
+      this.history.push({
+        role: "system",
+        content: this.formatSpawnResult(event.handle),
+      });
+    });
+
+    return this.spawns;
+  }
+
+  // Builds the compact system message injected into the parent's history once
+  // a child finishes. Only the final (truncated) text is included.
+  protected formatSpawnResult(handle: SpawnHandle): string {
+    const max = this.config.config.sessions?.childResultMaxChars ?? 2000;
+    const header = `[spawn ${handle.spawnId} · ${handle.agentId} · ${handle.status}]`;
+
+    if (handle.status === "error") {
+      return `${header} ${truncateText(handle.error ?? "unknown error", max)}`;
+    }
+    return `${header}\n${truncateText(handle.result ?? "(no output)", max)}`;
   }
 
   // Compacts the session history using the configured threshold.

@@ -27,6 +27,16 @@ const makeContext = (): CommandContext => ({
     ]),
     changeSession: vi.fn(async () => true),
     compactSession: vi.fn(async () => true),
+    spawn: vi.fn((agentId: string, prompt: string) => ({
+      spawnId: "spawn-1",
+      sessionId: "session-1",
+      agentId,
+      prompt,
+      status: "running" as const,
+      startedAt: "2024-01-01T00:00:00.000Z",
+    })),
+    listSpawns: vi.fn(() => []),
+    waitSpawn: vi.fn(async () => undefined),
     status: vi.fn(() => ({
       sessionId: "session-1",
       usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
@@ -60,6 +70,9 @@ describe("CommandRepository", () => {
       "resume",
       "compact",
       "status",
+      "spawn",
+      "children",
+      "join",
     ]);
     expect(commands[0]).not.toHaveProperty("run");
   });
@@ -175,5 +188,95 @@ describe("CommandRepository", () => {
     expect(context.notify).toHaveBeenCalledWith(
       "Session not changed: missing",
     );
+  });
+
+  it("spawns a background agent from agent and prompt args", async () => {
+    const repository = new CommandRepository();
+    const context = makeContext();
+
+    await repository.run("/spawn coder write the docs", context);
+
+    expect(context.session.spawn).toHaveBeenCalledWith(
+      "coder",
+      "write the docs",
+    );
+    expect(context.notify).toHaveBeenCalledWith(
+      expect.stringContaining("Spawned spawn-1"),
+    );
+  });
+
+  it("explains spawn usage when arguments are missing", async () => {
+    const repository = new CommandRepository();
+    const context = makeContext();
+
+    await repository.run("/spawn coder", context);
+
+    expect(context.session.spawn).not.toHaveBeenCalled();
+    expect(context.notify).toHaveBeenCalledWith("Usage: /spawn <agent> <prompt>");
+  });
+
+  it("reports spawn failures from the session", async () => {
+    const repository = new CommandRepository();
+    const context = makeContext();
+    context.session.spawn = vi.fn(() => {
+      throw new Error("Spawning is disabled");
+    });
+
+    await repository.run("/spawn coder task", context);
+
+    expect(context.notify).toHaveBeenCalledWith(
+      "Spawn failed: Spawning is disabled",
+    );
+  });
+
+  it("lists spawned agents", async () => {
+    const repository = new CommandRepository();
+    const context = makeContext();
+    context.session.listSpawns = vi.fn(() => [
+      {
+        spawnId: "spawn-1",
+        sessionId: "session-1",
+        agentId: "coder",
+        prompt: "task",
+        status: "done" as const,
+        startedAt: "2024-01-01T00:00:00.000Z",
+        result: "all done",
+      },
+    ]);
+
+    await repository.run("/children", context);
+
+    expect(context.notify).toHaveBeenCalledWith(
+      expect.stringContaining("[DONE] spawn-1 (coder)"),
+    );
+  });
+
+  it("joins a spawned agent and shows its result", async () => {
+    const repository = new CommandRepository();
+    const context = makeContext();
+    context.session.waitSpawn = vi.fn(async () => ({
+      spawnId: "spawn-1",
+      sessionId: "session-1",
+      agentId: "coder",
+      prompt: "task",
+      status: "done" as const,
+      startedAt: "2024-01-01T00:00:00.000Z",
+      result: "the result",
+    }));
+
+    await repository.run("/join spawn-1", context);
+
+    expect(context.notify).toHaveBeenCalledWith(
+      expect.stringContaining("the result"),
+    );
+  });
+
+  it("reports unknown spawn ids on join", async () => {
+    const repository = new CommandRepository();
+    const context = makeContext();
+
+    await repository.run("/join nope", context);
+
+    expect(context.notify).toHaveBeenCalledWith("Unknown spawn: nope");
   });
 });

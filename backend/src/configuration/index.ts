@@ -36,6 +36,17 @@ interface AgentsConfig {
   default?: string;
 }
 
+interface SessionsConfig {
+  // Master switch for spawning background child agents.
+  spawnEnabled?: boolean;
+  // Cap on concurrent child sessions a parent may run.
+  maxChildren?: number;
+  // Wall-clock budget for a child turn before it is abandoned.
+  childTimeoutMs?: number;
+  // Cap on the child result injected back into the parent history.
+  childResultMaxChars?: number;
+}
+
 interface HarnessConfig {
   model?: string;
   defaultProvider?: string;
@@ -51,6 +62,7 @@ interface HarnessConfig {
   providers: Record<string, ProviderConfig>;
   tools?: ToolsConfig;
   agents?: AgentsConfig;
+  sessions?: SessionsConfig;
 }
 
 const applyDefaults = (config: HarnessConfig): HarnessConfig => {
@@ -69,6 +81,11 @@ const applyDefaults = (config: HarnessConfig): HarnessConfig => {
   config.agents ??= {};
   config.agents.dir ??= agentsHome();
   config.agents.default ??= DEFAULT_AGENT_ID;
+  config.sessions ??= {};
+  config.sessions.spawnEnabled ??= true;
+  config.sessions.maxChildren ??= 4;
+  config.sessions.childTimeoutMs ??= 300_000;
+  config.sessions.childResultMaxChars ??= 2000;
 
   return config;
 };
@@ -147,6 +164,7 @@ export type {
   AgentsConfig,
   HarnessConfig,
   ProviderConfig,
+  SessionsConfig,
   ShellToolsConfig,
   ToolsConfig,
 };

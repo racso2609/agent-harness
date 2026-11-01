@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Config } from "../../src/configuration";
 import { OpenAiProvider } from "../../src/providers/openai";
 import { SessionManager } from "../../src/session/SessionManager";
@@ -634,5 +634,125 @@ describe("SessionManager agent loop", () => {
     expect(provider.chat).toHaveBeenCalledTimes(2);
     expect(execute).toHaveBeenCalledTimes(2);
     expect(response.text).toBe("Stopped: maximum tool iterations reached");
+  });
+});
+
+describe("SessionManager spawn", () => {
+  const spawnConfig = {
+    autoCompact: false,
+    defaultProvider: "openai",
+    model: "model",
+    providers: { openai: { url: "https://api.example.com", apikey: "key" } },
+  };
+
+  // Stubs the provider the child builds through createProvider, avoiding any
+  // real network call. Returns a spy so callers can assert on the chat prompt.
+  const stubProvider = (text = "child answer") => {
+    vi.spyOn(OpenAiProvider.prototype, "initialize").mockResolvedValue();
+    vi.spyOn(OpenAiProvider.prototype, "setModel").mockReturnValue(true);
+    vi.spyOn(OpenAiProvider.prototype, "getModel").mockImplementation(
+      function (this: OpenAiProvider) {
+        return (this as unknown as { model?: string }).model ?? "model";
+      },
+    );
+    vi.spyOn(OpenAiProvider.prototype, "getContextWindow").mockReturnValue(1000);
+    const chat = vi
+      .spyOn(OpenAiProvider.prototype, "chat")
+      .mockResolvedValue(stopTurn(text));
+    return chat;
+  };
+
+  const makeSession = (overrides: Record<string, unknown> = {}) => {
+    const session = new SessionManager(
+      makeConfig({ ...spawnConfig, ...overrides }),
+      makeStore(),
+    );
+    session.provider = new OpenAiProvider("https://api.example.com", "key", "model");
+    session.providerName = "openai";
+    session.model = "model";
+    return session;
+  };
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("spawns an isolated child session and collects its result", async () => {
+    stubProvider("child answer");
+    const session = makeSession();
+
+    const handle = session.spawn("coder", "do the thing", {
+      context: "parent context",
+    });
+
+    expect(handle).toMatchObject({ agentId: "coder", status: "running" });
+
+    const settled = await session.waitSpawn(handle.spawnId);
+
+    expect(settled).toMatchObject({ status: "done", result: "child answer" });
+    expect(session.listSpawns()).toHaveLength(1);
+    expect(session.pollSpawn(handle.spawnId)?.status).toBe("done");
+  });
+
+  it("prepends the delegated context to the child prompt", async () => {
+    const chat = stubProvider("ok");
+    const session = makeSession();
+
+    const handle = session.spawn("coder", "the task", { context: "shared ctx" });
+    await session.waitSpawn(handle.spawnId);
+
+    const history = chat.mock.calls.at(-1)?.[0] ?? [];
+    expect(history).toContainEqual({
+      role: "user",
+      content: "shared ctx\n\nthe task",
+    });
+  });
+
+  it("injects the truncated child result into the parent history", async () => {
+    stubProvider("child answer");
+    const session = makeSession({ sessions: { childResultMaxChars: 5 } });
+
+    const handle = session.spawn("coder", "do the thing");
+    await session.waitSpawn(handle.spawnId);
+
+    const injected = session.history.find(
+      (message) =>
+        message.role === "system" &&
+        message.content.includes(`[spawn ${handle.spawnId}`),
+    );
+    expect(injected?.content).toContain("child");
+    expect(injected?.content).toContain("…");
+  });
+
+  it("injects a system message with error status when the child fails", async () => {
+    vi.spyOn(OpenAiProvider.prototype, "initialize").mockRejectedValue(
+      new Error("provider down"),
+    );
+    const session = makeSession();
+
+    const handle = session.spawn("coder", "do the thing");
+    await session.waitSpawn(handle.spawnId);
+
+    expect(session.history).toContainEqual(
+      expect.objectContaining({
+        role: "system",
+        content: expect.stringContaining(`[spawn ${handle.spawnId} · coder · error]`),
+      }),
+    );
+  });
+
+  it("rejects spawning when disabled by config", () => {
+    const session = makeSession({ sessions: { spawnEnabled: false } });
+
+    expect(() => session.spawn("coder", "x")).toThrow(/disabled/);
+  });
+
+  it("returns undefined/empty results when nothing was spawned", async () => {
+    const session = makeSession();
+
+    expect(session.pollSpawn("missing")).toBeUndefined();
+    expect(session.listSpawns()).toEqual([]);
+    await expect(session.waitSpawn("missing")).resolves.toBeUndefined();
+    await expect(session.collectSpawns()).resolves.toEqual([]);
   });
 });

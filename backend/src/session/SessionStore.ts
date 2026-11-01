@@ -19,6 +19,8 @@ export interface SessionRecord {
   model: string;
   // Agent definition used by the session.
   agentId?: string;
+  // Parent session id when this record is a background-spawned child.
+  parentId?: string;
   // Conversation history, restored into the provider on resume.
   history: History[];
   // Accumulated token usage for the session.

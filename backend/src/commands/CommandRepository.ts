@@ -1,5 +1,6 @@
 import type { AgentSummary } from "@/agents";
 import type { SessionStatus, SessionSummary } from "@/types/session";
+import type { SpawnHandle } from "@/session/spawn";
 import {
   formatSessionList,
   formatSessionStatus,
@@ -20,6 +21,9 @@ export interface CommandSession {
   changeSession: (target?: string) => Promise<boolean>;
   compactSession: () => Promise<boolean>;
   status: () => SessionStatus;
+  spawn: (agentId: string, prompt: string) => SpawnHandle;
+  listSpawns: () => SpawnHandle[];
+  waitSpawn: (spawnId: string) => Promise<SpawnHandle | undefined>;
 }
 
 export interface CommandContext {
@@ -132,7 +136,80 @@ const BUILT_IN_COMMANDS: CommandDefinition[] = [
     run: (context) =>
       context.notify(formatSessionStatus(context.session.status())),
   },
+  {
+    name: "spawn",
+    description: "Launch a background agent: /spawn <agent> <prompt>",
+    run: (context, args) => {
+      const [agent, ...rest] = args;
+      const prompt = rest.join(" ").trim();
+      if (!agent || !prompt) {
+        context.notify("Usage: /spawn <agent> <prompt>");
+        return;
+      }
+
+      try {
+        const handle = context.session.spawn(agent, prompt);
+        context.notify(
+          `Spawned ${handle.spawnId} (agent ${handle.agentId})`,
+        );
+      } catch (err) {
+        context.notify(
+          `Spawn failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    },
+  },
+  {
+    name: "children",
+    description: "List spawned background agents",
+    run: (context) => {
+      const spawns = context.session.listSpawns();
+      context.notify(formatSpawnList(spawns));
+    },
+  },
+  {
+    name: "join",
+    description: "Wait for a spawned agent and show its result",
+    run: async (context, args) => {
+      const [spawnId] = args;
+      if (!spawnId) {
+        context.notify("Usage: /join <spawnId>");
+        return;
+      }
+
+      const handle = await context.session.waitSpawn(spawnId);
+      if (!handle) {
+        context.notify(`Unknown spawn: ${spawnId}`);
+        return;
+      }
+
+      context.notify(formatSpawnResult(handle));
+    },
+  },
 ];
+
+const truncate = (text: string, max = 100) =>
+  text.length > max ? `${text.slice(0, max)}…` : text;
+
+const formatSpawnList = (spawns: SpawnHandle[]) => {
+  if (!spawns.length) return "No spawned agents";
+
+  return spawns
+    .map((spawn) => {
+      const label = spawn.status.toUpperCase();
+      const detail = spawn.status === "error" ? spawn.error : spawn.result;
+      const suffix = detail ? ` — ${truncate(detail)}` : "";
+      return `[${label}] ${spawn.spawnId} (${spawn.agentId})${suffix}`;
+    })
+    .join("\n");
+};
+
+const formatSpawnResult = (spawn: SpawnHandle) => {
+  if (spawn.status === "error") {
+    return `${spawn.spawnId} failed: ${spawn.error ?? "unknown error"}`;
+  }
+  return `${spawn.spawnId} ${spawn.status}:\n${spawn.result ?? "(no output)"}`;
+};
 
 class CommandRepository {
   protected commands: CommandDefinition[];
