@@ -24,6 +24,15 @@ export interface ToolContext {
   signal?: AbortSignal;
   // Gate for side effects. Returns the decision for the requested action.
   approve: (request: ApprovalRequest) => Promise<ApprovalDecision>;
+  // Launches a background child agent from the spawning session. Injected by
+  // the session manager; tools that cannot spawn leave it undefined.
+  spawn?: (agentId: string, prompt: string) => SpawnRequestResult;
+}
+
+// Outcome of a spawn request made through the tool context.
+export interface SpawnRequestResult {
+  spawnId: string;
+  agentId: string;
 }
 
 export interface Tool {

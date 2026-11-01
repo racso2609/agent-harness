@@ -3,6 +3,7 @@ import { logger } from "@/utils/logger";
 import { ListDirTool } from "./listDir";
 import { ReadFileTool } from "./readFile";
 import { ShellTool } from "./shell";
+import { SpawnTool } from "./spawn";
 import { ToolRegistry } from "./ToolRegistry";
 import { WriteFileTool } from "./writeFile";
 
@@ -22,6 +23,7 @@ export const createToolRegistry = (
     new ReadFileTool(),
     new WriteFileTool({ deny: tools?.writeDeny }),
     new ListDirTool(),
+    new SpawnTool(),
   ];
 
   if (allowedTools === undefined) {
@@ -45,6 +47,7 @@ export { ToolRegistry };
 export type {
   ApprovalDecision,
   ApprovalRequest,
+  SpawnRequestResult,
   Tool,
   ToolContext,
   ToolResult,

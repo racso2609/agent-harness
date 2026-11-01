@@ -685,6 +685,7 @@ class SessionManagerImpl implements SessionManager {
       cwd: this.config.config.tools?.workspace ?? process.cwd(),
       sessionId: this.sessionId,
       approve: (request) => this.approve(request),
+      spawn: (agentId, prompt) => this.spawn(agentId, prompt),
     };
   }
 
