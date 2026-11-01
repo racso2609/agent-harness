@@ -71,6 +71,32 @@ interface SessionsConfig {
 	childResultMaxChars?: number;
 }
 
+// One visual role. `color` is a colour name understood by the CLI; `dim`
+// lowers opacity.
+interface UiRoleStyle {
+color?: string;
+dim?: boolean;
+bold?: boolean;
+}
+
+// Per-role styling for the terminal UI. Roles left out keep the defaults.
+interface UiTheme {
+// The user's own message.
+user?: UiRoleStyle;
+// Model reasoning streamed before the answer.
+reasoning?: UiRoleStyle;
+// Tool name, arguments and live output.
+tool?: UiRoleStyle;
+// Final assistant answer.
+answer?: UiRoleStyle;
+// Notices, pending work and harness errors.
+notice?: UiRoleStyle;
+}
+
+interface UiConfig {
+theme?: UiTheme;
+}
+
 interface HarnessConfig {
 	model?: string;
 	defaultProvider?: string;
@@ -89,6 +115,7 @@ interface HarnessConfig {
 	agents?: AgentsConfig;
 	sessions?: SessionsConfig;
 	skills?: SkillsConfig;
+	ui?: UiConfig;
 }
 
 const applyDefaults = (config: HarnessConfig): HarnessConfig => {
@@ -118,6 +145,13 @@ const applyDefaults = (config: HarnessConfig): HarnessConfig => {
 	config.skills.maxIndexChars ??= 160;
 	config.skills.maxBodyChars ??= 16_000;
 	config.skills.preload ??= [];
+	config.ui ??= {};
+	config.ui.theme ??= {};
+	config.ui.theme.user ??= { color: "cyan" };
+	config.ui.theme.reasoning ??= { color: "gray", dim: true };
+	config.ui.theme.tool ??= { color: "yellow" };
+	config.ui.theme.answer ??= { bold: true };
+	config.ui.theme.notice ??= { color: "gray", dim: true };
 
 	return config;
 };
@@ -268,6 +302,9 @@ export { Config, DEFAULT_PROVIDER_TYPE, SUPPORTED_PROVIDERS };
 export type {
 AgentsConfig,
 HarnessConfig,
+UiConfig,
+UiRoleStyle,
+UiTheme,
 ProviderConfig,
 ProviderDetail,
 SessionsConfig,

@@ -69,19 +69,18 @@ hecho: cada hijo aparece con `agentId`, `spawnId`, tiempo transcurrido e icono (
 
 ## P3 — Información adicional en el UI
 
-- [ ] **Mostrar el razonamiento del modelo en streaming**
-  `Capabilities.reasoning` existe en los tipos, pero `harness.ask()` solo devuelve
-  un `AgentResponse` final: hoy es imposible pintar tokens intermedios.
-  Done when: la TUI pinta el razonamiento parcial (colapsado o atenuado) mientras
-  llega, y la respuesta final lo reemplaza.
-  Depends on: exponer streaming en la capa de providers (`core/TODO.md` §9).
+- [x] **Mostrar el razonamiento del modelo en streaming**
+hecho: el razonamiento ya llegaba por `ChatEvent` pero el adapter lo **descartaba** (solo ponía `activity: thinking`). Ahora se acumula en su propia entrada `reasoning`, en dim y con glifo `~ `.
+hecho (config): `core` gana `ui.theme` (`user`, `reasoning`, `tool`, `answer`, `notice`; cada rol con `color`, `dim`, `bold`) con defaults aplicados en `applyDefaults`. **Solo config, sin env**, por decisión explícita. `ui/tui/theme.ts#resolveTheme` fusiona rol por rol sobre los defaults.
 
-- [ ] **Mostrar la salida viva de `shell`**
-  Un `shell` de 30s no muestra nada hasta terminar, que es el mismo problema que
-  el razonamiento pero en la tool.
-  Done when: `ToolContext.onOutput` alimenta la vista de la tool con throttle y el
-  truncado sigue aplicando solo al resultado final.
-  Depends on: exponer streaming en la capa de providers.
+- [x] **Mostrar la salida viva de `shell`**
+hecho: `toolOutput` se acumula en la entrada `tool` (amarilla), y `toolStart` marca `working · <tool>` en el input.
+
+- [x] **Formatear el texto del stream en lugar de concatenar caracteres** — DECIDIDO: bloques incrementales
+problema: `appendToLast` concatenaba deltas en una línea, así que el markdown del modelo (`**`, `#`, fences) se veía literal mientras llegaba y solo se formateaba al final. Además **el texto final se descartaba en TUI**: `MainLoop` hacía `if (!this.isTui() && text)`, así que si el proveedor no mandaba deltas la respuesta no aparecía.
+solución: `ui/tui/markdown.ts#MarkdownStream` acumula el stream y separa **bloques cerrados** (párrafo, heading, lista, quote, regla, código con lenguaje) de la **cola abierta**. Los cerrados se pintan con su estilo final; la cola se muestra plana. Nada parpadea y el último bloque se estiliza en cuanto se cierra.
+hecho: `MainLoop` emite `answer` con el texto final autoritativo (`{ type: "answer", text }`), que reemplaza lo acumulado en TUI e imprime una línea en modo líneas. `App.tsx` renderiza por rol con glifo (`› ` usuario, `~ ` razonamiento, `⏵ ` tool, `· ` aviso, sin glifo la respuesta), así que se distinguen sin depender del color.
+bugs que encontraron los tests: (1) la última línea de un bloque abierto desaparecía si no acababa en `\n` — el caso normal de un stream real; (2) un fence sin cerrar nunca se convertía en bloque de código al terminar. Ambos corregidos y cubiertos en `tests/ui/markdown.spec.ts` (16 tests).
 
 ## Descartados
 

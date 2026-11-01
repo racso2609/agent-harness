@@ -71,6 +71,9 @@ this.writeChunk(event.chunk);
 break;
 case "toolEnd":
 break;
+case "answer":
+this.notify(event.text);
+break;
 case "turnStart":
 break;
 case "turnEnd":

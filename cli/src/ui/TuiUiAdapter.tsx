@@ -1,7 +1,9 @@
-import type { ApprovalDecision, ApprovalRequest, ILogger } from "@racso/core";
+import type { ApprovalDecision, ApprovalRequest, ILogger, UiTheme } from "@racso/core";
 import { createLogger } from "@racso/core";
 import { render } from "ink";
 import { App, type TuiApproval, type TuiLine, type TuiState } from "./tui/App";
+import { MarkdownStream } from "./tui/markdown";
+import { resolveTheme, type Theme } from "./tui/theme";
 import type { UiAdapter, UiEvent } from "./UiAdapter";
 
 const MAX_LINES = 400;
@@ -10,12 +12,24 @@ const MAX_LINES = 400;
 // It owns one Ink instance and re-renders on every state change; the loop
 // keeps calling render(event) exactly as it does with the line renderer.
 class TuiUiAdapter implements UiAdapter {
-protected state: TuiState = { lines: [], status: {}, spawns: [] };
+protected state: TuiState;
 protected instance?: ReturnType<typeof render>;
 protected onSubmit: (prompt: string) => void = () => {};
 protected onExit: () => void = () => {};
 // Resolver for the approval currently on screen, if any.
 protected pendingApproval: ((decision: ApprovalDecision) => void) | null = null;
+// Markdown accumulators for the two streamed roles. Kept out of the state so
+// keystrokes never re-parse what already arrived.
+protected streams: Partial<Record<"answer" | "reasoning", MarkdownStream>> = {};
+
+constructor(theme?: UiTheme) {
+this.state = {
+lines: [],
+status: {},
+spawns: [],
+theme: resolveTheme(theme),
+};
+}
 
 // Registers the callbacks the app needs and mounts Ink.
 start(options: {
@@ -25,6 +39,10 @@ onExit: () => void;
 this.onSubmit = options.onSubmit;
 this.onExit = options.onExit;
 this.mount();
+}
+
+protected get theme(): Theme {
+return this.state.theme;
 }
 
 protected element() {
@@ -58,8 +76,69 @@ this.mount();
 resolve?.(decision);
 }
 
-protected pushLine(kind: TuiLine["kind"], text: string) {
-const lines = [...this.state.lines, { kind, text }];
+protected pushLine(line: TuiLine) {
+const lines = [...this.state.lines, line];
+
+this.state = { ...this.state, lines: lines.slice(-MAX_LINES) };
+this.mount();
+}
+
+// Appends a delta to the streamed role. The markdown stream owns block
+// boundaries, so the same role keeps growing in one entry.
+protected appendStream(role: "answer" | "reasoning", delta: string) {
+const stream = (this.streams[role] ??= new MarkdownStream());
+const doc = stream.push(delta);
+
+this.replaceStreamEntry(role, doc);
+}
+
+// Closes the stream of a role, styling its final block.
+protected finishStream(role: "answer" | "reasoning") {
+const stream = this.streams[role];
+if (!stream) return;
+
+const doc = stream.finish();
+this.replaceStreamEntry(role, doc);
+this.streams[role] = undefined;
+}
+
+// Replaces the streamed answer of the current turn with the final text.
+protected replaceStreamWith(role: "answer" | "reasoning", text: string) {
+const stream = new MarkdownStream();
+stream.push(text);
+const doc = stream.finish();
+
+this.streams[role] = undefined;
+
+const lines = [...this.state.lines];
+const last = lines.at(-1);
+
+if (last && last.role === role) {
+lines[lines.length - 1] = { role, doc };
+} else {
+lines.push({ role, doc });
+}
+
+this.state = { ...this.state, lines: lines.slice(-MAX_LINES) };
+this.mount();
+}
+
+protected replaceStreamEntry(
+role: "answer" | "reasoning",
+doc: ReturnType<MarkdownStream["push"]>,
+) {
+const lines = [...this.state.lines];
+const last = lines.at(-1);
+
+const entry: TuiLine = { role, doc };
+
+// The streamed role occupies the last entry while it is being written; once
+// another role interrupts, a fresh entry is started.
+if (last && last.role === role) {
+lines[lines.length - 1] = entry;
+} else {
+lines.push(entry);
+}
 
 this.state = { ...this.state, lines: lines.slice(-MAX_LINES) };
 this.mount();
@@ -71,33 +150,44 @@ case "status":
 this.state = { ...this.state, status: event.status };
 break;
 case "notice":
-this.pushLine("notice", event.message);
+this.pushLine({ role: "notice", text: event.message });
 return;
 case "text":
-this.appendToLast("assistant", event.delta);
+this.appendStream("answer", event.delta);
+return;
+case "answer":
+// The final text is authoritative: replace whatever the stream produced
+// (it may have been empty or cut short).
+this.replaceStreamWith("answer", event.text);
 return;
 case "reasoning":
+this.appendStream("reasoning", event.delta);
 this.state = { ...this.state, activity: "thinking" };
 break;
 case "toolStart":
 // The input box reports what the turn is doing right now.
 this.state = { ...this.state, activity: `working · ${event.name}` };
-this.pushLine("tool", `→ ${event.name}`);
+this.pushLine({ role: "tool", text: `→ ${event.name}` });
 return;
 case "toolOutput":
-this.appendToLast("tool", event.chunk);
+this.appendToolOutput(event.chunk);
 return;
 case "toolEnd":
 this.state = { ...this.state, activity: "working" };
 break;
 case "turnStart":
-this.pushLine("user", event.prompt);
+this.pushLine({ role: "user", text: event.prompt });
 this.state = { ...this.state, activity: "working" };
 break;
 case "turnEnd":
+this.finishStream("answer");
+this.finishStream("reasoning");
 this.state = { ...this.state, activity: undefined };
 if (event.outcome && event.outcome.pending.length) {
-this.pushLine("notice", `pending: ${event.outcome.pending.join(", ")}`);
+this.pushLine({
+role: "notice",
+text: `pending: ${event.outcome.pending.join(", ")}`,
+});
 return;
 }
 break;
@@ -132,6 +222,7 @@ finishedAt: event.handle.finishedAt,
 };
 break;
 case "reset":
+this.streams = {};
 this.state = { ...this.state, lines: [] };
 break;
 }
@@ -139,32 +230,31 @@ break;
 this.mount();
 }
 
-// Appends to the last line of the given kind, so streamed deltas do not
-// create one line per chunk.
-protected appendToLast(kind: TuiLine["kind"], chunk: string) {
+// Live tool output: appended to the last tool entry so a chatty command does
+// not create one line per chunk.
+protected appendToolOutput(chunk: string) {
 const lines = [...this.state.lines];
 const last = lines.at(-1);
 
-if (last && last.kind === kind) {
-lines[lines.length - 1] = { kind, text: last.text + chunk };
+if (last && last.role === "tool") {
+lines[lines.length - 1] = { role: "tool", text: last.text + chunk };
 } else {
-lines.push({ kind, text: chunk });
+lines.push({ role: "tool", text: chunk });
 }
 
 this.state = { ...this.state, lines: lines.slice(-MAX_LINES) };
+this.mount();
 }
 
 logger(): ILogger {
 return createLogger((line) => {
-this.pushLine("notice", line);
+this.pushLine({ role: "notice", text: line });
 });
 }
 
 // Shows the request as a selectable question and waits for the keystroke.
 // Ink owns stdin, so the answer cannot come from a readline prompt.
 promptApproval(request: ApprovalRequest): Promise<ApprovalDecision> {
-// A second request while one is on screen: refuse rather than queue, so the
-// user always knows what they are answering.
 if (this.pendingApproval) return Promise.resolve("deny");
 
 const approval: TuiApproval = {
@@ -182,11 +272,10 @@ this.pendingApproval = resolve;
 }
 
 async renderImage(url: string) {
-this.pushLine("notice", `[image] ${url.slice(0, 32)}…`);
+this.pushLine({ role: "notice", text: `[image] ${url.slice(0, 32)}…` });
 }
 
 close() {
-// Answer any approval still on screen before tearing the UI down.
 this.resolveApproval("deny");
 this.instance?.unmount();
 }

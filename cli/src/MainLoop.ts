@@ -42,7 +42,9 @@ constructor(options: MainLoopOptions = {}) {
 this.config = options.config ?? new Config();
 this.flows = createFlows([...SUPPORTED_PROVIDERS]);
 this.commands = new CommandRepository();
-this.ui = options.tui ? new TuiUiAdapter() : new CliUiAdapter();
+this.ui = options.tui
+? new TuiUiAdapter(this.config.config.ui?.theme)
+: new CliUiAdapter();
 this.harness = createHarness({
 config: this.config,
 logger: uiLogger(this.ui),
@@ -146,10 +148,11 @@ for (const uiEvent of toUiEvents(event)) this.ui.render(uiEvent);
 },
 });
 
-// The line renderer prints the final answer as a notice; the TUI already
-// accumulated the streamed text.
-if (!this.isTui() && text) {
-this.ui.render({ type: "notice", message: text });
+// The final text is authoritative: the stream may have been empty (no
+// deltas) or cut short. The line renderer prints it as one notice; the TUI
+// replaces the accumulated answer with it.
+if (text) {
+this.ui.render({ type: "answer", text });
 }
 for (const image of images ?? []) {
 await this.ui.renderImage(image.url);

@@ -17,6 +17,8 @@ export type UiEvent =
 | { type: "notice"; message: string }
 | { type: "reasoning"; delta: string }
 | { type: "text"; delta: string }
+// The authoritative final answer, after streaming (or instead of it).
+| { type: "answer"; text: string }
 | { type: "toolStart"; id: string; name: string }
 | { type: "toolOutput"; id: string; name: string; chunk: string }
 | { type: "toolEnd"; id: string; name: string }

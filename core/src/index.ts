@@ -48,3 +48,4 @@ export type {
   SessionSummary,
   SessionUsage,
 } from "./types/session";
+export type { UiConfig, UiRoleStyle, UiTheme } from "./configuration";
