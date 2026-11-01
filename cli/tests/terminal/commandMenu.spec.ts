@@ -5,7 +5,7 @@ import {
   filterCommands,
   moveSelection,
   visibleCommands,
-} from "../../src/utils/commandMenu";
+} from "../../src/terminal/commandMenu";
 
 const commands: CommandOption[] = [
   { name: "help", aliases: ["?"], description: "List commands" },

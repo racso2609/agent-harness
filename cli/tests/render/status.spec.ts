@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import type { SessionStatus } from "../../src/types/session";
+import type { SessionStatus } from "@racso/core";
 import {
   formatCost,
   formatSessionStatus,
   formatTokens,
-} from "../../src/utils/status";
+} from "../../src/render/status";
 
 const status: SessionStatus = {
   sessionId: "abc123",

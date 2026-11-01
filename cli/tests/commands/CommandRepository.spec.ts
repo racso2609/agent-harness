@@ -6,14 +6,18 @@ import {
 } from "../../src/commands/CommandRepository";
 
 const makeContext = (): CommandContext => ({
-  session: {
-    changeProvider: vi.fn(async () => true),
-    changeModel: vi.fn(async () => true),
-    changeAgent: vi.fn(async () => true),
-    listAgents: vi.fn(() => [
-      { id: "default", name: "Default" },
-      { id: "reviewer", name: "Reviewer" },
-    ]),
+  harness: {
+    initialize: vi.fn(async () => {}),
+    ask: vi.fn(),
+    status: vi.fn(() => ({
+      sessionId: "session-1",
+      usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+      costUsd: 0,
+      contextTokens: 0,
+      contextUsage: 0,
+      autoCompact: true,
+      autoCompactThreshold: 80,
+    })),
     listSessions: vi.fn(() => [
       {
         id: "session-1",
@@ -25,8 +29,19 @@ const makeContext = (): CommandContext => ({
         title: "hello",
       },
     ]),
-    changeSession: vi.fn(async () => true),
-    compactSession: vi.fn(async () => true),
+    resolveSession: vi.fn(() => "session-1"),
+    loadSession: vi.fn(async () => true),
+    save: vi.fn(),
+    listProviders: vi.fn(() => ["openai"]),
+    setProvider: vi.fn(async () => true),
+    listModels: vi.fn(() => []),
+    setModel: vi.fn(() => true),
+    listAgents: vi.fn(() => [
+      { id: "default", name: "Default" },
+      { id: "reviewer", name: "Reviewer" },
+    ]),
+    setAgent: vi.fn(async () => true),
+    approveWith: vi.fn(),
     spawn: vi.fn((agentId: string, prompt: string) => ({
       spawnId: "spawn-1",
       sessionId: "session-1",
@@ -35,17 +50,18 @@ const makeContext = (): CommandContext => ({
       status: "running" as const,
       startedAt: "2024-01-01T00:00:00.000Z",
     })),
+    pollSpawn: vi.fn(() => undefined),
     listSpawns: vi.fn(() => []),
     waitSpawn: vi.fn(async () => undefined),
-    status: vi.fn(() => ({
-      sessionId: "session-1",
-      usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
-      costUsd: 0,
-      contextTokens: 0,
-      contextUsage: 0,
-      autoCompact: true,
-      autoCompactThreshold: 80,
-    })),
+    collectSpawns: vi.fn(async () => []),
+    compactSession: vi.fn(async () => true),
+    shutdown: vi.fn(),
+  } as unknown as CommandContext["harness"],
+  flows: {
+    changeProvider: vi.fn(async () => true),
+    changeModel: vi.fn(async () => true),
+    changeAgent: vi.fn(async () => true),
+    changeSession: vi.fn(async () => true),
   },
   exit: vi.fn(),
   clear: vi.fn(),
@@ -136,7 +152,7 @@ describe("CommandRepository", () => {
   it("reports failed model changes", async () => {
     const repository = new CommandRepository();
     const context = makeContext();
-    context.session.changeModel = vi.fn(async () => false);
+    context.flows.changeModel = vi.fn(async () => false);
 
     await repository.run("/model", context);
 
@@ -160,7 +176,7 @@ describe("CommandRepository", () => {
 
     await repository.run("/sessions", context);
 
-    expect(context.session.listSessions).toHaveBeenCalledOnce();
+    expect(context.harness.listSessions).toHaveBeenCalledOnce();
     expect(context.notify).toHaveBeenCalledWith(
       expect.stringContaining("* 1) session-1 — hello"),
     );
@@ -172,7 +188,10 @@ describe("CommandRepository", () => {
 
     await repository.run("/resume 1", context);
 
-    expect(context.session.changeSession).toHaveBeenCalledWith("1");
+    expect(context.flows.changeSession).toHaveBeenCalledWith(
+      context.harness,
+      "1",
+    );
     expect(context.notify).toHaveBeenCalledWith(
       expect.stringContaining("Session resumed"),
     );
@@ -181,7 +200,7 @@ describe("CommandRepository", () => {
   it("reports failed session switches", async () => {
     const repository = new CommandRepository();
     const context = makeContext();
-    context.session.changeSession = vi.fn(async () => false);
+    context.flows.changeSession = vi.fn(async () => false);
 
     await repository.run("/resume missing", context);
 
@@ -196,7 +215,7 @@ describe("CommandRepository", () => {
 
     await repository.run("/spawn coder write the docs", context);
 
-    expect(context.session.spawn).toHaveBeenCalledWith(
+    expect(context.harness.spawn).toHaveBeenCalledWith(
       "coder",
       "write the docs",
     );
@@ -211,14 +230,14 @@ describe("CommandRepository", () => {
 
     await repository.run("/spawn coder", context);
 
-    expect(context.session.spawn).not.toHaveBeenCalled();
+    expect(context.harness.spawn).not.toHaveBeenCalled();
     expect(context.notify).toHaveBeenCalledWith("Usage: /spawn <agent> <prompt>");
   });
 
   it("reports spawn failures from the session", async () => {
     const repository = new CommandRepository();
     const context = makeContext();
-    context.session.spawn = vi.fn(() => {
+    context.harness.spawn = vi.fn(() => {
       throw new Error("Spawning is disabled");
     });
 
@@ -232,7 +251,7 @@ describe("CommandRepository", () => {
   it("lists spawned agents", async () => {
     const repository = new CommandRepository();
     const context = makeContext();
-    context.session.listSpawns = vi.fn(() => [
+    context.harness.listSpawns = vi.fn(() => [
       {
         spawnId: "spawn-1",
         sessionId: "session-1",
@@ -254,7 +273,7 @@ describe("CommandRepository", () => {
   it("joins a spawned agent and shows its result", async () => {
     const repository = new CommandRepository();
     const context = makeContext();
-    context.session.waitSpawn = vi.fn(async () => ({
+    context.harness.waitSpawn = vi.fn(async () => ({
       spawnId: "spawn-1",
       sessionId: "session-1",
       agentId: "coder",
