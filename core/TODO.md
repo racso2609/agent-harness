@@ -175,3 +175,86 @@ Nota: hoy lo rellena `runAgentLoop`; el camino de `generateImage` no lo emite (n
 6. [x] Resumen de cierre estructurado.
 
 Nota: los puntos 1–2 desbloquean `cli/TODO.md` §P1; el 3 desbloquea §P3.
+
+10. gateway persistente (cronjobs + webhooks)
+Formato de esta sección: ver la skill `todo-format`. Las secciones 0–9 se dejan como están.
+Contexto: hoy `createHarness()` vive dentro del proceso del CLI: el core no puede
+correr nada sin una terminal abierta. Un gateway es un proceso `@racso/core` de
+larga vida que expone `spawn` por HTTP y dispara trabajo por calendario o por
+evento entrante. Reutiliza lo que ya existe: `SpawnManager` (concurrencia, timeout,
+eventos `started`/`settled`) y `SessionStore` (hijos persistidos con `parentId`).
+Bloquea: nada del CLI actual; `cli/TODO.md` §P4 (publicación) es requisito previo
+para que un gateway instalable tenga sentido.
+
+- [ ] **Diseñar el contrato del gateway**
+Sin contrato, cada pieza (HTTP, scheduler, webhooks) inventa su propio vocabulario
+y el core se contamina de detalles de transporte.
+Done when: un documento en `core/GATEWAY.md` fija las operaciones (`spawn`,
+`status`, `collect`, `cancel`), el sobre de error y qué es sesión de gateway frente
+a sesión de usuario, aprobado antes de escribir código.
+Depends on: nada.
+
+- [ ] **Definir el almacenamiento de trabajos**
+Un cronjob o un webhook no puede vivir en memoria: si el proceso se cae, la
+definición y las ejecuciones pendientes deben sobrevivir.
+Done when: está decidido y escrito si son ficheros JSON junto a `SessionStore` o
+una base (sqlite), con el motivo, y `SessionStore` sigue siendo la única pieza que
+toca disco para sesiones.
+Depends on: diseñar el contrato del gateway.
+
+- [ ] **Añadir el bloque `gateway` a `Config`**
+El gateway necesita puerto, token y límites como configuración, no como constantes.
+Done when: `HarnessConfig.gateway` existe con `enabled` (default `false`), `host`,
+`port`, `token` y `maxConcurrentJobs`, aplicado en `applyDefaults` y validado en
+`validateConfig()`.
+Depends on: diseñar el contrato del gateway.
+
+- [ ] **Exponer un servidor HTTP con `spawn` y `status`**
+Es la única forma de lanzar trabajo sin una terminal, y hoy `IHarness.spawn()` ya
+resuelve el caso de uso puertas adentro.
+Done when: un `POST` a `/spawn` devuelve un `spawnId` y un `GET /spawn/:id`
+devuelve el `SpawnHandle` de `listSpawns()`, cubierto por tests con `fetch` sobre
+un puerto efímero.
+Depends on: añadir el bloque `gateway` a `Config`.
+
+- [ ] **Proteger el gateway con token**
+Un puerto abierto que ejecuta tools (`shell`) sin autenticación es ejecución
+remota de código en la máquina del usuario.
+Done when: toda ruta salvo `/health` exige el token de `config.gateway.token` y
+una petición sin él devuelve `401`; testeado en ambas direcciones.
+Depends on: exponer un servidor HTTP con `spawn` y `status`.
+
+- [ ] **Ejecutar cronjobs programados**
+Es la mitad del objetivo del gateway: trabajo recurrente sin usuario delante.
+Done when: un trabajo con expresión cron registrado en el almacenamiento se
+ejecuta solo en el intervalo esperado (test con reloj falso) y su resultado queda
+persistido como hijo de la sesión dueña.
+Depends on: definir el almacenamiento de trabajos.
+
+- [ ] **Recibir webhooks como disparadores**
+La otra mitad: reaccionar a un evento externo (un push, un mensaje) sin polling.
+Done when: un `POST` a `/webhooks/:id` con el token dispara el `spawn` asociado y
+devuelve `202` con el `spawnId`; un `id` desconocido devuelve `404`.
+Depends on: proteger el gateway con token.
+
+- [ ] **Persistir el estado de los trabajos entre reinicios**
+Un cronjob que se salta la ejecución perdida al reiniciar rompe la promesa de
+"corre siempre", que es la razón de tener un proceso de larga vida.
+Done when: matar el gateway a mitad de un trabajo y volver a arrancarlo restaura
+las programaciones y deja el trabajo interrumpido marcado como `error` en el
+histórico, sin duplicar ejecuciones.
+Depends on: ejecutar cronjobs programados.
+
+- [ ] **Documentar el gateway en `CONTRACT.md`**
+`CONTRACT.md` es la fuente de verdad del SDK; un modo de ejecución nuevo que no
+está ahí no existe para quien integra.
+Done when: `CONTRACT.md` describe cómo arrancar el gateway, qué rutas expone y qué
+API pública nueva añade (`createGateway(...)` o equivalente).
+Depends on: recibir webhooks como disparadores.
+
+### 10.1 orden sugerido
+1. Contrato (`GATEWAY.md`) — sin él las otras piezas divergen.
+2. Almacenamiento de trabajos + bloque `gateway` en `Config`.
+3. Servidor HTTP (`spawn`/`status`) + token.
+4. Cronjobs + webhooks.
+5. Persistencia entre reinicios y documentación en `CONTRACT.md`.

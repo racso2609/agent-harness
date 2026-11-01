@@ -89,6 +89,41 @@ atajos: `ctrl+r` razonamiento, `ctrl+t` tools (globales, `onToggleAll`: si algo 
 hecho: `ui/tui/collapse.ts` (puro: `estimateLines`, `tail`, `collapse`), 11 tests en `tests/ui/collapse.spec.ts`. `App.tsx` aplica la ventana a `reasoning` y `tool`; `TuiUiAdapter` guarda el set `expanded` por índice y lo **resetea al empezar cada turno**, para que el transcript no se llene de entradas abiertas de turnos anteriores.
 pendiente: el corte se calcula con `width: Infinity` (una línea lógica = una visual). Con líneas muy largas la ventana de 6 mostrará menos de lo esperado; pasa a `useStdout().stdout.columns` cuando importe.
 
+## P4 — Instalación y distribución
+
+Contexto: los dos paquetes están en el repo y se usan sólo desde el workspace
+(`@racso/cli` depende de `@racso/core` con `workspace:*`), así que instalar hoy
+exige clonar y construir. Publicar es requisito para lo de `core/TODO.md` §10.
+
+- [ ] **Publicar `@racso/core` en el registry**
+Hoy `@racso/core` no tiene ni versión publicada ni `.npmignore`, así que nada
+externo puede depender de él.
+Done when: `npm view @racso/core version` devuelve una versión y una instalación
+limpia en directorio temporal importa `createHarness` desde `@racso/core`.
+Depends on: nada.
+
+- [ ] **Publicar `@racso/cli` con su binario**
+`cli/package.json` tiene `private: true` y `@racso/core` como `workspace:*`, así
+que el tarball no es instalable fuera del monorepo.
+Done when: `npm pack` en `cli/` produce un tarball cuyo `bin.racso-harness`
+resuelve `dist/main.js`, y `private` es `false` con `@racso/core` como versión
+real, no `workspace:*`.
+Depends on: publicar `@racso/core`.
+
+- [ ] **Fijar un smoke test de instalación limpia**
+Publicar sin probar el artefacto deja los fallos de empaquetado (alias `@/`,
+assets, `dist` incompleto) para el usuario final.
+Done when: un script del repo crea un directorio temporal, instala el tarball y
+ejecuta `racso-harness --version` (y arranca el CLI) en CI, en verde.
+Depends on: publicar `@racso/cli` con su binario.
+
+- [ ] **Documentar la instalación en el README**
+El README explica el diseño pero no cómo se instala ni qué hace el binario al
+arrancar por primera vez (setup de config, seed de `agents/` y `skills/`).
+Done when: el README tiene una sección de instalación con el comando exacto, la
+versión de Node requerida y qué ficheros crea en `~/.racso-harness/`.
+Depends on: fijar un smoke test de instalación limpia.
+
 ## Descartados
 
 - **"add more info on the ui"** — sin objeto: no dice qué información ni para qué
@@ -111,3 +146,9 @@ pendiente: el corte se calcula con `width: Infinity` (una línea lógica = una v
   resuelven el mismo problema con layouts distintos (panel lateral, estado inline,
   modo de pantalla completa). Para cerrarla hay que listar 3–4 elementos concretos
   a imitar y descartar lo que no encaje antes de portar la pantalla base.
+- **¿Vale la pena usar el gateway desde el CLI?** Hoy el CLI habla `@racso/core`
+en proceso, así que meter un gateway añadiría un salto de red y un servicio que
+mantener sin resolver ningún problema actual (mono-usuario, una sesión a la vez).
+Sólo se reabre si el gateway existe (`core/TODO.md` §10) y aparece un caso real
+—varios terminales contra las mismas sesiones, o correr el CLI en otra máquina—.
+Para cerrarla hay que decidir qué se gana frente a ejecutar el core in-process.
