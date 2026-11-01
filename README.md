@@ -27,6 +27,35 @@ Cuatro piezas y ya tienes un agente de verdad:
 
 Todo lo demás (canales, cron, skills, MCP, memoria, subagentes) es encima de eso.
 
+## Estructura del repositorio
+
+Monorepo pnpm con dos workspaces hermanos:
+
+- **`core/`** (`@racso/core`) — el dominio como **SDK sin interacción**. Expone
+  `createHarness(deps): IHarness`. No lee stdin, no pinta prompts, no imprime
+  imágenes: logger, aprobaciones y render se inyectan. El contrato completo está
+  en [`core/CONTRACT.md`](core/CONTRACT.md).
+- **`cli/`** (`@racso/cli`) — el cliente de terminal. Es dueño del `MainLoop`,
+  los slash commands, los flujos interactivos (elegir provider/modelo/agente/
+  sesión, setup, aprobaciones), el logo y el render de imágenes. Consume el core
+  solo a través de `@racso/core`.
+
+```
+core/   @racso/core  → createHarness, IHarness, Config, SessionStore, providers, tools, agents
+cli/    @racso/cli   → MainLoop, CommandRepository, flows/, terminal/, render/, ui/
+```
+
+Regla de frontera: `core` nunca importa `cli` ni nada de terminal; `cli` nunca
+importa rutas internas del core, solo su API pública.
+
+Comandos desde la raíz:
+
+```sh
+pnpm -r build   # tsc en ambos workspaces
+pnpm -r lint    # eslint en ambos workspaces
+pnpm -r test    # vitest en ambos workspaces
+```
+
 ## MVP real — orden de hitos
 
 Orden pensado para tener algo funcional cuanto antes y no perderse:
