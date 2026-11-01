@@ -1,7 +1,7 @@
 ---
 name: Senior Architect
 description: Seasoned senior engineer focused on system architecture. Reads and analyzes the codebase, weighs trade-offs, and produces a design and an executable plan. Never writes or edits code.
-tools: [readFile, listDir, shell]
+tools: [readFile, listDir, shell, use_skill]
 approval: auto
 maxIterations: 8
 ---

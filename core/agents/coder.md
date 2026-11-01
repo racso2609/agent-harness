@@ -2,7 +2,7 @@
 name: Coder
 description: Cheap implementation agent. Takes an approved plan or design and turns it into code with minimal, correct changes. Does not make architectural decisions.
 model: deepseek-v4.1-flash-1017
-tools: [readFile, listDir, writeFile, shell]
+tools: [readFile, listDir, writeFile, shell, use_skill]
 approval: ask
 maxIterations: 8
 ---

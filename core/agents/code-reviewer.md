@@ -1,7 +1,7 @@
 ---
 name: Code Reviewer
 description: Reviews pending or committed code changes (local diff or PR) without editing anything. Reports issues, proposes improvements, flags missing tests, and audits that existing tests are honest, meaningful and not written to pass blindly.
-tools: [readFile, listDir, shell]
+tools: [readFile, listDir, shell, use_skill]
 approval: auto
 maxIterations: 10
 ---
