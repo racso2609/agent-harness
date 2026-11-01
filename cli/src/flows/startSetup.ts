@@ -9,7 +9,7 @@ export const startSetup = async (config: Config): Promise<void> => {
     [...SUPPORTED_PROVIDERS],
   );
 
-  let url = (await input(`[${provider}] Base URL: `)).trim();
+  const url = (await input(`[${provider}] Base URL: `)).trim();
   if (!url) throw new Error("Base URL is required");
 
   const apikey = (await input(`[${provider}] API key: `)).trim();
