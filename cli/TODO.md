@@ -97,6 +97,17 @@ atajos: `ctrl+r` razonamiento, `ctrl+t` tools (globales, `onToggleAll`: si algo 
 hecho: `ui/tui/collapse.ts` (puro: `estimateLines`, `tail`, `collapse`), 11 tests en `tests/ui/collapse.spec.ts`. `App.tsx` aplica la ventana a `reasoning` y `tool`; `TuiUiAdapter` guarda el set `expanded` por índice y lo **resetea al empezar cada turno**, para que el transcript no se llene de entradas abiertas de turnos anteriores.
 pendiente: el corte se calcula con `width: Infinity` (una línea lógica = una visual). Con líneas muy largas la ventana de 6 mostrará menos de lo esperado; pasa a `useStdout().stdout.columns` cuando importe.
 
+- [ ] **Dar aire vertical al texto final (interlineado y separación de bloques)**
+Hoy las entradas y los bloques del markdown se pintan pegados uno detrás de otro
+(`App.tsx` no añade margen entre `<Line>` ni entre bloques, y el modo líneas no
+deja aire antes ni después de la respuesta), así que párrafos, listas y respuestas
+se leen como un muro de texto.
+Done when: existe una regla de espaciado declarada (línea en blanco entre entradas,
+margen antes de heading/lista/código/tabla y aire antes/después de la respuesta
+final en modo líneas) y un test la fija.
+Depends on: nada.
+Decidir antes: si el interlineado es un valor de `ui.theme` (config) o una constante del layout.
+
 ## P4 — Instalación y distribución
 
 Contexto: los dos paquetes están en el repo y se usan sólo desde el workspace
