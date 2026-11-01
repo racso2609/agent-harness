@@ -80,13 +80,15 @@ case "reasoning":
 this.state = { ...this.state, activity: "thinking" };
 break;
 case "toolStart":
+// The input box reports what the turn is doing right now.
+this.state = { ...this.state, activity: `working · ${event.name}` };
 this.pushLine("tool", `→ ${event.name}`);
 return;
 case "toolOutput":
 this.appendToLast("tool", event.chunk);
 return;
 case "toolEnd":
-this.state = { ...this.state, activity: undefined };
+this.state = { ...this.state, activity: "working" };
 break;
 case "turnStart":
 this.pushLine("user", event.prompt);

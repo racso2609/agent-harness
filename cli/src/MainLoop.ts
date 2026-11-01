@@ -62,6 +62,16 @@ sessionId: options.sessionId,
 agent: options.agent,
 });
 
+// Children starting and settling are pushed, not polled: the UI shows a
+// child the moment it exists, including ones launched inside a turn.
+this.harness.onSpawnEvent((event) => {
+this.ui.render(
+event.type === "started"
+? { type: "spawn", handle: event.handle }
+: { type: "spawnSettled", handle: event.handle },
+);
+});
+
 if (this.isTui()) {
 // Ink owns stdin, so the app pushes prompts into the same loop.
 (this.ui as TuiUiAdapter).start({

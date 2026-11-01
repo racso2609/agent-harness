@@ -36,24 +36,15 @@ pendiente: la `activity` del input solo se alimenta de `reasoning`/`turnStart`; 
 
 ## P1 — Feedback mientras el turno corre
 
-- [ ] **Consumir los eventos de spawn en la UI**
-  `SpawnManager.on()` no tiene ningún suscriptor fuera de `SessionManager`, así que
-  un hijo que arranca o termina es invisible para el usuario.
-  Done when: `MainLoop` recibe `started`/`settled` y la UI actualiza la franja de hijos.
-  Depends on: persistir eventos de spawn (`core/TODO.md` §9).
+- [x] **Consumir los eventos de spawn en la UI**
+hecho: `MainLoop` se suscribe con `harness.onSpawnEvent()` al inicializar y traduce cada evento a `spawn`/`spawnSettled`; el adapter del TUI actualiza la franja y el de líneas imprime una línea por arranque y por cierre (con el error del hijo si falló).
 
-- [ ] **Mostrar trabajo en curso**
-  Sin indicador, un turno largo es indistinguible de un CLI colgado.
-  Done when: mientras el turno está en vuelo la status bar muestra actividad
-  (spinner + tool en ejecución) y vuelve a reposo al terminar.
-  Depends on: portar la pantalla base.
+- [x] **Mostrar trabajo en curso**
+hecho: `activity` dentro del input box. `turnStart` → `working`, `reasoning` → `thinking`, `toolStart` → `working · <tool>`, `toolEnd` → `working`, `turnEnd` → reposo. El status bar sigue mostrando provider/modelo/agente/tokens.
+nota: el caso `working` usa texto plano, no spinner animado; un spinner necesita un tick que repinte aunque no lleguen eventos. Se deja para cuando haga falta (un `shell` largo ya muestra salida viva, que es mejor señal).
 
-- [ ] **Mostrar estado por subagente**
-  El usuario debe poder ver qué agentes están corriendo, desde cuándo y con qué
-  estado, sin adivinar por logs.
-  Done when: cada spawn activo aparece con `agentId`, `status` y tiempo
-  transcurrido, y desaparece (o se marca `done`/`error`) al hacer `settled`.
-  Depends on: consumir los eventos de spawn; definir el layout de progreso.
+- [x] **Mostrar estado por subagente**
+hecho: cada hijo aparece con `agentId`, `spawnId`, tiempo transcurrido e icono (`◐` corriendo, `✓` done, `✗` error), y se marca al hacer `settled`; desaparece 5 s después (`progress.ts`).
 
 ## P2 — Contrato de retorno de los subagentes
 
