@@ -28,11 +28,24 @@ export type TokenUsage = {
   completionTokens: number;
   totalTokens: number;
 };
+// How a turn ended, for callers that must report state without parsing text.
+export type TurnStatus = "completed" | "incomplete" | "toolError";
+
+// Structured summary of a turn: what happened, what is left, what comes next.
+// `pending` is the work the turn could not finish (e.g. a shell tool that
+// errored); `next` is the concrete action the caller should take.
+export type TurnOutcome = {
+  status: TurnStatus;
+  pending: string[];
+  next?: string;
+};
+
 export type AgentResponse = {
   text: string;
   images?: { url: string }[];
   usage?: TokenUsage;
   costUsd?: number;
+  outcome?: TurnOutcome;
 };
 
 export type JsonSchemaProperty = {

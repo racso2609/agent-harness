@@ -24,6 +24,7 @@ ChatEventListener,
   History,
   Provider,
   TokenUsage,
+TurnOutcome,
   ToolCall,
   ToolResult,
 } from "@/types/providers";
@@ -668,6 +669,10 @@ return this.spawnManager().on(listener);
     let costUsd = 0;
     let lastText = "";
 
+// Work the turn could not finish, surfaced in the response outcome so the
+// caller can report it without parsing text.
+const failedTools: string[] = [];
+
     for (let iteration = 0; iteration < maxIterations; iteration++) {
       const result = await provider.chat(this.history, { tools: specs, onEvent });
 
@@ -681,11 +686,17 @@ return this.spawnManager().on(listener);
         result.turn.toolCalls.length === 0;
 
       if (readyToAnswer) {
-        return { text: result.turn.text, usage, costUsd };
+return {
+text: result.turn.text,
+usage,
+costUsd,
+outcome: this.outcomeOf(failedTools),
+};
       }
 
       for (const call of result.turn.toolCalls) {
 const toolResult = await this.runTool(call, onEvent);
+ if (toolResult.isError) failedTools.push(call.name);
         const content = toolResult.isError
           ? `[tool error] ${toolResult.output}`
           : toolResult.output;
@@ -698,13 +709,32 @@ const toolResult = await this.runTool(call, onEvent);
     }
 
     return {
-      text: lastText || "Stopped: maximum tool iterations reached",
+text: lastText || "Stopped: maximum tool iterations reached",
       usage,
       costUsd,
+ outcome: {
+ status: "incomplete",
+ pending: [...failedTools, "finish the turn within tools.maxIterations"],
+ next: "Reply with a smaller scope, or raise tools.maxIterations.",
+ },
     };
   }
 
   // Tool calls run sequentially in v1 so ordering and logs stay predictable.
+// Builds the structured outcome for a turn that reached its answer.
+protected outcomeOf(failedTools: string[]): TurnOutcome {
+if (failedTools.length) {
+return {
+status: "toolError",
+pending: failedTools,
+next: "Review the failing tool output and retry.",
+};
+}
+
+return { status: "completed", pending: [] };
+}
+
+
 protected async runTool(
 call: ToolCall,
 onEvent?: ChatEventListener,

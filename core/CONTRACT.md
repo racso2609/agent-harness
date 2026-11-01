@@ -71,6 +71,8 @@ export interface IHarness {
 
   // Turno principal. `images` es dato de dominio; el CLI decide cómo pintarlo.
   ask(prompt: string, options?: AskOptions): Promise<AgentResponse>;
+// AgentResponse.outcome?: TurnOutcome = { status, pending[], next? }, para reportar
+// estado sin parsear texto. status: "completed" | "toolError" | "incomplete".
 // AskOptions.onEvent recibe el progreso del turno mientras se produce:
 // { type: "text" | "reasoning", delta }, { type: "toolCallStart" | "toolCallEnd", id, name }
 // y { type: "toolOutput", id, name, chunk } (salida viva de la tool, con throttle).

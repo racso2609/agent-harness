@@ -145,10 +145,16 @@ Depends on: exponer `SpawnEvent` y `SpawnStatus` en el contrato público. [x]
   Done when: un test fija exactamente ese shape y `listSpawns()` está en `IHarness`.
   Depends on: añadir un listener de spawn al `IHarness`.
 
-- [ ] **Persistir eventos de spawn en la sesión**
-  Los eventos viven solo en memoria: al reabrir una sesión con `/resume` no hay rastro de qué hijos corrieron ni cómo terminaron.
-  Done when: `SessionRecord` guarda los handles (o sus eventos) y `/resume` los reconstruye; la versión de `SessionStore` sube con su migración.
-  Depends on: devolver estado consultable de los hijos.
+- [ ] **Persistir eventos de spawn en la sesión** — APLAZADO a propósito (2026-11-01)
+review: los handles viven solo en memoria (`SpawnManager`), así que tras `/resume` no hay rastro de qué hijos corrieron ni cómo terminaron. No es un bug visible hoy: no existe ninguna superficie que los lea y los hijos no sobreviven al reinicio del proceso (no se re-lanzan al cargar la sesión).
+por qué se aplaza: persistirlos sin consumidor es coste sin beneficio, y añade una migración de `SessionStore` (`SESSION_VERSION` 3 → 4) que habría que mantener. Se hace cuando `/resume` deba mostrar el histórico de hijos.
+qué falta para cerrarlo (checklist al retomarlo):
+1. Añadir `spawns?: SpawnHandle[]` (o `SpawnEvent[]`) a `SessionRecord` y subir `SESSION_VERSION` a 4.
+2. Migración en `SessionStore.load`: v3 → v4 con `spawns: []`; no romper sesiones existentes.
+3. Escribirlo al hacer `settled` desde `SessionManager` (ya hay suscripción interna ahí); en `started` solo si se quiere el histórico completo.
+4. Restaurar en `load` como **histórico de solo lectura**: los hijos cargados NO son reanudables, el `status` se conserva tal cual quedó.
+5. Tests: round-trip de una sesión con un hijo `done` y otro `error`; y migración v3 → v4.
+Decisión de formato pendiente: guardar eventos (`started`/`settled`, fiel al runtime) o solo el handle final (más compacto). El evento permite reconstruir duraciones; el handle no.
 
 - [x] **Emitir progreso del turno desde `ask()`**
 review: `ask()` devolvía solo el `AgentResponse` final y, aunque `OpenAiProvider` ya tenía un `_onChunk` en el constructor, era global del provider (no por llamada) y solo transportaba texto: no había forma de atribuir eventos a un turno ni de ver tool calls o razonamiento.
@@ -159,17 +165,16 @@ Bug encontrado por los tests: la captura de razonamiento había quedado dentro d
 hecho: `ToolContext.onOutput?: (chunk) => void` y `ShellTool` coalesce los chunks por ventana (`outputThrottleMs`, default 100, `0` lo desactiva) y hace flush al terminar. `SessionManager` lo etiqueta con `id`/`name` de la call y lo emite como `ChatEvent` `toolOutput`, así que la UI lo recibe por el mismo canal que el resto. El truncado (`maxOutputBytes`) sigue aplicando **solo** al resultado final, no al stream (test explícito).
 4 tests en `tools/shell.spec.ts` (stream, sin `onOutput`, stream sin truncar, coalescing) + 2 en `SessionManager.spec.ts` (etiquetado con la call, turno idéntico sin listener). Build + 211 tests (core) + 49 (cli) + lint verdes.
 
-- [ ] **Incluir un resumen de cierre en `AgentResponse`**
-  La UI debe decir qué pasó, qué falta y qué sigue sin parsear texto libre ni gastar un turno extra.
-  Done when: `AgentResponse` gana un campo estructurado opcional (`status`, `pending[]`, `next`) que `SessionManager` rellena y los providers ignoran si no lo producen.
-  Depends on: emitir progreso del turno desde `ask()`.
+- [x] **Incluir un resumen de cierre en `AgentResponse`**
+hecho: `TurnOutcome { status: "completed" | "toolError" | "incomplete", pending: string[], next? }` y `AgentResponse.outcome?`. `runAgentLoop` acumula las tools que fallaron (`pending`) y distingue el corte por `tools.maxIterations` (`incomplete` + qué hacer). El campo es opcional, así ningún `toEqual` existente cambió. 3 tests (completed, toolError con la tool nombrada, incomplete por tope de iteraciones).
+Nota: hoy lo rellena `runAgentLoop`; el camino de `generateImage` no lo emite (no hay turno ReAct que resumir).
 
 ### 9.1 orden sugerido
 1. [x] Contrato: `SpawnEvent`/`SpawnStatus` reexportados + `listSpawns()` ya expuesto en `IHarness`.
 2. [x] Listener de spawn en `IHarness`.
 3. [x] `onEvent` en `ask()` + `reasoning` en el provider.
-4. [ ] Persistencia de handles + migración de `SessionStore`.
+4. [ ] Persistencia de handles + migración de `SessionStore` — APLAZADO, ver checklist en el bloque de arriba.
 5. [x] `ToolContext.onOutput` (shell vivo).
-6. [ ] Resumen de cierre estructurado.
+6. [x] Resumen de cierre estructurado.
 
 Nota: los puntos 1–2 desbloquean `cli/TODO.md` §P1; el 3 desbloquea §P3.

@@ -647,6 +647,89 @@ describe("SessionManager agent loop", () => {
   });
 });
 
+describe("SessionManager turn outcome", () => {
+let provider: OpenAiProvider;
+let store: SessionStore;
+
+beforeEach(() => {
+provider = new OpenAiProvider("https://api.example.com", "key", "model");
+store = makeStore();
+});
+
+const makeSession = () => {
+const session = new SessionManager(makeConfig({ autoCompact: false }), store);
+session.provider = provider;
+session.providerName = "openai";
+session.model = "model";
+vi.spyOn(session, "classifyAction").mockResolvedValue("textGeneration");
+return session;
+};
+
+it("reports a completed turn with nothing pending", async () => {
+const session = makeSession();
+
+provider.chat = vi.fn().mockResolvedValueOnce(stopTurn("all good"));
+
+const response = await session.ask("go");
+
+expect(response.outcome).toEqual({ status: "completed", pending: [] });
+});
+
+it("reports the failing tools when a tool errors", async () => {
+const session = makeSession();
+session.tools.register({
+name: "broken",
+description: "Always fails",
+parameters: { type: "object" },
+execute: async () => ({ output: "boom", isError: true }),
+});
+
+provider.chat = vi
+.fn()
+.mockResolvedValueOnce({
+turn: {
+text: "",
+toolCalls: [{ id: "call_1", name: "broken", args: {} }],
+finishReason: "toolCalls",
+},
+})
+.mockResolvedValueOnce(
+stopTurn("recovered", { promptTokens: 1, completionTokens: 1, totalTokens: 2 }),
+);
+
+const response = await session.ask("go");
+
+expect(response.outcome).toEqual({
+status: "toolError",
+pending: ["broken"],
+next: "Review the failing tool output and retry.",
+});
+});
+
+it("reports an incomplete turn when the iteration cap is reached", async () => {
+const session = makeSession();
+
+// The model keeps asking for a tool the registry does not know, so the loop
+// never reaches an answer and hits maxIterations.
+provider.chat = vi.fn().mockResolvedValue({
+turn: {
+text: "",
+toolCalls: [{ id: "call_1", name: "missing", args: {} }],
+finishReason: "toolCalls",
+},
+});
+
+const response = await session.ask("go");
+
+expect(response.outcome?.status).toBe("incomplete");
+expect(response.outcome?.pending).toContain(
+"finish the turn within tools.maxIterations",
+);
+expect(response.outcome?.next).toContain("maxIterations");
+});
+});
+
+
 describe("SessionManager turn events", () => {
 let provider: OpenAiProvider;
 let store: SessionStore;
