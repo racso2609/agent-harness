@@ -8,7 +8,7 @@ import type {
 import { Config } from "@/configuration";
 import { SessionManager } from "@/session/SessionManager";
 import { SessionStore } from "@/session/SessionStore";
-import type { SpawnHandle } from "@/session/spawn";
+import type { SpawnEventListener, SpawnHandle } from "@/session/spawn";
 import type { ApprovalRequest } from "@/tools";
 import type { AgentResponse } from "@/types/providers";
 import { createLogger, setLogger } from "@/utils/logger";
@@ -112,7 +112,11 @@ class Harness implements IHarness {
     return this.session.pollSpawn(spawnId);
   }
 
-  listSpawns(): SpawnHandle[] {
+  onSpawnEvent(listener: SpawnEventListener): () => void {
+return this.session.onSpawnEvent(listener);
+}
+
+listSpawns(): SpawnHandle[] {
     return this.session.listSpawns();
   }
 

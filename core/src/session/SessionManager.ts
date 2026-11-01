@@ -41,7 +41,7 @@ import {
   estimateHistoryTokens,
 } from "./history";
 import { SessionRecord, SessionStore } from "./SessionStore";
-import { SpawnHandle, SpawnManager } from "./spawn";
+import { SpawnEventListener, SpawnHandle, SpawnManager } from "./spawn";
 
 // Options accepted by initialize/load to resume an existing session.
 export interface SessionOptions {
@@ -552,7 +552,15 @@ reloadSkills(): SkillSummary[] {
     return this.spawns.collect(spawnIds);
   }
 
-  // Builds the spawn manager on first use. The runner spins up a fresh child
+  // Subscribes an external consumer (the CLI UI) to spawn lifecycle events.
+// Live only: past events are not replayed, read listSpawns() for the current
+// state. The manager is built here so a listener registered before the first
+// spawn still receives it.
+onSpawnEvent(listener: SpawnEventListener): () => void {
+return this.spawnManager().on(listener);
+}
+
+// Builds the spawn manager on first use. The runner spins up a fresh child
   // SessionManager per spawn so history, usage and provider state stay
   // isolated from the parent turn.
   protected spawnManager(): SpawnManager {

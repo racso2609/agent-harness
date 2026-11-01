@@ -1,7 +1,12 @@
 import type { AgentSummary } from "@/agents";
 import type { SkillSummary } from "@/skills";
 import type { Config, ProviderConfig, ProviderDetail } from "@/configuration";
-import type { SpawnEvent, SpawnHandle, SpawnStatus } from "@/session/spawn";
+import type {
+SpawnEvent,
+SpawnEventListener,
+SpawnHandle,
+SpawnStatus,
+} from "@/session/spawn";
 import type { SessionStore } from "@/session/SessionStore";
 import type { ApprovalDecision, ApprovalRequest } from "@/tools";
 import type { AgentResponse, Model } from "@/types/providers";
@@ -102,6 +107,8 @@ export interface IHarness {
   spawn(agentId: string, prompt: string, options?: SpawnOptions): SpawnHandle;
   pollSpawn(spawnId: string): SpawnHandle | undefined;
   listSpawns(): SpawnHandle[];
+// Live-only subscription to children starting/finishing. Returns unsubscribe.
+onSpawnEvent(listener: SpawnEventListener): () => void;
   waitSpawn(spawnId: string): Promise<SpawnHandle | undefined>;
   collectSpawns(spawnIds?: string[]): Promise<SpawnHandle[]>;
 
@@ -117,6 +124,7 @@ export type {
   ProviderConfig,
   ProviderDetail,
 SpawnEvent,
+SpawnEventListener,
 SpawnHandle,
 SpawnStatus,
 };

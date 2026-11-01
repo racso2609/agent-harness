@@ -21,6 +21,7 @@ export type {
   ILogger,
   LoggerSink,
   SpawnEvent,
+  SpawnEventListener,
   SpawnOptions,
 } from "./contract";
 export type {

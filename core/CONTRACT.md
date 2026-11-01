@@ -116,6 +116,9 @@ reloadSkills(): SkillSummary[];
   spawn(agentId: string, prompt: string, options?: { context?: string }): SpawnHandle;
   pollSpawn(spawnId: string): SpawnHandle | undefined;
   listSpawns(): SpawnHandle[];
+// Suscripción en vivo a arranque/fin de hijos. Devuelve el unsubscribe.
+// No reenvía eventos pasados: el estado inicial se lee con listSpawns().
+onSpawnEvent(listener: SpawnEventListener): () => void;
   waitSpawn(spawnId: string): Promise<SpawnHandle | undefined>;
   collectSpawns(spawnIds?: string[]): Promise<SpawnHandle[]>;
 

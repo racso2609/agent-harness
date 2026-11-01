@@ -135,10 +135,10 @@ Contexto: el CLI va a una TUI de pantalla completa (ver `cli/TODO.md` §P0) que 
 review: `IHarness` ya exponía `spawn`/`pollSpawn`/`listSpawns`/`waitSpawn`/`collectSpawns` y `SpawnHandle` ya se importaba de `session/spawn.ts`; lo que faltaba era `SpawnEvent` y `SpawnStatus` fuera del módulo interno.
 hecho: `contract.ts` reexporta `SpawnEvent`/`SpawnHandle`/`SpawnStatus`, `index.ts` los publica desde `./contract` (ya no desde `./session/spawn`) y `tests/session/spawnContract.spec.ts` fija el shape de `started`/`settled`. Build + 195 tests (core) + 49 (cli) + lint verdes.
 
-- [ ] **Añadir un listener de spawn al `IHarness`**
-  Sin esto el CLI solo puede hacer polling; la UI en vivo necesita push.
-  Done when: `IHarness` expone `onSpawnEvent(listener)` (o equivalente) y hay test de `started` → `settled` a través del harness, no del `SpawnManager`.
-  Depends on: exponer `SpawnEvent` y `SpawnStatus` en el contrato público.
+- [x] **Añadir un listener de spawn al `IHarness`**
+review: `SpawnManager.on()` ya devolvía el unsubscribe y `emit()` aislaba errores de listener; faltaba exponerlo sin acoplar la UI a `SessionManagerImpl`.
+hecho: `SessionManager.onSpawnEvent()` construye el manager on-demand (un listener registrado antes del primer spawn igual lo recibe) y `IHarness`/`harness.ts` lo delegan. Semántica A: solo en vivo, sin replay; el estado inicial es `listSpawns()`. La suscripción interna del mensaje `system` sigue intacta (test explícito). 4 tests en `SessionManager.spec.ts` (started→settled, unsubscribe, coexistencia con la inyección, listener que lanza). Build + 199 tests (core) + 49 (cli) + lint verdes.
+Depends on: exponer `SpawnEvent` y `SpawnStatus` en el contrato público. [x]
 
 - [ ] **Devolver estado consultable de los hijos**
   `SessionManager.listSpawns()` existe, pero hay que confirmar que devuelve lo que la UI necesita: `agentId`, `status`, `startedAt`, `finishedAt` y un resumen del prompt.
@@ -167,7 +167,7 @@ hecho: `contract.ts` reexporta `SpawnEvent`/`SpawnHandle`/`SpawnStatus`, `index.
 
 ### 9.1 orden sugerido
 1. [x] Contrato: `SpawnEvent`/`SpawnStatus` reexportados + `listSpawns()` ya expuesto en `IHarness`.
-2. [ ] Listener de spawn en `IHarness`.
+2. [x] Listener de spawn en `IHarness`.
 3. [ ] `onEvent` en `ask()`.
 4. [ ] Persistencia de handles + migración de `SessionStore`.
 5. [ ] `ToolContext.onOutput` (shell vivo).

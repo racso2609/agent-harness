@@ -750,7 +750,72 @@ describe("SessionManager spawn", () => {
     );
   });
 
-  it("rejects spawning when disabled by config", () => {
+  it("delivers spawn events to an external listener", async () => {
+stubProvider("child answer");
+const session = makeSession();
+const events: string[] = [];
+
+const unsubscribe = session.onSpawnEvent((event) => {
+events.push(`${event.type}:${event.handle.status}`);
+});
+
+const handle = session.spawn("coder", "do the thing");
+await session.waitSpawn(handle.spawnId);
+
+expect(events).toEqual(["started:running", "settled:done"]);
+unsubscribe();
+});
+
+it("stops delivering events after unsubscribe", async () => {
+stubProvider("child answer");
+const session = makeSession();
+const seen: string[] = [];
+
+const unsubscribe = session.onSpawnEvent((event) => {
+seen.push(event.type);
+});
+unsubscribe();
+
+const handle = session.spawn("coder", "do the thing");
+await session.waitSpawn(handle.spawnId);
+
+expect(seen).toEqual([]);
+});
+
+it("keeps the parent system message when an external listener is present", async () => {
+stubProvider("child answer");
+const session = makeSession();
+
+// The external listener must be additive: it cannot replace the internal
+// subscription that injects the child result into the parent history.
+session.onSpawnEvent(() => {});
+
+const handle = session.spawn("coder", "do the thing");
+await session.waitSpawn(handle.spawnId);
+
+const injected = session.history.find(
+(message) =>
+message.role === "system" &&
+message.content.includes(`[spawn ${handle.spawnId}`),
+);
+expect(injected?.content).toContain("child answer");
+});
+
+it("survives a throwing listener without breaking the child", async () => {
+stubProvider("child answer");
+const session = makeSession();
+
+session.onSpawnEvent(() => {
+throw new Error("bad consumer");
+});
+
+const handle = session.spawn("coder", "do the thing");
+const settled = await session.waitSpawn(handle.spawnId);
+
+expect(settled).toMatchObject({ status: "done" });
+});
+
+it("rejects spawning when disabled by config", () => {
     const session = makeSession({ sessions: { spawnEnabled: false } });
 
     expect(() => session.spawn("coder", "x")).toThrow(/disabled/);
