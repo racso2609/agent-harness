@@ -52,9 +52,48 @@ const BUILT_IN_COMMANDS: CommandDefinition[] = [
   },
   {
     name: "provider",
-    description: "Switch the active provider",
-    run: async (context) => {
-      const changed = await context.flows.changeProvider(context.harness);
+    aliases: ["providers"],
+    description:
+      "List, switch, add or remove providers: /provider [add|rm|ls] [id]",
+    run: async (context, args) => {
+      const [action, id] = args;
+
+      if (!action) {
+        const changed = await context.flows.changeProvider(context.harness);
+        context.notify(changed ? "Provider updated" : "Provider not changed");
+        return;
+      }
+
+      if (action === "ls" || action === "list") {
+        context.notify(formatProviderList(context));
+        return;
+      }
+
+      if (action === "add") {
+        try {
+          const created = await context.flows.addProvider(context.harness);
+          context.notify(created ? "Provider added" : "Provider not added");
+        } catch (err) {
+          context.notify(`Provider not added: ${errorMessage(err)}`);
+        }
+        return;
+      }
+
+      if (action === "rm" || action === "remove") {
+        try {
+          const removed = await context.flows.removeProvider(
+            context.harness,
+            id,
+          );
+          context.notify(removed ? "Provider removed" : "Provider not removed");
+        } catch (err) {
+          context.notify(`Provider not removed: ${errorMessage(err)}`);
+        }
+        return;
+      }
+
+      // Anything else is treated as a provider id and switched to directly.
+      const changed = await context.flows.changeProvider(context.harness, action);
       context.notify(changed ? "Provider updated" : "Provider not changed");
     },
   },
@@ -176,6 +215,30 @@ const BUILT_IN_COMMANDS: CommandDefinition[] = [
 
 const truncate = (text: string, max = 100) =>
   text.length > max ? `${text.slice(0, max)}…` : text;
+
+const errorMessage = (err: unknown) =>
+  err instanceof Error ? err.message : String(err);
+
+// One line per provider instance, marking the default and the active one.
+const formatProviderList = (context: CommandContext) => {
+  const details = context.harness.listProviderDetails();
+  if (!details.length) return "No providers configured";
+
+  const current = context.harness.status().provider;
+
+  return details
+    .map((provider) => {
+      const markers = [
+        provider.isDefault ? "default" : "",
+        provider.id === current ? "active" : "",
+      ].filter(Boolean);
+      const suffix = markers.length ? ` [${markers.join(", ")}]` : "";
+      const model = provider.model ? ` — ${provider.model}` : "";
+
+      return `${provider.id} (${provider.type}) ${provider.url}${model}${suffix}`;
+    })
+    .join("\n");
+};
 
 const formatSpawnList = (spawns: SpawnHandle[]) => {
   if (!spawns.length) return "No spawned agents";

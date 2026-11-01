@@ -4,10 +4,25 @@ import { OpenAiProvider } from "../../src/providers/openai";
 import { SessionManager } from "../../src/session/SessionManager";
 import type { SessionStore } from "../../src/session/SessionStore";
 
-const makeConfig = (overrides: Record<string, unknown> = {}) =>
-  ({
-    config: { providers: {}, ...overrides },
-  }) as unknown as Config;
+const makeConfig = (overrides: Record<string, unknown> = {}) => {
+  const config = { providers: {}, ...overrides };
+
+  return {
+    config,
+    // Mirrors the Config helpers SessionManager delegates to.
+    listProviders: () => Object.keys(config.providers),
+    listProviderDetails: () =>
+      Object.entries(config.providers).map(([id, provider]) => ({
+        id,
+        type: "openai",
+        ...(provider as object),
+        isDefault: false,
+      })),
+    configureProvider: vi.fn(),
+    removeProvider: vi.fn(),
+    writeConfig: vi.fn(),
+  } as unknown as Config;
+};
 
 const makeStore = () =>
   ({

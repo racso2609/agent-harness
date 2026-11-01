@@ -33,6 +33,18 @@ const makeContext = (): CommandContext => ({
     loadSession: vi.fn(async () => true),
     save: vi.fn(),
     listProviders: vi.fn(() => ["openai"]),
+    listProviderDetails: vi.fn(() => [
+      {
+        id: "openai",
+        type: "openai",
+        url: "https://api.example.com",
+        apikey: "key",
+        model: "model",
+        isDefault: true,
+      },
+    ]),
+    configureProvider: vi.fn(),
+    removeProvider: vi.fn(() => true),
     setProvider: vi.fn(async () => true),
     listModels: vi.fn(() => []),
     setModel: vi.fn(() => true),
@@ -59,6 +71,8 @@ const makeContext = (): CommandContext => ({
   } as unknown as CommandContext["harness"],
   flows: {
     changeProvider: vi.fn(async () => true),
+    addProvider: vi.fn(async () => true),
+    removeProvider: vi.fn(async () => true),
     changeModel: vi.fn(async () => true),
     changeAgent: vi.fn(async () => true),
     changeSession: vi.fn(async () => true),
@@ -157,6 +171,88 @@ describe("CommandRepository", () => {
     await repository.run("/model", context);
 
     expect(context.notify).toHaveBeenCalledWith("Model not changed");
+  });
+
+  it("lists providers marking the active and default ones", async () => {
+    const repository = new CommandRepository();
+    const context = makeContext();
+    context.harness.status = vi.fn(() => ({
+      sessionId: "session-1",
+      provider: "openai",
+      usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+      costUsd: 0,
+      contextTokens: 0,
+      contextUsage: 0,
+      autoCompact: true,
+      autoCompactThreshold: 80,
+    }));
+
+    await repository.run("/provider ls", context);
+
+    expect(context.notify).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "openai (openai) https://api.example.com — model [default, active]",
+      ),
+    );
+  });
+
+  it("lists providers through the alias and opens the picker with no args", async () => {
+    const repository = new CommandRepository();
+    const context = makeContext();
+
+    await repository.run("/providers", context);
+
+    expect(context.flows.changeProvider).toHaveBeenCalledWith(context.harness);
+  });
+
+  it("adds a provider instance", async () => {
+    const repository = new CommandRepository();
+    const context = makeContext();
+
+    await repository.run("/provider add", context);
+
+    expect(context.flows.addProvider).toHaveBeenCalledWith(context.harness);
+    expect(context.notify).toHaveBeenCalledWith("Provider added");
+  });
+
+  it("removes a provider instance by id", async () => {
+    const repository = new CommandRepository();
+    const context = makeContext();
+
+    await repository.run("/provider rm cheap", context);
+
+    expect(context.flows.removeProvider).toHaveBeenCalledWith(
+      context.harness,
+      "cheap",
+    );
+    expect(context.notify).toHaveBeenCalledWith("Provider removed");
+  });
+
+  it("reports provider removal failures", async () => {
+    const repository = new CommandRepository();
+    const context = makeContext();
+    context.flows.removeProvider = vi.fn(async () => {
+      throw new Error("Cannot remove the last configured provider");
+    });
+
+    await repository.run("/provider rm openai", context);
+
+    expect(context.notify).toHaveBeenCalledWith(
+      "Provider not removed: Cannot remove the last configured provider",
+    );
+  });
+
+  it("switches to a provider when given its id", async () => {
+    const repository = new CommandRepository();
+    const context = makeContext();
+
+    await repository.run("/provider cheap", context);
+
+    expect(context.flows.changeProvider).toHaveBeenCalledWith(
+      context.harness,
+      "cheap",
+    );
+    expect(context.notify).toHaveBeenCalledWith("Provider updated");
   });
 
   it("renders the current session status", async () => {

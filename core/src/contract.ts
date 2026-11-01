@@ -1,5 +1,5 @@
 import type { AgentSummary } from "@/agents";
-import type { Config } from "@/configuration";
+import type { Config, ProviderConfig, ProviderDetail } from "@/configuration";
 import type { SpawnHandle } from "@/session/spawn";
 import type { SessionStore } from "@/session/SessionStore";
 import type { ApprovalDecision, ApprovalRequest } from "@/tools";
@@ -71,6 +71,15 @@ export interface IHarness {
 
   // --- providers / models ---
   listProviders(): string[];
+  listProviderDetails(): ProviderDetail[];
+  // Creates or replaces a provider instance (id libre + type de backend).
+  configureProvider(
+    id: string,
+    provider: ProviderConfig,
+    options?: { makeDefault?: boolean; model?: string },
+  ): void;
+  // Removes a provider instance. false when it does not exist.
+  removeProvider(id: string): boolean;
   setProvider(name: string): Promise<boolean>;
   listModels(): Model[];
   setModel(model: string): boolean;
@@ -95,4 +104,9 @@ export interface IHarness {
   shutdown(): void;
 }
 
-export type { ApprovalDecision, ApprovalRequest };
+export type {
+  ApprovalDecision,
+  ApprovalRequest,
+  ProviderConfig,
+  ProviderDetail,
+};

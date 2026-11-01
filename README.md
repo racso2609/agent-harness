@@ -162,6 +162,44 @@ maxIterations: 10
 ---
 ```
 
+## Providers (instancias vs tipo de backend)
+
+`providers` es un **mapa de instancias**: la clave es un id libre que eliges tú
+(`cheap`, `openrouter`, `work`, ...). El campo `type` declara qué backend
+interpreta `url`/`apikey`; hoy solo existe el tipo `openai`, compatible con
+cualquier endpoint OpenAI-compatible. Así puedes tener varias instancias del
+mismo tipo (cheaperinference, OpenRouter, un proxy local...) sin estar atado a
+una sola.
+
+```jsonc
+"providers": {
+  "cheap": {
+    "type": "openai",
+    "url": "https://api.cheaperinference.com/v1",
+    "apikey": "ci_...",
+    "model": "deepseek-v4.1-flash-1017"
+  },
+  "openrouter": {
+    "type": "openai",
+    "url": "https://openrouter.ai/api/v1",
+    "apikey": "sk-or-..."
+  }
+},
+"defaultProvider": "cheap"
+```
+
+- Un provider sin `type` se interpreta como `openai` (las configs antiguas con
+  `providers.openai` siguen funcionando sin migración).
+- `providers.<id>.model` es el modelo preferido de esa instancia; se usa como
+  fallback cuando el modelo activo no existe en la instancia destino (p.ej. al
+  cambiar con `/provider`).
+- La sesión persistida guarda el **id de instancia**, y un agente puede fijar el
+  suyo con `provider: <id>` en el frontmatter.
+
+En runtime: `/provider ls` lista las instancias (id, tipo, modelo, default y la
+activa con `*`); `/provider add` registra una nueva; `/provider rm [id]` la
+elimina (no borra sesiones); `/provider <id>` cambia la instancia activa.
+
 ## Sesiones persistidas
 
 Cada sesión se guarda como JSON en `~/.racso-harness/sessions` (override con

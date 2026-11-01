@@ -1,6 +1,11 @@
 export { createHarness } from "./harness";
 export { createLogger, logger, setLogger } from "./utils/logger";
-export { Config, SUPPORTED_PROVIDERS } from "./configuration";
+export {
+  Config,
+  DEFAULT_PROVIDER_TYPE,
+  SUPPORTED_PROVIDERS,
+} from "./configuration";
+export type { ProviderConfig, ProviderDetail } from "./configuration";
 export { SessionStore } from "./session/SessionStore";
 export { SessionManager } from "./session/SessionManager";
 

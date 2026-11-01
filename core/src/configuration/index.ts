@@ -4,8 +4,20 @@ import { agentsHome, env, harnessHome } from "@/utils/env";
 import { DEFAULT_AGENT_ID } from "@/agents/defaults";
 
 interface ProviderConfig {
+  // Backend that interprets url/apikey. Defaults to "openai" so configs
+  // written before instance ids existed keep working unchanged.
+  type?: string;
   url: string;
   apikey: string;
+  // Preferred model for this instance; used as the fallback when the active
+  // model does not exist on the target instance.
+  model?: string;
+}
+
+// Provider entry as listed by Config, with its instance id resolved.
+interface ProviderDetail extends ProviderConfig {
+  id: string;
+  isDefault: boolean;
 }
 
 interface ShellToolsConfig {
@@ -58,6 +70,7 @@ interface HarnessConfig {
   classificationProvider?: string;
   classificationModel?: string;
 
+  // Provider instances keyed by a free-form id (cheap, openrouter, work...).
   providers: Record<string, ProviderConfig>;
   tools?: ToolsConfig;
   agents?: AgentsConfig;
@@ -89,12 +102,13 @@ const applyDefaults = (config: HarnessConfig): HarnessConfig => {
   return config;
 };
 
+// Backend types a provider entry may declare through its `type` field. This
+// is not a list of ids: any number of entries can share the same type.
 const SUPPORTED_PROVIDERS = ["openai"];
 
-const DEFAULT_CONFIG_LOCATION = path.join(
-  harnessHome(),
-  "config.json",
-);
+const DEFAULT_PROVIDER_TYPE = "openai";
+
+const DEFAULT_CONFIG_LOCATION = path.join(harnessHome(), "config.json");
 
 class Config {
   config: HarnessConfig;
@@ -111,45 +125,99 @@ class Config {
     return !this.validateConfig().ok;
   }
 
-  // Checks that a default provider is configured and usable.
+  // Checks that every provider entry is usable and that the default one exists.
   validateConfig() {
     const errors: string[] = [];
     const provider = this.config.defaultProvider;
 
     if (!provider) {
       errors.push("No default provider configured");
-    } else {
-      const providerConfig = this.config.providers[provider];
-      if (!providerConfig) {
-        errors.push(`Missing config for provider: ${provider}`);
-      } else {
-        if (!providerConfig.url?.trim()) {
-          errors.push(`Provider ${provider} is missing a base URL`);
-        }
-        if (!providerConfig.apikey?.trim()) {
-          errors.push(`Provider ${provider} is missing an API key`);
-        }
-      }
+    } else if (!this.config.providers[provider]) {
+      errors.push(`Missing config for provider: ${provider}`);
+    }
+
+    for (const [id, providerConfig] of Object.entries(this.config.providers)) {
+      errors.push(...this.validateProvider(id, providerConfig));
     }
 
     return { ok: errors.length === 0, errors };
   }
 
-  // Stores a provider definition without prompting. Used by the CLI setup flow.
+  // Validates one provider entry: backend type, base URL and API key.
+  validateProvider(id: string, providerConfig: ProviderConfig) {
+    const errors: string[] = [];
+    const type = providerConfig.type ?? DEFAULT_PROVIDER_TYPE;
+
+    if (!SUPPORTED_PROVIDERS.includes(type)) {
+      errors.push(
+        `Provider ${id} uses an unsupported type: ${type} (supported: ${SUPPORTED_PROVIDERS.join(", ")})`,
+      );
+    }
+    if (!providerConfig.url?.trim()) {
+      errors.push(`Provider ${id} is missing a base URL`);
+    }
+    if (!providerConfig.apikey?.trim()) {
+      errors.push(`Provider ${id} is missing an API key`);
+    }
+
+    return errors;
+  }
+
+  // Stores a provider instance without prompting. `id` is a free-form name
+  // chosen by the user and `provider.type` selects the backend implementation.
+  // Used by the CLI setup and add-provider flows.
   configureProvider(
-    name: string,
+    id: string,
     provider: ProviderConfig,
     options: { makeDefault?: boolean; model?: string } = {},
   ) {
-    this.config.providers[name] = {
+    this.config.providers[id] = {
+      type: provider.type ?? DEFAULT_PROVIDER_TYPE,
       url: provider.url.replace(/\/+$/, ""),
       apikey: provider.apikey,
+      ...(provider.model ? { model: provider.model } : {}),
     };
 
     if (options.makeDefault || !this.config.defaultProvider) {
-      this.config.defaultProvider = name;
+      this.config.defaultProvider = id;
     }
     if (options.model) this.config.model = options.model;
+  }
+
+  // Removes a provider instance. Returns false when it does not exist.
+  // Sessions persisted with that id stay on disk untouched.
+  removeProvider(id: string) {
+    if (!this.config.providers[id]) return false;
+
+    delete this.config.providers[id];
+
+    if (this.config.defaultProvider === id) {
+      const [next] = this.listProviders();
+      this.config.defaultProvider = next;
+    }
+
+    return true;
+  }
+
+  // Lists the provider instances with their id and default flag.
+  listProviderDetails(): ProviderDetail[] {
+    return this.listProviders().map((id) => {
+      const provider = this.config.providers[id];
+
+      return {
+        id,
+        type: provider.type ?? DEFAULT_PROVIDER_TYPE,
+        url: provider.url,
+        apikey: provider.apikey,
+        ...(provider.model ? { model: provider.model } : {}),
+        isDefault: this.config.defaultProvider === id,
+      };
+    });
+  }
+
+  // Lists the provider instance ids currently configured.
+  listProviders() {
+    return Object.keys(this.config.providers);
   }
 
   writeConfig() {
@@ -168,6 +236,9 @@ class Config {
       const parsed = JSON.parse(raw) as HarnessConfig;
 
       parsed.providers ??= {};
+      for (const entry of Object.values(parsed.providers)) {
+        entry.type ??= DEFAULT_PROVIDER_TYPE;
+      }
       return applyDefaults(parsed);
     } catch {
       return null;
@@ -175,11 +246,12 @@ class Config {
   }
 }
 
-export { Config, SUPPORTED_PROVIDERS };
+export { Config, DEFAULT_PROVIDER_TYPE, SUPPORTED_PROVIDERS };
 export type {
   AgentsConfig,
   HarnessConfig,
   ProviderConfig,
+  ProviderDetail,
   SessionsConfig,
   ShellToolsConfig,
   ToolsConfig,

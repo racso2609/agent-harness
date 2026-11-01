@@ -56,6 +56,22 @@ class Harness implements IHarness {
     return this.session.listProviders();
   }
 
+  listProviderDetails() {
+    return this.session.listProviderDetails();
+  }
+
+  configureProvider(
+    id: string,
+    provider: { type?: string; url: string; apikey: string; model?: string },
+    options: { makeDefault?: boolean } = {},
+  ) {
+    this.session.configureProvider(id, provider, options);
+  }
+
+  removeProvider(id: string) {
+    return this.session.removeProvider(id);
+  }
+
   setProvider(name: string) {
     return this.session.setProvider(name);
   }

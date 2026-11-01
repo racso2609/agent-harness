@@ -3,6 +3,7 @@ import {
   createHarness,
   type ApprovalRequest,
   type IHarness,
+  SUPPORTED_PROVIDERS,
 } from "@racso/core";
 import { CommandContext, CommandRepository } from "@/commands/CommandRepository";
 import { createFlows, type Flows } from "@/flows";
@@ -31,7 +32,7 @@ class MainLoop {
 
   constructor(options: MainLoopOptions = {}) {
     this.config = options.config ?? new Config();
-    this.flows = createFlows();
+    this.flows = createFlows([...SUPPORTED_PROVIDERS]);
     this.commands = new CommandRepository();
     this.ui = new CliUiAdapter();
     this.harness = createHarness({

@@ -8,7 +8,11 @@ import {
   DEFAULT_AGENT_ID,
   strictestApproval,
 } from "@/agents";
-import { Config } from "@/configuration";
+import {
+  Config,
+  DEFAULT_PROVIDER_TYPE,
+  ProviderDetail,
+} from "@/configuration";
 import { OpenAiProvider } from "@/providers/openai";
 import { createToolRegistry, ToolContext, ToolRegistry } from "@/tools";
 import type { ApprovalDecision, ApprovalRequest } from "@/tools";
@@ -53,8 +57,9 @@ export interface SpawnOptions {
   context?: string;
 }
 
-// Registry mapping a provider name (as used in the config) to a factory
-// that builds the concrete Provider implementation for that backend.
+// Registry mapping a backend type (the `type` field of a provider entry) to a
+// factory that builds the concrete Provider implementation. Provider entries
+// are keyed by a free-form instance id, so several entries can share a type.
 const PROVIDER_FACTORIES: Record<
   string,
   (config: { url: string; apikey: string }, model: string) => Provider
@@ -63,12 +68,17 @@ const PROVIDER_FACTORIES: Record<
     new OpenAiProvider(config.url, config.apikey, model),
 };
 
+// Resolves the backend type of a provider entry, defaulting to "openai" so
+// configs written before instance ids existed keep working.
+const providerType = (config: { type?: string }) =>
+  config.type ?? DEFAULT_PROVIDER_TYPE;
+
 const applyProviderOptions = (
   provider: Provider,
   config: Config,
-  providerName: string,
+  type: string,
 ) => {
-  if (providerName !== "openai") return provider;
+  if (type !== "openai") return provider;
 
   const openai = provider as OpenAiProvider;
   openai.normalizeTextToolCalls =
@@ -100,8 +110,18 @@ interface SessionManager {
   resolveSession: (target: string) => string | undefined;
   // Persists the current session state to the store.
   save: () => void;
-  // Lists the providers keyed in the config.
+  // Lists the provider instances keyed in the config.
   listProviders: () => string[];
+  // Lists the provider instances with their id, backend type and default flag.
+  listProviderDetails: () => ProviderDetail[];
+  // Creates or replaces a provider instance and persists the config.
+  configureProvider: (
+    id: string,
+    provider: { type?: string; url: string; apikey: string; model?: string },
+    options?: { makeDefault?: boolean },
+  ) => void;
+  // Removes a provider instance and persists the config.
+  removeProvider: (id: string) => boolean;
   // Swaps the active provider, keeping the current model when possible.
   setProvider: (name: string) => Promise<boolean>;
   // Swaps the model of the active provider.
@@ -203,7 +223,8 @@ class SessionManagerImpl implements SessionManager {
     const providerConfig = this.config.config.providers[providerName];
     if (!providerConfig) throw new Error(`Missing config for ${providerName}`);
 
-    const model = agent.model ?? this.config.config.model;
+    const model =
+      agent.model ?? providerConfig.model ?? this.config.config.model;
     if (!model) throw new Error("No default model configured");
 
     this.provider = this.createProvider(providerName, providerConfig, model);
@@ -333,9 +354,31 @@ class SessionManagerImpl implements SessionManager {
     this.store.save(record);
   }
 
-  // Lists the providers keyed in the config.
+  // Lists the provider instances keyed in the config.
   listProviders() {
-    return Object.keys(this.config.config.providers);
+    return this.config.listProviders();
+  }
+
+  // Lists the provider instances with their id, backend type and default flag.
+  listProviderDetails() {
+    return this.config.listProviderDetails();
+  }
+
+  // Creates or replaces a provider instance and persists the config.
+  configureProvider(
+    id: string,
+    provider: { type?: string; url: string; apikey: string; model?: string },
+    options: { makeDefault?: boolean } = {},
+  ) {
+    this.config.configureProvider(id, provider, options);
+    this.config.writeConfig();
+  }
+
+  // Removes a provider instance (and persists the config).
+  removeProvider(id: string) {
+    const removed = this.config.removeProvider(id);
+    if (removed) this.config.writeConfig();
+    return removed;
   }
 
   // Replaces the active provider, keeping the current model when possible.
@@ -346,13 +389,14 @@ class SessionManagerImpl implements SessionManager {
     const providerConfig = this.config.config.providers[name];
     if (!providerConfig) return false;
 
-    const model = this.model ?? this.config.config.model;
-    if (!model) return false;
-
-    const provider = this.createProvider(name, providerConfig, model);
+    const provider = this.createProvider(
+      name,
+      providerConfig,
+      this.model ?? providerConfig.model ?? this.config.config.model ?? "",
+    );
     await provider.initialize();
 
-    if (!provider.setModel(model)) return false;
+    if (!this.selectModel(provider, providerConfig)) return false;
 
     this.provider = provider;
     this.providerName = name;
@@ -399,20 +443,30 @@ class SessionManagerImpl implements SessionManager {
 
     const providerName =
       agent.provider ?? this.providerName ?? this.config.config.defaultProvider;
+    if (!providerName) return false;
+
+    // Injected sessions may have a provider without a config entry (unit tests,
+    // embedders); keep the current model in that case instead of failing.
+    const switching = providerName !== this.providerName;
+    const providerConfig = this.config.config.providers[providerName];
+    if (!providerConfig && switching) return false;
+
     const model =
       agent.model ??
-      (providerName === this.providerName ? this.model : undefined) ??
-      this.config.config.model;
-    if (!providerName || !model) return false;
-
-    if (providerName !== this.providerName || model !== this.model) {
-      const providerConfig = this.config.config.providers[providerName];
-      if (!providerConfig) return false;
-
+      (switching ? undefined : this.model) ??
+      providerConfig?.model ??
+      this.config.config.model ??
+      "";
+    if (!model) return false;
+    if (switching || model !== this.model) {
       try {
-        const provider = this.createProvider(providerName, providerConfig, model);
+        const provider = this.createProvider(
+          providerName,
+          providerConfig ?? {},
+          model,
+        );
         await provider.initialize();
-        if (!provider.setModel(model)) return false;
+        if (!this.selectModel(provider, providerConfig ?? {})) return false;
 
         this.provider = provider;
         this.providerName = providerName;
@@ -836,15 +890,44 @@ class SessionManagerImpl implements SessionManager {
     this.history.unshift(message);
   }
 
-  // Resolves the factory for the given provider name and instantiates it.
+  // Applies the model the caller asked for; when the instance does not offer
+  // it, falls back to the instance's preferred model and finally to the first
+  // model it advertises, so switching between instances with different
+  // catalogues keeps working.
+  protected selectModel(
+    provider: Provider,
+    providerConfig: { model?: string },
+  ): boolean {
+    if (provider.setModel(provider.getModel())) return true;
+
+    let available: string[] = [];
+    try {
+      available = provider.listModels?.().map((model) => model.id) ?? [];
+    } catch {
+      // A provider that has not loaded its catalogue just keeps the fallbacks.
+    }
+
+    const candidates = [providerConfig.model, ...available].filter(
+      (model): model is string => Boolean(model),
+    );
+
+    for (const candidate of candidates) {
+      if (provider.setModel(candidate)) return true;
+    }
+
+    return false;
+  }
+
+  // Resolves the factory for the given provider instance id and instantiates it.
   protected createProvider(
     name: string,
-    config: { url: string; apikey: string },
+    config: { type?: string; url: string; apikey: string },
     model: string,
   ) {
-    const factory = PROVIDER_FACTORIES[name];
-    if (!factory) throw new Error(`Unsupported provider: ${name}`);
-    return applyProviderOptions(factory(config, model), this.config, name);
+    const type = providerType(config);
+    const factory = PROVIDER_FACTORIES[type];
+    if (!factory) throw new Error(`Unsupported provider type: ${type}`);
+    return applyProviderOptions(factory(config, model), this.config, type);
   }
 }
 

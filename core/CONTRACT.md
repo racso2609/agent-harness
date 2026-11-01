@@ -84,8 +84,17 @@ export interface IHarness {
   save(): void;
 
   // --- providers / modelos ---
-  listProviders(): string[];
-  setProvider(name: string): Promise<boolean>;
+listProviders(): string[];
+listProviderDetails(): ProviderDetail[];
+// Crea o reemplaza una instancia (id libre + type de backend).
+configureProvider(
+id: string,
+provider: ProviderConfig,
+options?: { makeDefault?: boolean; model?: string },
+): void;
+// Borra una instancia. false si no existe.
+removeProvider(id: string): boolean;
+setProvider(name: string): Promise<boolean>;
   listModels(): Model[];
   setModel(model: string): boolean;
 
@@ -154,22 +163,80 @@ export { logger }; // proxy al logger activo
 
 ```ts
 class Config {
-  needsSetup(): boolean;               // antes setupComplete()
-  validateConfig(): {
-    ok: boolean;
-    errors: string[];                  // provider default ausente, URL/key...
-  };
-  configureProvider(
-    name: string,
-    provider: ProviderConfig,
-    options?: { makeDefault?: boolean; model?: string },
-  ): void;
-  writeConfig(): void;
+needsSetup(): boolean; // antes setupComplete()
+validateConfig(): {
+ok: boolean;
+errors: string[]; // provider default ausente, URL/key...
+};
+configureProvider(
+id: string,
+provider: ProviderConfig,
+options?: { makeDefault?: boolean; model?: string },
+): void;
+removeProvider(id: string): boolean;
+listProviderDetails(): ProviderDetail[];
+writeConfig(): void;
 }
 ```
 
 `startSetup()` se elimina. El CLI implementa `startSetup` con `input`/`select`,
 llama a `configureProvider(...)` y `writeConfig()`.
+
+## Providers: id de instancia vs tipo de backend
+
+`providers` es un **mapa de instancias**: la clave es un id libre elegido por el
+usuario (`cheap`, `openrouter`, `work`, ...). El tipo de backend se declara en
+el campo `type` y es lo que decide que implementacion de `Provider` se instancia.
+
+```jsonc
+"providers": {
+  "cheap": {
+    "type": "openai",
+    "url": "https://api.cheaperinference.com/v1",
+    "apikey": "ci_...",
+    "model": "deepseek-v4.1-flash-1017"
+  },
+  "openrouter": {
+    "type": "openai",
+    "url": "https://openrouter.ai/api/v1",
+    "apikey": "sk-or-...",
+    "model": "openai/gpt-4o-mini"
+  }
+},
+"defaultProvider": "cheap"
+```
+
+```ts
+interface ProviderConfig {
+  // Backend que interpreta url/apikey. Default "openai" (compatibilidad).
+  type?: string;
+  url: string;
+  apikey: string;
+  // Modelo preferido de esta instancia. Se usa como fallback cuando el
+  // modelo activo no existe en la instancia destino (p.ej. al cambiar con
+  // /provider entre dos instancias con catalogos distintos).
+  model?: string;
+}
+
+interface ProviderDetail extends ProviderConfig {
+  id: string;
+  // true si es el defaultProvider del config.
+  isDefault: boolean;
+}
+```
+
+Reglas:
+
+- `SUPPORTED_PROVIDERS` pasa a significar **tipos de backend** disponibles
+  (hoy solo `"openai"`), no nombres de instancia.
+- Al escribir la config desde el CLI, `type` se persiste explicitamente; al
+  leerla, un provider sin `type` se interpreta como `"openai"` (las configs
+  actuales con `providers.openai` siguen funcionando sin migracion).
+- La sesion persiste el **id de instancia** en `record.provider`; los agentes
+  (`provider:` en el markdown) tambien referencian un id de instancia.
+- `Config` valida por entrada: `type` soportado, `url` y `apikey` no vacios. La
+  seleccion de modelo efectivo sigue igual: `agent.model ?? config.model` con
+  `providers.<id>.model` como fallback al cambiar de instancia.
 
 ## Primitivas de `SessionManager`
 
@@ -214,6 +281,7 @@ activo.
 | `changeSession(target?)` + `pickSession` | `listSessions()`, `resolveSession(target)`, `loadSession(target)` | `flows/pickSession.ts` pregunta y llama `loadSession` |
 | `promptApproval(request)` | `approveWith(handler)` | `flows/promptApproval.ts` pregunta `y/N/always` |
 | `Config.startSetup()` | `needsSetup()`, `validateConfig()`, `configureProvider()`, `writeConfig()` | `flows/startSetup.ts` pregunta URL/key/model |
+| — (nuevo) | `listProviderDetails()`, `configureProvider()`, `removeProvider()` | `flows/addProvider.ts`, `flows/removeProvider.ts`, `/provider add\|rm\|ls\|id` |
 
 ## Mapa de archivos que se mudan a `cli`
 
@@ -259,5 +327,8 @@ Se quedan en core: `types/`, `providers/`, `tools/`, `agents/`,
    resuelve.
 5. **Tests actuales.** `SessionManager.spec.ts` mockea `utils/stdin`; pasa a
    probar `approveWith`. `CommandRepository.spec.ts` se muda con el comando.
-6. **`scripts/omniroute.ts`** importa `printImage`; deja de hacerlo y vuelca la
+6. **Ids de provider.** La clave de `providers` es el id de instancia y se
+   persiste en sesiones y agentes. Renombrar un id deja huerfanas las sesiones
+   viejas; `removeProvider` no borra historial, solo la entrada de config.
+7. **`scripts/omniroute.ts`** importa `printImage`; deja de hacerlo y vuelca la
    URL/base64 con `console` (o se elimina el script si no aporta).
