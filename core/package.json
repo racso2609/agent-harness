@@ -1,8 +1,8 @@
 {
-  "name": "agent-harness",
+  "name": "@racso/core",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
+  "main": "./dist/index.js",
   "scripts": {
     "dev": "pnpm dlx tsx ./src/index.ts",
     "build": "tsc",
@@ -36,5 +36,12 @@
     "pino-pretty": "^13.2.0",
     "terminal-image": "^5.0.1",
     "tsconfig-paths": "^4.2.0"
+  },
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
   }
 }
