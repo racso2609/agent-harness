@@ -5,10 +5,11 @@
   "description": "Terminal client for the agent harness",
   "type": "module",
   "bin": {
-    "racso-harness": "./dist/main.js"
+    "racso-harness": "./bin/run.mjs"
   },
   "main": "./dist/main.js",
   "scripts": {
+    "start": "node --import ./loader.mjs ./dist/main.js",
     "dev": "pnpm dlx tsx ./src/main.ts",
     "build": "tsc",
     "lint": "eslint .",
@@ -16,7 +17,8 @@
   },
   "dependencies": {
     "@racso/core": "workspace:*",
-    "terminal-image": "^5.0.1"
+    "terminal-image": "^5.0.1",
+    "tsconfig-paths": "^4.2.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -24,6 +26,7 @@
     "eslint": "^10.12.0",
     "globals": "^17.13.0",
     "jiti": "^2.7.0",
+    "tsx": "^4.20.6",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.71.1",
     "vitest": "^5.0.3"
