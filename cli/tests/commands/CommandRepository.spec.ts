@@ -53,6 +53,24 @@ const makeContext = (): CommandContext => ({
       { id: "reviewer", name: "Reviewer" },
     ]),
     setAgent: vi.fn(async () => true),
+	listSkills: vi.fn(() => [
+		{
+			id: "deploy",
+			name: "Deploy",
+			description: "How to ship a release.",
+			tags: ["ops"],
+			source: "/skills/deploy/SKILL.md",
+		},
+	]),
+	reloadSkills: vi.fn(() => [
+		{
+			id: "deploy",
+			name: "Deploy",
+			description: "How to ship a release.",
+			tags: ["ops"],
+			source: "/skills/deploy/SKILL.md",
+		},
+	]),
     approveWith: vi.fn(),
     spawn: vi.fn((agentId: string, prompt: string) => ({
       spawnId: "spawn-1",
@@ -99,6 +117,8 @@ describe("CommandRepository", () => {
       "sessions",
       "resume",
       "compact",
+"skills",
+"skill",
       "status",
       "spawn",
       "children",
@@ -394,4 +414,63 @@ describe("CommandRepository", () => {
 
     expect(context.notify).toHaveBeenCalledWith("Unknown spawn: nope");
   });
+
+	it("lists skills with their ids, names and origin", () => {
+		const context = makeContext();
+
+		new CommandRepository().find("skills")?.run(context, []);
+
+		expect(context.notify).toHaveBeenCalledWith(
+			"- deploy (Deploy) [ops]: How to ship a release.",
+		);
+	});
+
+	it("reports when there are no skills", () => {
+		const context = makeContext();
+		vi.mocked(context.harness.listSkills).mockReturnValueOnce([]);
+
+		new CommandRepository().find("skills")?.run(context, []);
+
+		expect(context.notify).toHaveBeenCalledWith("No skills available");
+	});
+
+	it("shows one skill without calling the model", () => {
+		const context = makeContext();
+
+		new CommandRepository().find("skill")?.run(context, ["deploy"]);
+
+		expect(context.notify).toHaveBeenCalledWith(
+			"# Deploy (deploy)\nHow to ship a release.\nsource: /skills/deploy/SKILL.md\ntags: ops",
+		);
+		expect(context.harness.ask).not.toHaveBeenCalled();
+	});
+
+	it("rejects an unknown skill", () => {
+		const context = makeContext();
+
+		new CommandRepository().find("skill")?.run(context, ["nope"]);
+
+		expect(context.notify).toHaveBeenCalledWith("Unknown skill: nope");
+	});
+
+	it("reloads skills and reports the new count", () => {
+		const context = makeContext();
+
+		new CommandRepository().find("skill")?.run(context, ["reload"]);
+
+		expect(context.harness.reloadSkills).toHaveBeenCalled();
+		expect(context.notify).toHaveBeenCalledWith(
+			"Skills reloaded (1)\n- deploy (Deploy) [ops]: How to ship a release.",
+		);
+	});
+
+	it("explains the skill usage when called with no arguments", () => {
+		const context = makeContext();
+
+		new CommandRepository().find("skill")?.run(context, []);
+
+		expect(context.notify).toHaveBeenCalledWith(
+			"Usage: /skill <id> | /skill reload",
+		);
+	});
 });

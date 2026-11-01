@@ -1,4 +1,4 @@
-import type { IHarness, SpawnHandle } from "@racso/core";
+import type { IHarness, SkillSummary, SpawnHandle } from "@racso/core";
 import type { Flows } from "@/flows";
 import {
   formatSessionList,
@@ -155,7 +155,47 @@ const BUILT_IN_COMMANDS: CommandDefinition[] = [
       context.notify(compacted ? "Session compacted" : "Nothing to compact");
     },
   },
-  {
+  	{
+		name: "skills",
+		description: "List the available skills",
+		run: (context) => {
+			context.notify(formatSkillList(context.harness.listSkills()));
+		},
+	},
+	{
+		name: "skill",
+		description:
+			"Inspect a skill (no model call) or reload: /skill <id> | reload",
+		run: (context, args) => {
+			const [target] = args;
+
+			if (!target) {
+				context.notify("Usage: /skill <id> | /skill reload");
+				return;
+			}
+
+			if (target === "reload") {
+				const skills = context.harness.reloadSkills();
+				context.notify(
+					`Skills reloaded (${skills.length})\n${formatSkillList(skills)}`,
+				);
+				return;
+			}
+
+			// Reads the registry directly: no model call and no history entry,
+			// which makes it useful when debugging a skill definition.
+			const skill = context.harness
+				.listSkills()
+				.find((entry) => entry.id === target.toLowerCase());
+			if (!skill) {
+				context.notify(`Unknown skill: ${target}`);
+				return;
+			}
+
+			context.notify(formatSkill(skill));
+		},
+	},
+	{
     name: "status",
     description: "Show session usage, cost and context",
     run: (context) =>
@@ -212,6 +252,28 @@ const BUILT_IN_COMMANDS: CommandDefinition[] = [
     },
   },
 ];
+
+const formatSkill = (skill: SkillSummary) =>
+	[
+		`# ${skill.name} (${skill.id})`,
+		skill.description,
+		skill.source ? `source: ${skill.source}` : undefined,
+		(skill.tags ?? []).length ? `tags: ${skill.tags?.join(", ")}` : undefined,
+	]
+		.filter(Boolean)
+		.join("\n");
+
+const formatSkillList = (skills: SkillSummary[]) =>
+	skills.length
+		? skills
+				.map((skill) => {
+					const tags = (skill.tags ?? []).length
+						? ` [${skill.tags?.join(", ")}]`
+						: "";
+					return `- ${skill.id} (${skill.name})${tags}: ${skill.description}`;
+				})
+				.join("\n")
+		: "No skills available";
 
 const truncate = (text: string, max = 100) =>
   text.length > max ? `${text.slice(0, max)}…` : text;
