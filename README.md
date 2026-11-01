@@ -251,6 +251,11 @@ Se pueden añadir más directorios con `skills.dirs` en la config, con `skills`
 opcional (si no existe se usan los defaults). Gana el primer directorio en
 caso de ids repetidos; dentro de un mismo directorio gana `SKILL.md`.
 
+En una instalación limpia el primer directorio se siembra con los ejemplos que
+vienen en el paquete (hoy `frontend-design.md`), igual que ocurre con los
+agentes. Solo se copian si el directorio no existe o está vacío: **nunca se
+pisa** una skill tuya.
+
 ```json
 {
   "skills": {

@@ -14,7 +14,7 @@ import {
   ProviderDetail,
 } from "@/configuration";
 import { OpenAiProvider } from "@/providers/openai";
-import { SkillLoader, SkillRegistry } from "@/skills";
+import { ensureSkillsDir, SkillLoader, SkillRegistry } from "@/skills";
 import type { SkillSummary } from "@/skills";
 import { createToolRegistry, ToolContext, ToolRegistry } from "@/tools";
 import type { ApprovalDecision, ApprovalRequest } from "@/tools";
@@ -915,7 +915,13 @@ protected loadSkillRegistry() {
 		return;
 	}
 
-	this.skillRegistry = new SkillLoader(this.config.config.skills?.dirs).load();
+	const dirs = this.config.config.skills?.dirs ?? [];
+	const [primary] = dirs;
+	// Copy the bundled examples on a clean install, mirroring the agent
+	// seed: an existing directory is never touched.
+	if (primary) ensureSkillsDir(primary);
+
+	this.skillRegistry = new SkillLoader(dirs).load();
 }
 
   protected ensureAgentRegistry() {

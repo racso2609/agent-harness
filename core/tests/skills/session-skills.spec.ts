@@ -99,11 +99,25 @@ describe("SessionManager skills", () => {
 		expect(prompt).not.toContain("Run the smoke tests");
 	});
 
-	it("keeps the prompt free of skills when there are none", async () => {
+	it("seeds the bundled skills into an empty directory", async () => {
+		// The loader seeds config.skills.dirs[0] on a clean install, so the
+		// example skill is what a first run sees.
 		const session = await makeSession();
 
-		const prompt = session.history[0].content as string;
-		expect(prompt).not.toContain("## Skills");
+		expect(session.listSkills().map((skill) => skill.id)).toContain(
+			"frontend-design",
+		);
+	});
+
+	it("does not seed over an existing skill directory", async () => {
+		writeSkill("mine");
+		const before = fs.readdirSync(skillsDir).sort();
+
+		await makeSession();
+
+		// The seed skips a directory that already holds a skill, so the
+		// example never lands next to the user's own definitions.
+		expect(fs.readdirSync(skillsDir).sort()).toEqual(before);
 	});
 
 	it("keeps the prompt free of skills when disabled", async () => {
@@ -161,27 +175,31 @@ describe("SessionManager skills", () => {
 		writeSkill("deploy");
 		const session = await makeSession();
 
-		expect(session.listSkills()).toEqual([
-			{
-				id: "deploy",
-				name: "Deploy",
-				description: "How to ship a release.",
-				source: path.join(skillsDir, "deploy", "SKILL.md"),
-			},
-		]);
+		const [first, ...rest] = session.listSkills();
+		expect(first).toEqual({
+			id: "deploy",
+			name: "Deploy",
+			description: "How to ship a release.",
+			source: path.join(skillsDir, "deploy", "SKILL.md"),
+		});
+		// A user skill already present means no seed, so deploy stands alone.
+		expect(rest).toEqual([]);
 	});
 
 	it("reload picks up a new skill and refreshes the prompt once", async () => {
 		const session = await makeSession();
-		expect(session.history[0].content as string).not.toContain("## Skills");
+		const before = (session.history[0].content as string).match(/- /g)?.length;
 
 		writeSkill("deploy");
 		const summaries = session.reloadSkills();
 
-		expect(summaries.map((skill) => skill.id)).toEqual(["deploy"]);
+		expect(summaries.map((skill) => skill.id)).toContain("deploy");
 
 		const systems = session.history.filter((m) => m.role === "system");
 		expect(systems).toHaveLength(1);
-		expect(systems[0].content as string).toContain("## Skills");
+		expect((systems[0].content as string).match(/- /g)?.length).toBe(
+			(before ?? 0) + 1,
+		);
+		expect(systems[0].content as string).toContain("- deploy — ");
 	});
 });
