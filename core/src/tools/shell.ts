@@ -5,6 +5,8 @@ import type { Tool, ToolContext, ToolResult } from "./Tool";
 interface ShellOptions {
   timeoutMs?: number;
   maxOutputBytes?: number;
+// Minimum gap between live output chunks. 0 disables throttling.
+outputThrottleMs?: number;
 }
 
 // Picks the shell to spawn: the user's login shell when it looks usable,
@@ -58,10 +60,12 @@ class ShellTool implements Tool {
 
   protected timeoutMs: number;
   protected maxOutputBytes: number;
+protected outputThrottleMs: number;
 
   constructor(options: ShellOptions = {}) {
     this.timeoutMs = options.timeoutMs ?? 30_000;
     this.maxOutputBytes = options.maxOutputBytes ?? 32_768;
+this.outputThrottleMs = options.outputThrottleMs ?? 100;
   }
 
   async execute(ctx: ToolContext, args: unknown): Promise<ToolResult> {
@@ -107,6 +111,35 @@ class ShellTool implements Tool {
       let timedOut = false;
       let settled = false;
 
+// Live stream to the UI. Chunks are coalesced per window so a chatty
+// command does not flood the renderer; the final result still carries the
+// (possibly truncated) full output.
+let pending = "";
+let lastEmit = 0;
+const emitOutput = (chunk: string) => {
+if (!ctx.onOutput || !chunk) return;
+
+pending += chunk;
+
+const now = Date.now();
+if (now - lastEmit < this.outputThrottleMs) return;
+
+lastEmit = now;
+const payload = pending;
+pending = "";
+ctx.onOutput(payload);
+};
+
+// Flushes whatever is still buffered when the command ends.
+const flushOutput = () => {
+if (!ctx.onOutput || !pending) return;
+
+const payload = pending;
+pending = "";
+ctx.onOutput(payload);
+};
+
+
       const append = (current: string, chunk: string) => {
         if (current.length >= this.maxOutputBytes) {
           truncated = true;
@@ -145,6 +178,7 @@ class ShellTool implements Tool {
       ctx.signal?.addEventListener("abort", onAbort);
 
       const finish = (result: ToolResult) => {
+ flushOutput();
         if (settled) return;
         settled = true;
         clearTimeout(timer);
@@ -154,10 +188,12 @@ class ShellTool implements Tool {
 
       child.stdout?.on("data", (chunk: Buffer) => {
         stdout = append(stdout, chunk.toString("utf8"));
+ emitOutput(chunk.toString("utf8"));
       });
 
       child.stderr?.on("data", (chunk: Buffer) => {
         stderr = append(stderr, chunk.toString("utf8"));
+ emitOutput(chunk.toString("utf8"));
       });
 
       child.on("error", (err) => {

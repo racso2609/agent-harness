@@ -685,7 +685,7 @@ return this.spawnManager().on(listener);
       }
 
       for (const call of result.turn.toolCalls) {
-        const toolResult = await this.runTool(call);
+const toolResult = await this.runTool(call, onEvent);
         const content = toolResult.isError
           ? `[tool error] ${toolResult.output}`
           : toolResult.output;
@@ -705,10 +705,13 @@ return this.spawnManager().on(listener);
   }
 
   // Tool calls run sequentially in v1 so ordering and logs stay predictable.
-  protected async runTool(call: ToolCall): Promise<ToolResult> {
+protected async runTool(
+call: ToolCall,
+onEvent?: ChatEventListener,
+): Promise<ToolResult> {
     logger.info(`Tool call: ${call.name} ${this.preview(call.args)}`);
 
-    const result = await this.tools.execute(this.toolContext(), call);
+const result = await this.tools.execute(this.toolContext(call, onEvent), call);
 
     if (result.isError) {
       logger.warn(`Tool ${call.name} failed: ${this.preview(result.output)}`);
@@ -727,7 +730,7 @@ return this.spawnManager().on(listener);
     this.history.push(message);
   }
 
-  protected toolContext(): ToolContext {
+protected toolContext(call?: ToolCall, onEvent?: ChatEventListener): ToolContext {
 		return {
 			cwd: this.config.config.tools?.workspace ?? process.cwd(),
 			sessionId: this.sessionId,
@@ -735,6 +738,12 @@ return this.spawnManager().on(listener);
 			spawn: (agentId, prompt) => this.spawn(agentId, prompt),
 			getSkillBody: (id) => this.skillBody(id),
 			listSkillIds: () => this.skillIds(),
+ // Streams shell/tool output live, tagged with the originating call so the
+ // UI can attribute it.
+ onOutput: (chunk) => {
+ if (!call) return;
+ onEvent?.({ type: "toolOutput", id: call.id, name: call.name, chunk });
+ },
 		};
   }
 

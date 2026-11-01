@@ -90,7 +90,8 @@ export type ChatEvent =
   | { type: "text"; delta: string }
   | { type: "reasoning"; delta: string }
   | { type: "toolCallStart"; id: string; name: string }
-  | { type: "toolCallEnd"; id: string; name: string };
+  | { type: "toolCallEnd"; id: string; name: string }
+ | { type: "toolOutput"; id: string; name: string; chunk: string };
 
 export type ChatEventListener = (event: ChatEvent) => void;
 

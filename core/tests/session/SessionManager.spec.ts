@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { ChatEvent } from "../../src/types/providers";
 import type { Config } from "../../src/configuration";
 import { OpenAiProvider } from "../../src/providers/openai";
 import { SessionManager } from "../../src/session/SessionManager";
@@ -644,6 +645,87 @@ describe("SessionManager agent loop", () => {
     expect(execute).toHaveBeenCalledTimes(2);
     expect(response.text).toBe("Stopped: maximum tool iterations reached");
   });
+});
+
+describe("SessionManager turn events", () => {
+let provider: OpenAiProvider;
+let store: SessionStore;
+
+beforeEach(() => {
+provider = new OpenAiProvider("https://api.example.com", "key", "model");
+store = makeStore();
+});
+
+const makeSession = () => {
+const session = new SessionManager(makeConfig({ autoCompact: false }), store);
+session.provider = provider;
+session.providerName = "openai";
+session.model = "model";
+vi.spyOn(session, "classifyAction").mockResolvedValue("textGeneration");
+return session;
+};
+
+it("forwards tool output tagged with the originating call", async () => {
+const session = makeSession();
+session.tools.register({
+name: "stream",
+description: "Stream output",
+parameters: { type: "object" },
+execute: async (ctx) => {
+ctx.onOutput?.("live chunk");
+return { output: "final output" };
+},
+});
+
+provider.chat = vi
+.fn()
+.mockResolvedValueOnce({
+turn: {
+text: "",
+toolCalls: [{ id: "call_9", name: "stream", args: {} }],
+finishReason: "toolCalls",
+},
+})
+.mockResolvedValueOnce(stopTurn("done"));
+
+const events: ChatEvent[] = [];
+await session.ask("go", (event) => {
+events.push(event);
+});
+
+const outputs = events.filter((event) => event.type === "toolOutput");
+expect(outputs).toEqual([
+{ type: "toolOutput", id: "call_9", name: "stream", chunk: "live chunk" },
+]);
+});
+
+it("runs the turn unchanged when no listener is passed", async () => {
+const session = makeSession();
+session.tools.register({
+name: "stream",
+description: "Stream output",
+parameters: { type: "object" },
+execute: async (ctx) => {
+ctx.onOutput?.("ignored");
+return { output: "final output" };
+},
+});
+
+provider.chat = vi
+.fn()
+.mockResolvedValueOnce({
+turn: {
+text: "",
+toolCalls: [{ id: "call_9", name: "stream", args: {} }],
+finishReason: "toolCalls",
+},
+})
+.mockResolvedValueOnce(stopTurn("done"));
+
+const response = await session.ask("go");
+
+expect(response.text).toBe("done");
+});
 });
 
 describe("SessionManager spawn", () => {

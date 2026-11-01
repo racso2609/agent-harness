@@ -155,10 +155,9 @@ review: `ask()` devolvía solo el `AgentResponse` final y, aunque `OpenAiProvide
 hecho: `ChatEvent`/`ChatEventListener` en `types/providers.ts` (`text`, `reasoning`, `toolCallStart`, `toolCallEnd`). `_handleStream(response, onEvent?)` emite texto y razonamiento por delta y `toolCallEnd` por llamada; `chat()` reenvía `options.onEvent`. `AssistantTurn.reasoning` guarda el razonamiento, nunca vuelve al history. `ask(prompt, onEvent?)` y `runAgentLoop` lo propagan; `IHarness.ask(prompt, { onEvent })` vía `AskOptions`. El `_onChunk` del constructor se deja intacto (dos caminos en paralelo, documentado). 6 tests en `openai.spec.ts` (texto, `reasoning_content`, fallback `reasoning`, sin razonamiento, `toolCallEnd`, y que omitir `onEvent` no cambia nada). Build + 205 tests (core) + 49 (cli) + lint verdes.
 Bug encontrado por los tests: la captura de razonamiento había quedado dentro del `if (content)`, así que se perdía en chunks que solo traían razonamiento.
 
-- [ ] **Emitir salida viva de `shell` vía `ToolContext.onOutput`**
-  Es el nivel 2 de §4.2: un `shell` largo no muestra nada hasta terminar.
-  Done when: `ShellTool` llama `ctx.onOutput` con throttle (~100 ms) y el truncado sigue aplicando solo al resultado final.
-  Depends on: emitir progreso del turno desde `ask()`.
+- [x] **Emitir salida viva de `shell` vía `ToolContext.onOutput`**
+hecho: `ToolContext.onOutput?: (chunk) => void` y `ShellTool` coalesce los chunks por ventana (`outputThrottleMs`, default 100, `0` lo desactiva) y hace flush al terminar. `SessionManager` lo etiqueta con `id`/`name` de la call y lo emite como `ChatEvent` `toolOutput`, así que la UI lo recibe por el mismo canal que el resto. El truncado (`maxOutputBytes`) sigue aplicando **solo** al resultado final, no al stream (test explícito).
+4 tests en `tools/shell.spec.ts` (stream, sin `onOutput`, stream sin truncar, coalescing) + 2 en `SessionManager.spec.ts` (etiquetado con la call, turno idéntico sin listener). Build + 211 tests (core) + 49 (cli) + lint verdes.
 
 - [ ] **Incluir un resumen de cierre en `AgentResponse`**
   La UI debe decir qué pasó, qué falta y qué sigue sin parsear texto libre ni gastar un turno extra.
@@ -170,7 +169,7 @@ Bug encontrado por los tests: la captura de razonamiento había quedado dentro d
 2. [x] Listener de spawn en `IHarness`.
 3. [x] `onEvent` en `ask()` + `reasoning` en el provider.
 4. [ ] Persistencia de handles + migración de `SessionStore`.
-5. [ ] `ToolContext.onOutput` (shell vivo).
+5. [x] `ToolContext.onOutput` (shell vivo).
 6. [ ] Resumen de cierre estructurado.
 
 Nota: los puntos 1–2 desbloquean `cli/TODO.md` §P1; el 3 desbloquea §P3.

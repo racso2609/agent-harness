@@ -31,6 +31,9 @@ export interface ToolContext {
 	getSkillBody?: (id: string) => string | undefined;
 	// Lists the ids of the loaded skills, for error messages.
 	listSkillIds?: () => string[];
+	// Live output of a long-running tool. Chunks are already throttled by the
+	// tool. Optional: every tool must work without it.
+	onOutput?: (chunk: string) => void;
 }
 
 // Outcome of a spawn request made through the tool context.
