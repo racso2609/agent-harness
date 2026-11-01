@@ -2,9 +2,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { env, harnessHome } from "@/utils/env";
 import { History } from "@/types/providers";
+import type { SpawnHandle } from "@/session/spawn";
 import type { SessionUsage } from "@/types/session";
 
-const SESSION_VERSION = 3;
+const SESSION_VERSION = 4;
 
 export interface SessionRecord {
   version?: number;
@@ -27,6 +28,9 @@ export interface SessionRecord {
   usage?: SessionUsage;
   // Accumulated cost in USD for the session.
   costUsd?: number;
+// Background children this session launched, in launch order. Restored as
+// read-only history: a resumed session cannot reattach to them.
+spawns?: SpawnHandle[];
 }
 
 const DEFAULT_SESSIONS_DIR = path.join(
@@ -67,6 +71,10 @@ class SessionStore {
             : message,
         );
       }
+
+// v4 added the spawn history. Older records simply have none; normalising
+// here keeps callers from branching on the version.
+record.spawns ??= [];
 
       return record;
     } catch {

@@ -200,6 +200,9 @@ class SessionManagerImpl implements SessionManager {
   protected approvalHandler?: ApprovalHandler;
   // Background child agents launched by this session. Created lazily.
   protected spawns?: SpawnManager;
+// Children this session launched, kept in launch order so the transcript
+// survives /resume. Restored read-only: children are never reattached.
+protected spawnHistory: SpawnHandle[] = [];
 
   constructor(config = new Config(), store = new SessionStore()) {
     this.config = config;
@@ -285,6 +288,9 @@ this.loadSkillRegistry();
 		});
 
     this.history = record.history ?? [];
+// Children from a previous run are history only: they cannot be
+// reattached, and their status is whatever it was when persisted.
+this.spawnHistory = record.spawns ?? [];
     // Sessions persisted with an agent already start with its persona. Older
     // sessions keep their system messages (e.g. compacted memory) untouched.
     this.applySystemPrompt(Boolean(record.agentId));
@@ -366,6 +372,7 @@ this.loadSkillRegistry();
       history: this.history,
       usage: this.usage,
       costUsd: this.costUsd,
+spawns: this.spawnHistory.length ? this.spawnHistory : undefined,
     };
 
     this.store.save(record);
@@ -528,12 +535,16 @@ reloadSkills(): SkillSummary[] {
       throw new Error("Spawning is disabled (sessions.spawnEnabled = false)");
     }
 
-    return this.spawnManager().spawn({
+const handle = this.spawnManager().spawn({
       agentId,
       sessionId: this.sessionId,
       prompt,
       context: options.context,
     });
+
+this.spawnHistory = [...this.spawnHistory, handle];
+
+return handle;
   }
 
   pollSpawn(spawnId: string) {
@@ -588,6 +599,15 @@ return this.spawnManager().on(listener);
     // system message so the next turn can take it into account. The full child
     // history is never shared; the text is capped to avoid inflating context.
     this.spawns.on((event) => {
+      if (event.type === "settled") {
+      // Keep the persisted history in sync with the real outcome.
+      this.spawnHistory = this.spawnHistory.map((entry) =>
+      entry.spawnId === event.handle.spawnId ? event.handle : entry,
+      );
+      // A child can finish without another turn, so persist here too.
+      this.save();
+      }
+
       if (event.type !== "settled") return;
       this.history.push({
         role: "system",

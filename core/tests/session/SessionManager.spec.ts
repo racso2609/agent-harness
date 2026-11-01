@@ -811,6 +811,92 @@ expect(response.text).toBe("done");
 });
 });
 
+describe("SessionManager spawn history", () => {
+let provider: OpenAiProvider;
+let store: SessionStore;
+let saved: Record<string, unknown>[];
+
+beforeEach(() => {
+provider = new OpenAiProvider("https://api.example.com", "key", "model");
+saved = [];
+store = {
+save: vi.fn((record: Record<string, unknown>) => saved.push(record)),
+load: vi.fn(() => null),
+list: vi.fn(() => []),
+} as unknown as SessionStore;
+});
+
+afterEach(() => {
+vi.restoreAllMocks();
+});
+
+const makeSession = () => {
+const session = new SessionManager(
+makeConfig({
+autoCompact: false,
+defaultProvider: "openai",
+model: "model",
+providers: { openai: { url: "https://api.example.com", apikey: "key" } },
+}),
+store,
+);
+session.provider = provider;
+session.providerName = "openai";
+session.model = "model";
+return session;
+};
+
+const stubProvider = (text = "child answer") => {
+vi.spyOn(OpenAiProvider.prototype, "initialize").mockResolvedValue();
+vi.spyOn(OpenAiProvider.prototype, "setModel").mockReturnValue(true);
+vi.spyOn(OpenAiProvider.prototype, "getModel").mockImplementation(
+function (this: OpenAiProvider) {
+return (this as unknown as { model?: string }).model ?? "model";
+},
+);
+vi.spyOn(OpenAiProvider.prototype, "getContextWindow").mockReturnValue(1000);
+vi.spyOn(OpenAiProvider.prototype, "chat").mockResolvedValue(stopTurn(text));
+};
+
+it("persists the launched child with its final status", async () => {
+stubProvider("child answer");
+const session = makeSession();
+
+const handle = session.spawn("coder", "do the thing");
+await session.waitSpawn(handle.spawnId);
+
+const last = saved.at(-1);
+const spawns = last?.spawns as Array<Record<string, unknown>>;
+const stored = spawns.find((entry) => entry.spawnId === handle.spawnId);
+
+expect(stored).toMatchObject({ agentId: "coder", status: "done" });
+expect(stored?.finishedAt).toBeDefined();
+});
+
+it("stores a failed child with its error", async () => {
+vi.spyOn(OpenAiProvider.prototype, "initialize").mockRejectedValue(
+new Error("provider down"),
+);
+const session = makeSession();
+
+const handle = session.spawn("coder", "boom");
+await session.waitSpawn(handle.spawnId);
+
+const spawns = saved.at(-1)?.spawns as Array<Record<string, unknown>>;
+const stored = spawns.find((entry) => entry.spawnId === handle.spawnId);
+
+expect(stored).toMatchObject({ status: "error" });
+expect(String(stored?.error)).toContain("provider down");
+});
+
+it("omits the field entirely when nothing was spawned", () => {
+const session = makeSession();
+session.save();
+
+expect(saved.at(-1)?.spawns).toBeUndefined();
+});
+});
+
 describe("SessionManager spawn", () => {
   const spawnConfig = {
     autoCompact: false,

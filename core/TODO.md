@@ -145,16 +145,13 @@ Depends on: exponer `SpawnEvent` y `SpawnStatus` en el contrato público. [x]
   Done when: un test fija exactamente ese shape y `listSpawns()` está en `IHarness`.
   Depends on: añadir un listener de spawn al `IHarness`.
 
-- [ ] **Persistir eventos de spawn en la sesión** — APLAZADO a propósito (2026-11-01)
-review: los handles viven solo en memoria (`SpawnManager`), así que tras `/resume` no hay rastro de qué hijos corrieron ni cómo terminaron. No es un bug visible hoy: no existe ninguna superficie que los lea y los hijos no sobreviven al reinicio del proceso (no se re-lanzan al cargar la sesión).
-por qué se aplaza: persistirlos sin consumidor es coste sin beneficio, y añade una migración de `SessionStore` (`SESSION_VERSION` 3 → 4) que habría que mantener. Se hace cuando `/resume` deba mostrar el histórico de hijos.
-qué falta para cerrarlo (checklist al retomarlo):
-1. Añadir `spawns?: SpawnHandle[]` (o `SpawnEvent[]`) a `SessionRecord` y subir `SESSION_VERSION` a 4.
-2. Migración en `SessionStore.load`: v3 → v4 con `spawns: []`; no romper sesiones existentes.
-3. Escribirlo al hacer `settled` desde `SessionManager` (ya hay suscripción interna ahí); en `started` solo si se quiere el histórico completo.
-4. Restaurar en `load` como **histórico de solo lectura**: los hijos cargados NO son reanudables, el `status` se conserva tal cual quedó.
-5. Tests: round-trip de una sesión con un hijo `done` y otro `error`; y migración v3 → v4.
-Decisión de formato pendiente: guardar eventos (`started`/`settled`, fiel al runtime) o solo el handle final (más compacto). El evento permite reconstruir duraciones; el handle no.
+- [x] **Persistir eventos de spawn en la sesión**
+review: los handles vivían solo en `SpawnManager`, así que tras `/resume` no había rastro de qué hijos corrieron ni cómo terminaron, y la franja del TUI se perdía entera.
+decisión de formato: se guarda el **handle final** (`SpawnHandle[]`), no los eventos. El handle ya trae `startedAt`/`finishedAt` (toda la duración que hace falta) y crece O(hijos), mientras el array de eventos crece O(reintentos). Para un histórico de lectura basta.
+decisión de I/O: `save()` ya hace `writeFileSync` completo y se llama ~7 veces por turno; añadir una escritura por evento habría duplicado I/O sobre un JSON que crece con el historial. En su lugar, `SessionManager` acumula `spawnHistory` en memoria y lo persiste dentro del `save()` existente. Excepción: al hacer `settled` sí se llama a `save()`, porque un hijo puede terminar sin que haya otro turno y su estado no debe perderse.
+hecho: `SessionRecord.spawns?: SpawnHandle[]`, `SESSION_VERSION` 3 → 4, migración en `load` (`record.spawns ??= []`, así los llamadores no ramifican por versión). El campo se **omite** del JSON cuando no hay hijos (test). Al restaurar es histórico de **solo lectura**: los hijos no se reanudan y conservan el `status` con el que se persistieron.
+tests: 3 en `SessionStore.spec.ts` (round-trip con un hijo `done` y otro `error`, migración v3 → v4, campo omitido si no hay hijos) + 3 en `SessionManager.spec.ts` (persiste el hijo al terminar, persiste el error, no escribe el campo sin hijos). Build + 220 tests (core) + 103 (cli) + lint verdes.
+pendiente: no hay superficie que **muestre** este histórico al reanudar; `listSpawns()` sigue devolviendo solo los del proceso actual. Pintar los hijos restaurados en la franja del TUI (atenuados, sin tiempo corriendo) es el siguiente paso natural.
 
 - [x] **Emitir progreso del turno desde `ask()`**
 review: `ask()` devolvía solo el `AgentResponse` final y, aunque `OpenAiProvider` ya tenía un `_onChunk` en el constructor, era global del provider (no por llamada) y solo transportaba texto: no había forma de atribuir eventos a un turno ni de ver tool calls o razonamiento.
@@ -173,7 +170,7 @@ Nota: hoy lo rellena `runAgentLoop`; el camino de `generateImage` no lo emite (n
 1. [x] Contrato: `SpawnEvent`/`SpawnStatus` reexportados + `listSpawns()` ya expuesto en `IHarness`.
 2. [x] Listener de spawn en `IHarness`.
 3. [x] `onEvent` en `ask()` + `reasoning` en el provider.
-4. [ ] Persistencia de handles + migración de `SessionStore` — APLAZADO, ver checklist en el bloque de arriba.
+4. [x] Persistencia de handles + migración de `SessionStore`.
 5. [x] `ToolContext.onOutput` (shell vivo).
 6. [x] Resumen de cierre estructurado.
 
