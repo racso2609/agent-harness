@@ -4,13 +4,6 @@ import { OpenAiProvider } from "../../src/providers/openai";
 import { SessionManager } from "../../src/session/SessionManager";
 import type { SessionStore } from "../../src/session/SessionStore";
 
-const { inputMock } = vi.hoisted(() => ({ inputMock: vi.fn() }));
-vi.mock("../../src/utils/stdin", async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import("../../src/utils/stdin")>();
-  return { ...actual, input: inputMock };
-});
-
 const makeConfig = (overrides: Record<string, unknown> = {}) =>
   ({
     config: { providers: {}, ...overrides },
@@ -222,7 +215,8 @@ describe("SessionManager agent definition", () => {
 
   it("remembers an 'always' answer for the session", async () => {
     const session = makeSession({ tools: { approval: "ask" } });
-    inputMock.mockResolvedValue("always");
+    const handler = vi.fn(async () => "always" as const);
+    session.approveWith(handler);
     const request = {
       tool: "writeFile",
       kind: "write" as const,
@@ -232,12 +226,20 @@ describe("SessionManager agent definition", () => {
     await expect(session["approve"](request)).resolves.toBe("allow");
     await expect(session["approve"](request)).resolves.toBe("allow");
 
-    expect(inputMock).toHaveBeenCalledTimes(1);
+    expect(handler).toHaveBeenCalledTimes(1);
   });
 
-  it("denies a write in ask mode when the user says no", async () => {
+  it("denies a write in ask mode when the handler says no", async () => {
     const session = makeSession({ tools: { approval: "ask" } });
-    inputMock.mockResolvedValue("n");
+    session.approveWith(vi.fn(async () => "deny" as const));
+
+    await expect(
+      session["approve"]({ tool: "writeFile", kind: "write", subject: "/x" }),
+    ).resolves.toBe("deny");
+  });
+
+  it("denies writes in ask mode when no approval handler is installed", async () => {
+    const session = makeSession({ tools: { approval: "ask" } });
 
     await expect(
       session["approve"]({ tool: "writeFile", kind: "write", subject: "/x" }),
@@ -288,7 +290,7 @@ describe("SessionManager agent definition", () => {
       tools: ["readFile"],
     });
 
-    const changed = await session.changeAgent("reader");
+    const changed = await session.setAgent("reader");
 
     expect(changed).toBe(true);
     expect(session.status().agent).toBe("reader");
@@ -320,7 +322,7 @@ describe("SessionManager agent definition", () => {
       model: "cheap-model",
     });
 
-    const changed = await session.changeAgent("coder");
+    const changed = await session.setAgent("coder");
 
     expect(changed).toBe(true);
     expect(created).toEqual([{ provider: "openai", model: "cheap-model" }]);
@@ -355,7 +357,7 @@ describe("SessionManager agent definition", () => {
       personality: "x",
     });
 
-    const changed = await session.changeAgent("plain");
+    const changed = await session.setAgent("plain");
 
     expect(changed).toBe(true);
     expect(created).toEqual([]);
@@ -418,31 +420,23 @@ describe("SessionManager stored sessions", () => {
     ]);
   });
 
-  it("resumes a session by list index, persisting the current one first", async () => {
+  it("resolves a session by list index", () => {
     const session = makeSession([record("session-1"), record("session-2")]);
-    const save = vi.spyOn(session, "save");
-    const load = vi.spyOn(session, "load").mockResolvedValue(true);
 
-    await expect(session.changeSession("2")).resolves.toBe(true);
-
-    expect(save).toHaveBeenCalled();
-    expect(load).toHaveBeenCalledWith("session-2");
+    expect(session.resolveSession("2")).toBe("session-2");
   });
 
-  it("resumes a session by unique id prefix", async () => {
+  it("resolves a session by unique id prefix", () => {
     const session = makeSession([record("session-aaa"), record("session-bbb")]);
-    const load = vi.spyOn(session, "load").mockResolvedValue(true);
 
-    await expect(session.changeSession("session-b")).resolves.toBe(true);
-
-    expect(load).toHaveBeenCalledWith("session-bbb");
+    expect(session.resolveSession("session-b")).toBe("session-bbb");
   });
 
-  it("rejects ambiguous prefixes and unknown sessions", async () => {
+  it("rejects ambiguous prefixes and unknown sessions", () => {
     const session = makeSession([record("session-aaa"), record("session-aab")]);
 
-    await expect(session.changeSession("session-aa")).resolves.toBe(false);
-    await expect(session.changeSession("missing")).resolves.toBe(false);
+    expect(session.resolveSession("session-aa")).toBeUndefined();
+    expect(session.resolveSession("missing")).toBeUndefined();
   });
 });
 
