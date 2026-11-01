@@ -4,6 +4,7 @@ import type { UiStatus } from "../UiAdapter";
 import type { Block, InlineSpan, StreamDocument } from "./markdown";
 import { colorFor, elapsedFor, iconFor, type SpawnEntry, visibleSpawns } from "./progress";
 import { GLYPH, resolveTheme, type Role, type Theme } from "./theme";
+import { collapse } from "./collapse";
 
 // One rendered entry. `answer` and `reasoning` carry the live markdown
 // document; everything else is plain text.
@@ -27,6 +28,10 @@ activity?: string;
 spawns: TuiSpawn[];
 approval?: TuiApproval;
 theme: Theme;
+// A turn is in flight: reasoning and tool output preview their tail.
+running?: boolean;
+// Entries the user expanded explicitly.
+expanded: Set<number>;
 }
 
 interface AppProps {
@@ -34,6 +39,8 @@ state: TuiState;
 onSubmit: (prompt: string) => void;
 onExit: () => void;
 onDecision: (decision: "allow" | "deny" | "always") => void;
+onToggle: (kind: "reasoning" | "tool", index: number) => void;
+onToggleAll: (kind: "reasoning" | "tool") => void;
 }
 
 const CHOICES = [
@@ -42,7 +49,14 @@ const CHOICES = [
 { key: "deny" as const, label: "deny" },
 ];
 
-export const App = ({ state, onSubmit, onExit, onDecision }: AppProps) => {
+export const App = ({
+state,
+onSubmit,
+onExit,
+onDecision,
+onToggle,
+onToggleAll,
+}: AppProps) => {
 const [draft, setDraft] = useState("");
 const [choice, setChoice] = useState(0);
 const [now, setNow] = useState(() => Date.now());
@@ -63,6 +77,18 @@ return () => clearInterval(timer);
 useInput((input, key) => {
 if (key.ctrl && input === "c") {
 onExit();
+return;
+}
+
+// Collapse controls work while typing so an expanding turn can be quieted
+// without losing the draft.
+if (key.ctrl && input === "r") {
+onToggleAll("reasoning");
+return;
+}
+
+if (key.ctrl && input === "t") {
+onToggleAll("tool");
 return;
 }
 
@@ -106,8 +132,22 @@ return;
 
 if (key.return) {
 const value = draft.trim();
+
+// Empty input + enter opens the last collapsible entry the user can see.
+if (!value) {
+const lastIndex = state.lines.length - 1;
+const last = state.lines[lastIndex];
+
+if (last && (last.role === "reasoning" || last.role === "tool")) {
+onToggle(last.role, lastIndex);
+return;
+}
+
+return;
+}
+
 setDraft("");
-if (value) onSubmit(value);
+onSubmit(value);
 return;
 }
 
@@ -127,7 +167,13 @@ return (
 <Box flexDirection="column" height="100%">
 <Box flexDirection="column" flexGrow={1} borderStyle="round" paddingX={1}>
 {state.lines.slice(-60).map((line, index) => (
-<Line key={index} line={line} theme={theme} />
+<Line
+key={index}
+line={line}
+theme={theme}
+running={state.running ?? false}
+expanded={state.expanded.has(index)}
+/>
 ))}
 </Box>
 
@@ -178,29 +224,102 @@ inverse={index === choice}
 
 // Renders one entry with the style of its role. Colour alone is not enough to
 // tell speakers apart, so each role also gets a glyph.
-const Line = ({ line, theme }: { line: TuiLine; theme: Theme }) => {
+const Line = ({
+line,
+theme,
+running,
+expanded,
+}: {
+line: TuiLine;
+theme: Theme;
+running: boolean;
+expanded: boolean;
+}) => {
 // A spawn entry is informational, so it borrows the notice style.
 const role: Role = line.role === "spawn" ? "notice" : line.role;
 const style = theme[role];
 const glyph = line.role === "spawn" ? "◈ " : GLYPH[role];
 
-if (line.role === "answer" || line.role === "reasoning") {
+if (line.role === "reasoning") {
+const text = [
+...line.doc.blocks.map((block) => plainBlock(block)),
+line.doc.open,
+]
+.filter(Boolean)
+.join("\n");
+const view = collapse({
+role: "reasoning",
+text,
+width: Infinity,
+running,
+expanded,
+});
+
+if (!view.shown) {
+return (
+<Text {...style}>
+{glyph}
+{view.summary} · ctrl+r
+</Text>
+);
+}
+
+return (
+<Box flexDirection="column">
+<Text {...style}>
+{glyph}
+{view.hidden ? `${view.summary} · ctrl+r` : view.summary}
+</Text>
+<Box paddingLeft={2}>
+<Text {...style}>{view.shown}</Text>
+</Box>
+</Box>
+);
+}
+
+if (line.role === "answer") {
 return (
 <Box flexDirection="column">
 {line.doc.blocks.map((block, index) => (
 <Block key={index} block={block} role={line.role} style={style} />
 ))}
-{line.doc.open ? (
-<Text {...style}>
-{glyph}
-{line.doc.open}
-</Text>
-) : null}
+{line.doc.open ? <Text {...style}>{line.doc.open}</Text> : null}
 </Box>
 );
 }
 
 const textLine = line as Extract<TuiLine, { text: string }>;
+
+if (line.role === "tool") {
+const view = collapse({
+role: "tool",
+text: textLine.text,
+width: Infinity,
+running,
+expanded,
+});
+
+if (!view.shown) {
+return (
+<Text {...style}>
+{glyph}
+{view.summary} · ctrl+t
+</Text>
+);
+}
+
+return (
+<Box flexDirection="column">
+<Text {...style}>
+{glyph}
+{view.hidden ? `${view.summary} · ctrl+t` : view.summary}
+</Text>
+<Box paddingLeft={2}>
+<Text {...style}>{view.shown}</Text>
+</Box>
+</Box>
+);
+}
 
 return (
 <Text {...style}>
@@ -208,6 +327,24 @@ return (
 {textLine.text}
 </Text>
 );
+};
+
+// Flattens a block to plain text for the collapse window.
+const plainBlock = (block: Block): string => {
+const spans = (parts: InlineSpan[]) => parts.map((span) => span.text).join("");
+
+switch (block.kind) {
+case "code":
+return block.lines.join("\n");
+case "list":
+return block.items.map((item) => `• ${spans(item)}`).join("\n");
+case "rule":
+return "───";
+case "heading":
+case "quote":
+case "paragraph":
+return spans(block.spans);
+}
 };
 
 // Closed blocks are styled definitively; inline spans map to ink props.

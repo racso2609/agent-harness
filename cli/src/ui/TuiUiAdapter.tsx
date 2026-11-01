@@ -28,6 +28,7 @@ lines: [],
 status: {},
 spawns: [],
 theme: resolveTheme(theme),
+expanded: new Set<number>(),
 };
 }
 
@@ -52,6 +53,8 @@ state={this.state}
 onSubmit={(prompt) => this.onSubmit(prompt)}
 onExit={() => this.onExit()}
 onDecision={(decision) => this.resolveApproval(decision)}
+onToggle={(kind, index) => this.toggleEntry(kind, index)}
+onToggleAll={(kind) => this.toggleAll(kind)}
 />
 );
 }
@@ -74,6 +77,43 @@ this.pendingApproval = null;
 this.state = { ...this.state, approval: undefined };
 this.mount();
 resolve?.(decision);
+}
+
+// Expands or collapses one entry by index (its position in the transcript).
+protected toggleEntry(kind: "reasoning" | "tool", index: number) {
+const expanded = new Set(this.state.expanded);
+
+if (expanded.has(index)) {
+expanded.delete(index);
+} else {
+expanded.add(index);
+}
+
+this.state = { ...this.state, expanded };
+this.mount();
+}
+
+// Ctrl+R / Ctrl+T: toggles every entry of that kind at once. If any is
+// collapsed the whole kind opens, otherwise it all closes.
+protected toggleAll(kind: "reasoning" | "tool") {
+const lines = this.state.lines;
+const indexes = lines
+.map((line, index) => ({ line, index }))
+.filter((entry) => entry.line.role === kind)
+.map((entry) => entry.index);
+
+if (!indexes.length) return;
+
+const expanded = new Set(this.state.expanded);
+const anyCollapsed = indexes.some((index) => !expanded.has(index));
+
+for (const index of indexes) {
+if (anyCollapsed) expanded.add(index);
+else expanded.delete(index);
+}
+
+this.state = { ...this.state, expanded };
+this.mount();
 }
 
 protected pushLine(line: TuiLine) {
@@ -177,12 +217,19 @@ this.state = { ...this.state, activity: "working" };
 break;
 case "turnStart":
 this.pushLine({ role: "user", text: event.prompt });
-this.state = { ...this.state, activity: "working" };
+// A new turn starts settled: every reasoning/tool entry collapses by
+// default, so the transcript stays readable as it grows.
+this.state = {
+...this.state,
+activity: "working",
+running: true,
+expanded: new Set<number>(),
+};
 break;
 case "turnEnd":
 this.finishStream("answer");
 this.finishStream("reasoning");
-this.state = { ...this.state, activity: undefined };
+this.state = { ...this.state, activity: undefined, running: false };
 if (event.outcome && event.outcome.pending.length) {
 this.pushLine({
 role: "notice",

@@ -82,6 +82,13 @@ solución: `ui/tui/markdown.ts#MarkdownStream` acumula el stream y separa **bloq
 hecho: `MainLoop` emite `answer` con el texto final autoritativo (`{ type: "answer", text }`), que reemplaza lo acumulado en TUI e imprime una línea en modo líneas. `App.tsx` renderiza por rol con glifo (`› ` usuario, `~ ` razonamiento, `⏵ ` tool, `· ` aviso, sin glifo la respuesta), así que se distinguen sin depender del color.
 bugs que encontraron los tests: (1) la última línea de un bloque abierto desaparecía si no acababa en `\n` — el caso normal de un stream real; (2) un fence sin cerrar nunca se convertía en bloque de código al terminar. Ambos corregidos y cubiertos en `tests/ui/markdown.spec.ts` (16 tests).
 
+- [x] **Colapsar razonamiento y tool calls** — DECIDIDO: ventana deslizante + expandir
+problema: razonamiento y salida de tools competían por el espacio con la respuesta; con un `shell` charlatán o un thinking largo el mensaje útil desaparecía de la pantalla.
+decisión: **mientras el turno corre** se ven solo las últimas `PREVIEW_LINES` (6) líneas de cada entrada, con un `…` que indica que hay más — así hay señal de vida sin inundar. **Al terminar el turno** la entrada se colapsa a su cabecera (`412 car.` / `8 líneas`). **Expandida** se ve completa. Una tool que **falló nunca se oculta**: un error no debería necesitar una tecla para verse.
+atajos: `ctrl+r` razonamiento, `ctrl+t` tools (globales, `onToggleAll`: si algo está colapsado abre todo, si no cierra todo), y `enter` con el input vacío alterna la última entrada colapsable visible. `enter` con texto sigue enviando el prompt.
+hecho: `ui/tui/collapse.ts` (puro: `estimateLines`, `tail`, `collapse`), 11 tests en `tests/ui/collapse.spec.ts`. `App.tsx` aplica la ventana a `reasoning` y `tool`; `TuiUiAdapter` guarda el set `expanded` por índice y lo **resetea al empezar cada turno**, para que el transcript no se llene de entradas abiertas de turnos anteriores.
+pendiente: el corte se calcula con `width: Infinity` (una línea lógica = una visual). Con líneas muy largas la ventana de 6 mostrará menos de lo esperado; pasa a `useStdout().stdout.columns` cuando importe.
+
 ## Descartados
 
 - **"add more info on the ui"** — sin objeto: no dice qué información ni para qué
