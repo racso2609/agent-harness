@@ -1,4 +1,5 @@
 import type { AgentSummary } from "@/agents";
+import type { SkillSummary } from "@/skills";
 import type { Config, ProviderConfig, ProviderDetail } from "@/configuration";
 import type { SpawnHandle } from "@/session/spawn";
 import type { SessionStore } from "@/session/SessionStore";
@@ -86,6 +87,12 @@ export interface IHarness {
 
   // --- agents ---
   listAgents(): AgentSummary[];
+
+	// --- skills ---
+	// Skills available to the active session, index only (no bodies).
+	listSkills(): SkillSummary[];
+	// Re-scans the skills directories and refreshes the system prompt.
+	reloadSkills(): SkillSummary[];
   setAgent(agentId: string): Promise<boolean>;
 
   // --- approvals ---

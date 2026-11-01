@@ -27,6 +27,10 @@ export interface ToolContext {
   // Launches a background child agent from the spawning session. Injected by
   // the session manager; tools that cannot spawn leave it undefined.
   spawn?: (agentId: string, prompt: string) => SpawnRequestResult;
+	// Returns the body of a loaded skill, undefined when unknown.
+	getSkillBody?: (id: string) => string | undefined;
+	// Lists the ids of the loaded skills, for error messages.
+	listSkillIds?: () => string[];
 }
 
 // Outcome of a spawn request made through the tool context.

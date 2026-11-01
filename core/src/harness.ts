@@ -88,6 +88,14 @@ class Harness implements IHarness {
     return this.session.listAgents();
   }
 
+	listSkills() {
+		return this.session.listSkills();
+	}
+
+	reloadSkills() {
+		return this.session.reloadSkills();
+	}
+
   setAgent(agentId: string) {
     return this.session.setAgent(agentId);
   }

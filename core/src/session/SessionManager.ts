@@ -202,7 +202,9 @@ class SessionManagerImpl implements SessionManager {
   constructor(config = new Config(), store = new SessionStore()) {
     this.config = config;
     this.store = store;
-    this.tools = createToolRegistry(this.config);
+		this.tools = createToolRegistry(this.config, undefined, {
+			skills: this.skillRegistry,
+		});
     this.createdAt = new Date().toISOString();
   }
 
@@ -221,7 +223,9 @@ this.loadSkillRegistry();
     );
     this.agent = agent;
     this.agentId = agent.id;
-    this.tools = createToolRegistry(this.config, agent.tools);
+		this.tools = createToolRegistry(this.config, agent.tools, {
+			skills: this.skillRegistry,
+		});
 
     const providerName =
       agent.provider ?? this.config.config.defaultProvider;
@@ -274,7 +278,9 @@ this.loadSkillRegistry();
     );
     this.agent = agent;
     this.agentId = agent.id;
-    this.tools = createToolRegistry(this.config, agent.tools);
+		this.tools = createToolRegistry(this.config, agent.tools, {
+			skills: this.skillRegistry,
+		});
 
     this.history = record.history ?? [];
     // Sessions persisted with an agent already start with its persona. Older
@@ -501,7 +507,9 @@ reloadSkills(): SkillSummary[] {
 
     this.agent = agent;
     this.agentId = agent.id;
-    this.tools = createToolRegistry(this.config, agent.tools);
+		this.tools = createToolRegistry(this.config, agent.tools, {
+			skills: this.skillRegistry,
+		});
     this.applySystemPrompt(true);
 
     await this.initializeClassifier();
@@ -711,13 +719,32 @@ reloadSkills(): SkillSummary[] {
   }
 
   protected toolContext(): ToolContext {
-    return {
-      cwd: this.config.config.tools?.workspace ?? process.cwd(),
-      sessionId: this.sessionId,
-      approve: (request) => this.approve(request),
-      spawn: (agentId, prompt) => this.spawn(agentId, prompt),
-    };
+		return {
+			cwd: this.config.config.tools?.workspace ?? process.cwd(),
+			sessionId: this.sessionId,
+			approve: (request) => this.approve(request),
+			spawn: (agentId, prompt) => this.spawn(agentId, prompt),
+			getSkillBody: (id) => this.skillBody(id),
+			listSkillIds: () => this.skillIds(),
+		};
   }
+
+	// Ids of the loaded skills, so use_skill can list them on a bad id.
+	protected skillIds(): string[] {
+		return this.skillRegistry?.list().map((skill) => skill.id) ?? [];
+	}
+
+	// Body handed to use_skill, capped by skills.maxBodyChars so a long
+	// recipe cannot swallow the turn.
+	protected skillBody(id: string): string | undefined {
+		const skill = this.skillRegistry?.get(id);
+		if (!skill) return undefined;
+
+		const max = this.config.config.skills?.maxBodyChars ?? 16_000;
+		if (skill.body.length <= max) return skill.body;
+
+		return `${skill.body.slice(0, max)}\n[skill truncated]`;
+	}
 
   // Approval gate. The effective mode is the strictest of the configured
   // global policy and the active agent's policy:
