@@ -108,6 +108,8 @@ spawns: [
 id: event.handle.spawnId,
 agent: event.handle.agentId,
 status: event.handle.status,
+startedAt: event.handle.startedAt,
+finishedAt: event.handle.finishedAt,
 },
 ],
 };
@@ -117,7 +119,12 @@ this.state = {
 ...this.state,
 spawns: this.state.spawns.map((spawn) =>
 spawn.id === event.handle.spawnId
-? { ...spawn, status: event.handle.status }
+? {
+...spawn,
+status: event.handle.status,
+startedAt: event.handle.startedAt,
+finishedAt: event.handle.finishedAt,
+}
 : spawn,
 ),
 };
