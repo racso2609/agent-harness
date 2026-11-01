@@ -1,0 +1,19 @@
+{
+  "name": "agent-harness",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Agent harness SDK and terminal client",
+  "type": "module",
+  "scripts": {
+    "build": "pnpm -r build",
+    "lint": "pnpm -r lint",
+    "test": "pnpm -r test"
+  },
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": "^11.8.0",
+      "onFail": "download"
+    }
+  }
+}
