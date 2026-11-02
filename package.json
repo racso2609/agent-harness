@@ -15,5 +15,8 @@
       "version": "^11.8.0",
       "onFail": "download"
     }
+  },
+  "devDependencies": {
+    "prettier": "^3.9.10"
   }
 }
