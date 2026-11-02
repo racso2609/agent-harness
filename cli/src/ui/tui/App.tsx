@@ -7,7 +7,7 @@ InlineSpan,
 StreamDocument,
 TableBlock,
 } from "./markdown";
-import { colorFor, elapsedFor, iconFor, type SpawnEntry, visibleSpawns } from "./progress";
+import { colorFor, elapsedFor, iconFor, type SpawnEntry, spawnStrip } from "./progress";
 import { GLYPH, resolveTheme, type Role, type Theme } from "./theme";
 import { collapse } from "./collapse";
 import { fitColumns, truncateCell, wrapText } from "./layout";
@@ -32,6 +32,8 @@ lines: TuiLine[];
 status: UiStatus;
 activity?: string;
 spawns: TuiSpawn[];
+ // Children restored from a previous run: read-only, never ticking.
+ history: TuiSpawn[];
 approval?: TuiApproval;
 theme: Theme;
 // A turn is in flight: reasoning and tool output preview their tail.
@@ -75,11 +77,12 @@ const approval = state.approval;
 const theme = state.theme;
 const { stdout } = useStdout();
 
-const lingering = state.spawns.some(
-(spawn) => spawn.status !== "running" && spawn.finishedAt,
-);
-
+// Only a child of this run needs the clock: a running one counts up and a
+// settled one lingers. Restored rows keep their frozen time, so they never
+// force a repaint.
+const lingering = state.spawns.length > 0;
 useEffect(() => {
+
 if (!lingering) return;
 
 const timer = setInterval(() => setNow(Date.now()), 1_000);
@@ -173,7 +176,7 @@ setDraft((current) => current + input);
 }
 });
 
-const visible = visibleSpawns(state.spawns, now);
+  const strip = spawnStrip(state.spawns, state.history ?? [], now);
 // The panel frame and its padding eat a few columns; keep a floor so the
 // layout never collapses on a tiny terminal.
 const width = Math.max(
@@ -196,13 +199,20 @@ width={width}
 ))}
 </Box>
 
-{visible.length > 0 && (
+{strip.rows.length > 0 && (
 <Box flexDirection="column" borderStyle="single" borderColor="cyan" paddingX={1}>
-{visible.map((spawn) => (
-<Text key={spawn.id} color={colorFor(spawn.status)}>
+{strip.rows.map((spawn) => (
+<Text
+key={spawn.id}
+color={colorFor(spawn.status)}
+dimColor={spawn.restored}
+>
 {iconFor(spawn.status)} {spawn.agent} · {spawn.id} · {elapsedFor(spawn, now)}
 </Text>
 ))}
+{strip.hidden > 0 && (
+<Text dimColor>+{strip.hidden} older from previous runs</Text>
+)}
 </Box>
 )}
 

@@ -15,6 +15,14 @@ import { TuiUiAdapter } from "@/ui/TuiUiAdapter";
 import { toStatusEvent, toUiEvents } from "@/ui/renderEvents";
 import type { UiAdapter } from "@/ui/UiAdapter";
 
+// Emits the children persisted in the session (previous runs) so the strip
+// starts with what the session launched instead of empty. Only the core knows
+// whether a load happened, so the loop asks instead of guessing.
+export const showChildHistory = (harness: IHarness, ui: UiAdapter) => {
+  const handles = harness.childHistory();
+  if (handles.length) ui.render({ type: "spawnHistory", handles });
+};
+
 interface MainLoopOptions {
 // Id of a previously persisted session to resume on boot.
 sessionId?: string;
@@ -64,8 +72,11 @@ sessionId: options.sessionId,
 agent: options.agent,
 });
 
-// Children starting and settling are pushed, not polled: the UI shows a
-// child the moment it exists, including ones launched inside a turn.
+// A resumed session keeps the children of its previous runs on disk, so the
+// strip starts with them; starting and settling produce pushed events, since
+// the UI shows a child the moment it exists, even inside a turn.
+    showChildHistory(this.harness, this.ui);
+
 this.harness.onSpawnEvent((event) => {
 this.ui.render(
 event.type === "started"
@@ -129,7 +140,13 @@ const prompt = (await this.nextPrompt()).trim();
 if (!prompt) continue;
 
 if (prompt.startsWith("/")) {
-const handled = await this.commands.run(prompt, this.commandContext());
+      const before = this.harness.status().sessionId;
+      const handled = await this.commands.run(prompt, this.commandContext());
+      // A command can switch sessions (/resume, /switch): the strip must show
+      // the children of the session we are in now, not the previous one.
+      if (this.harness.status().sessionId !== before) {
+        showChildHistory(this.harness, this.ui);
+      }
 if (!handled) {
 this.ui.render({
 type: "notice",

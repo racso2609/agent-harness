@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
-colorFor,
-elapsedFor,
-iconFor,
-SPAWN_LINGER_MS,
-visibleSpawns,
+  colorFor,
+  elapsedFor,
+  iconFor,
+  RESTORED_LIMIT,
+  spawnStrip,
+  SPAWN_LINGER_MS,
+  toSpawnEntry,
+  visibleSpawns,
 } from "../../src/ui/tui/progress";
 
 const at = (offsetMs: number) => new Date(Date.UTC(2026, 0, 1) + offsetMs).toISOString();
@@ -89,4 +92,112 @@ expect(colorFor("running")).toBe("cyan");
 expect(colorFor("done")).toBe("green");
 expect(colorFor("error")).toBe("red");
 });
+});
+
+describe("toSpawnEntry", () => {
+  it("maps a core handle to the row the strip renders", () => {
+    expect(
+      toSpawnEntry({
+        spawnId: "spawn-1",
+        agentId: "coder",
+        status: "running",
+        startedAt: at(0),
+      }),
+    ).toEqual({
+      id: "spawn-1",
+      agent: "coder",
+      status: "running",
+      startedAt: at(0),
+      finishedAt: undefined,
+    });
+  });
+});
+
+describe("restored children", () => {
+  it("freezes the clock of a finished child from a previous run", () => {
+    const spawn = {
+      id: "spawn-1",
+      agent: "coder",
+      status: "done",
+      startedAt: at(0),
+      finishedAt: at(4_000),
+      restored: true,
+    };
+
+    // The session is long gone; the elapsed time is the one it took back then.
+    expect(elapsedFor({ ...spawn }, now)).toBe("done in 4s");
+    expect(elapsedFor({ ...spawn }, now + 3_600_000)).toBe("done in 4s");
+  });
+
+  it("calls a child that was running when the session ended interrupted", () => {
+    const spawn = {
+      id: "spawn-1",
+      agent: "coder",
+      status: "running",
+      startedAt: at(0),
+      restored: true,
+    };
+
+    expect(elapsedFor(spawn, now)).toBe("interrupted");
+  });
+
+  it("still counts the live children of this run", () => {
+    const spawn = { id: "spawn-1", agent: "coder", status: "running", startedAt: at(0) };
+
+    expect(elapsedFor(spawn, now)).toBe("60s");
+  });
+});
+
+describe("spawnStrip", () => {
+  const entry = (id: string, startedAt: string, finishedAt = startedAt) => ({
+    id,
+    agent: "coder",
+    status: "done",
+    startedAt,
+    finishedAt,
+  });
+  // A child of this run that settled less than SPAWN_LINGER_MS ago.
+  const live = (id: string) => entry(id, at(59_000), at(59_500));
+
+  it("lists the live children first, then the restored ones", () => {
+    const { rows, hidden } = spawnStrip(
+      [live("spawn-live")],
+      [entry("spawn-past", at(-2_000))],
+      now,
+    );
+
+    expect(rows.map((row) => row.id)).toEqual(["spawn-live", "spawn-past"]);
+    expect(rows.map((row) => row.restored)).toEqual([false, true]);
+    expect(hidden).toBe(0);
+  });
+
+  it("never lists the same child twice", () => {
+    const child = live("spawn-1");
+
+    const { rows } = spawnStrip([child], [child], now);
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.restored).toBe(false);
+  });
+
+  it("shows the newest restored children and counts the rest", () => {
+    const history = Array.from({ length: RESTORED_LIMIT + 3 }, (_, index) =>
+      // Launch order: the newest children were started last.
+      entry(`spawn-${index}`, at(index * 1_000)),
+    );
+
+    const { rows, hidden } = spawnStrip([], history, now);
+
+    expect(rows).toHaveLength(RESTORED_LIMIT);
+    expect(rows[0]?.id).toBe(`spawn-${RESTORED_LIMIT + 2}`);
+    expect(hidden).toBe(3);
+  });
+
+  it("drops the live children that outlived their linger window", () => {
+    const settled = entry("spawn-live", at(0), at(1_000));
+
+    const { rows } = spawnStrip([settled], [], now);
+
+    expect(rows).toEqual([]);
+  });
 });

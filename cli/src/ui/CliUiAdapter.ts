@@ -84,6 +84,19 @@ break;
 case "spawn":
 this.notify(`spawn ${event.handle.spawnId} started (${event.handle.agentId})`);
 break;
+case "spawnHistory":
+// A resumed session can carry a long tail; only the newest are worth a
+// line, and /children still has them all.
+if (event.handles.length) {
+const newest = event.handles
+.slice(-3)
+.map((handle) => `${handle.spawnId} ${handle.status}`)
+.join(", ");
+this.notify(
+`children from this session: ${event.handles.length} (${newest})`,
+);
+}
+break;
 case "spawnSettled":
 this.notify(
 `spawn ${event.handle.spawnId} ${event.handle.status}` +

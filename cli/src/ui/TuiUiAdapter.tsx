@@ -3,6 +3,7 @@ import { createLogger } from "@racso/core";
 import { render } from "ink";
 import { App, type TuiApproval, type TuiLine, type TuiState } from "./tui/App";
 import { MarkdownStream } from "./tui/markdown";
+import { toSpawnEntry } from "./tui/progress";
 import { resolveTheme, type Theme } from "./tui/theme";
 import type { UiAdapter, UiEvent } from "./UiAdapter";
 
@@ -27,6 +28,7 @@ this.state = {
 lines: [],
 status: {},
 spawns: [],
+      history: [],
 theme: resolveTheme(theme),
 expanded: new Set<number>(),
 };
@@ -238,21 +240,23 @@ text: `pending: ${event.outcome.pending.join(", ")}`,
 return;
 }
 break;
-case "spawn":
-this.state = {
-...this.state,
-spawns: [
-...this.state.spawns,
-{
-id: event.handle.spawnId,
-agent: event.handle.agentId,
-status: event.handle.status,
-startedAt: event.handle.startedAt,
-finishedAt: event.handle.finishedAt,
-},
-],
-};
-break;
+    case "spawn":
+      this.state = {
+        ...this.state,
+        spawns: [...this.state.spawns, toSpawnEntry(event.handle)],
+      };
+      break;
+    case "spawnHistory":
+      // Restored children keep their final status and never tick; they live
+      // in their own list so they never mix with the children of this run.
+      this.state = {
+        ...this.state,
+        history: event.handles.map((handle) => ({
+          ...toSpawnEntry(handle),
+          restored: true,
+        })),
+      };
+      break;
 case "spawnSettled":
 this.state = {
 ...this.state,

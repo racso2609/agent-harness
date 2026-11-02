@@ -29,6 +29,9 @@ text?: string;
 outcome?: { status: string; pending: string[]; next?: string };
 }
 | { type: "spawn"; handle: SpawnHandle }
+// Children persisted in the session (previous runs). Sent once after loading,
+// so a resumed session shows what it launched instead of an empty strip.
+| { type: "spawnHistory"; handles: SpawnHandle[] }
 | { type: "spawnSettled"; handle: SpawnHandle }
 | { type: "reset" };
 
