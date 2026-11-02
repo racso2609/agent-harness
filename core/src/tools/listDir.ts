@@ -4,8 +4,7 @@ import { resolveInWorkspace } from "./paths";
 
 class ListDirTool implements Tool {
   name = "listDir";
-  description =
-    "List the entries of a directory. Directories are suffixed with '/'.";
+  description = "List the entries of a directory. Directories are suffixed with '/'.";
   parameters = {
     type: "object" as const,
     properties: {
@@ -43,9 +42,7 @@ class ListDirTool implements Tool {
       .sort((left, right) => left.localeCompare(right));
 
     return {
-      output: lines.length
-        ? `${target}:\n${lines.join("\n")}`
-        : `${target}: (empty)`,
+      output: lines.length ? `${target}:\n${lines.join("\n")}` : `${target}: (empty)`,
     };
   }
 }

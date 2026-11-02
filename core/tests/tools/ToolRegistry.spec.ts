@@ -89,9 +89,10 @@ describe("ToolRegistry", () => {
       }),
     ]);
 
-    await expect(
-      registry.execute(ctx, { id: "call_1", name: "echo", args: {} }),
-    ).resolves.toEqual({ output: "boom", isError: true });
+    await expect(registry.execute(ctx, { id: "call_1", name: "echo", args: {} })).resolves.toEqual({
+      output: "boom",
+      isError: true,
+    });
   });
 
   it("truncates outputs larger than the configured limit", async () => {

@@ -21,21 +21,15 @@ describe("commandMenu", () => {
     });
 
     it("filters by name prefix", () => {
-      expect(filterCommands(commands, "mo").map((c) => c.name)).toEqual([
-        "model",
-      ]);
+      expect(filterCommands(commands, "mo").map((c) => c.name)).toEqual(["model"]);
     });
 
     it("filters by alias prefix", () => {
-      expect(filterCommands(commands, "?").map((c) => c.name)).toEqual([
-        "help",
-      ]);
+      expect(filterCommands(commands, "?").map((c) => c.name)).toEqual(["help"]);
     });
 
     it("is case-insensitive", () => {
-      expect(filterCommands(commands, "PRO").map((c) => c.name)).toEqual([
-        "provider",
-      ]);
+      expect(filterCommands(commands, "PRO").map((c) => c.name)).toEqual(["provider"]);
     });
 
     it("returns no matches when the prefix does not exist", () => {

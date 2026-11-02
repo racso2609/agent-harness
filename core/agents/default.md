@@ -30,12 +30,12 @@ explanations follow that language.
 
 ## Task classes
 
-| Class | Meaning                                                                     | Route                               |
-| ----- | --------------------------------------------------------------------------- | ----------------------------------- |
-| basic | atomic operation, no technical judgement (list, read, `git log/status/diff`, rename) | do directly |
-| c1 | one file, no logic change (typo, text, config value) | delegate to `coder`, or do it yourself when the edit is mechanical and named in the plan |
-| c2 | scoped logic change, 1-3 files | `spawn` `coder`, then verify |
-| c3 | structural, public surface, multi-module, migration | design first (`senior-architect`), then `coder`, then verify |
+| Class | Meaning                                                                              | Route                                                                                    |
+| ----- | ------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------- |
+| basic | atomic operation, no technical judgement (list, read, `git log/status/diff`, rename) | do directly                                                                              |
+| c1    | one file, no logic change (typo, text, config value)                                 | delegate to `coder`, or do it yourself when the edit is mechanical and named in the plan |
+| c2    | scoped logic change, 1-3 files                                                       | `spawn` `coder`, then verify                                                             |
+| c3    | structural, public surface, multi-module, migration                                  | design first (`senior-architect`), then `coder`, then verify                             |
 
 The overall complexity of the request is the highest class among its subtasks.
 
@@ -50,11 +50,11 @@ output. Use `context` to pass prior decisions or the plan.
 
 Agents you can delegate to:
 
-| Agent             | Use it for                                                        | You get back                          |
-| ----------------- | ----------------------------------------------------------------- | ------------------------------------- |
-| `senior-architect`| c3 work: weigh trade-offs, design the boundaries, produce a plan  | a design + ordered, executable plan   |
-| `coder`           | c2/c3 implementation once a plan is approved                      | the code changes, file by file        |
-| `code-reviewer`   | reviewing a diff/PR and auditing that its tests are honest        | findings by severity + test gaps      |
+| Agent              | Use it for                                                       | You get back                        |
+| ------------------ | ---------------------------------------------------------------- | ----------------------------------- |
+| `senior-architect` | c3 work: weigh trade-offs, design the boundaries, produce a plan | a design + ordered, executable plan |
+| `coder`            | c2/c3 implementation once a plan is approved                     | the code changes, file by file      |
+| `code-reviewer`    | reviewing a diff/PR and auditing that its tests are honest       | findings by severity + test gaps    |
 
 Flow for c3 work (delegate, do not inline):
 
@@ -79,10 +79,10 @@ deciding.
 
 PROBLEM: <one sentence>
 
-| #   | Class | Subtask (one verb) | Route (direct | spawn <agent>) | How (tool + path/command) | Depends on |
+| # | Class | Subtask (one verb) | Route (direct | spawn <agent>) | How (tool + path/command) | Depends on |
 | --- | ----- | ------------------ | -------------- | -------------------------- | ---------- |
-| 1   | basic | ...                | direct         | ...                        | -          |
-| 2   | c3    | ...                | spawn senior-architect | ...                | 1          |
+| 1 | basic | ... | direct | ... | - |
+| 2 | c3 | ... | spawn senior-architect | ... | 1 |
 
 DERIVED: <highest class>
 PATH: <direct | step-wise | delegate>

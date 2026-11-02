@@ -31,3 +31,12 @@ repos:
         entry: bash -c 'exec pnpm -r test --run'
         language: system
         pass_filenames: false
+
+  # Prettier (core + cli)
+  - repo: local
+    hooks:
+      - id: prettier
+        name: Prettier
+        entry: bash -c 'exec pnpm exec prettier --check .'
+        language: system
+        pass_filenames: false

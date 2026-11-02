@@ -41,10 +41,7 @@ export const toSpawnEntry = (handle: {
 });
 
 // A child is visible while running and for SPAWN_LINGER_MS after settling.
-export const visibleSpawns = (
-  spawns: SpawnEntry[],
-  now: number,
-): SpawnEntry[] =>
+export const visibleSpawns = (spawns: SpawnEntry[], now: number): SpawnEntry[] =>
   spawns.filter((spawn) => {
     if (spawn.status === "running") return true;
     if (!spawn.finishedAt) return true;
@@ -67,10 +64,7 @@ export const elapsedFor = (spawn: SpawnEntry, now: number): string => {
     : spawn.restored
       ? Date.parse(spawn.startedAt)
       : now;
-  const seconds = Math.max(
-    0,
-    Math.round((end - Date.parse(spawn.startedAt)) / 1000),
-  );
+  const seconds = Math.max(0, Math.round((end - Date.parse(spawn.startedAt)) / 1000));
 
   if (spawn.status === "running") return `${seconds}s`;
 

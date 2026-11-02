@@ -1,0 +1,9 @@
+node_modules
+dist
+pnpm-lock.yaml
+.vitest
+*.tsbuildinfo
+.git
+coverage
+# Box-drawing ASCII art: reformatting would break the alignment.
+racso-logo.txt

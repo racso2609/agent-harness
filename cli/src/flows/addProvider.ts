@@ -27,18 +27,13 @@ export const addProvider = async (
   if (!id) throw new Error("Provider id is required");
 
   if (harness.listProviders().includes(id)) {
-    const overwrite = (
-      await input(`Provider "${id}" exists. Overwrite? [y/N]: `)
-    )
+    const overwrite = (await input(`Provider "${id}" exists. Overwrite? [y/N]: `))
       .trim()
       .toLowerCase();
     if (overwrite !== "y" && overwrite !== "yes") return undefined;
   }
 
-  const type =
-    available.length === 1
-      ? available[0]
-      : await select("Backend type:", available);
+  const type = available.length === 1 ? available[0] : await select("Backend type:", available);
 
   const url = (await input(`[${id}] Base URL: `)).trim();
   if (!url) throw new Error("Base URL is required");
@@ -49,8 +44,7 @@ export const addProvider = async (
   const model = (await input(`[${id}] Preferred model (optional): `)).trim();
 
   const makeDefault =
-    (await input("Use as default provider? [Y/n]: ")).trim().toLowerCase() !==
-    "n";
+    (await input("Use as default provider? [Y/n]: ")).trim().toLowerCase() !== "n";
 
   harness.configureProvider(
     id,

@@ -34,20 +34,14 @@ describe("SessionStore", () => {
     const { dir, store } = makeStore();
     store.save(baseRecord());
 
-    const raw = JSON.parse(
-      fs.readFileSync(path.join(dir, "session-1.json"), "utf8"),
-    );
+    const raw = JSON.parse(fs.readFileSync(path.join(dir, "session-1.json"), "utf8"));
 
-expect(raw.version).toBe(4);
+    expect(raw.version).toBe(4);
   });
 
   it("migrates legacy assistant messages stored as system", () => {
     const { dir, store } = makeStore();
-    fs.writeFileSync(
-      path.join(dir, "session-1.json"),
-      JSON.stringify(baseRecord()),
-      "utf8",
-    );
+    fs.writeFileSync(path.join(dir, "session-1.json"), JSON.stringify(baseRecord()), "utf8");
 
     const loaded = store.load("session-1");
 
@@ -80,71 +74,62 @@ expect(raw.version).toBe(4);
     expect(store.load("session-1")?.agentId).toBe("reviewer");
   });
 
-it("persists the spawn history of a session", () => {
-const { dir, store } = makeStore();
-store.save({
-...baseRecord(),
-spawns: [
-{
-spawnId: "spawn-1",
-sessionId: "session-1",
-agentId: "coder",
-prompt: "implement",
-status: "done",
-startedAt: "2026-01-01T00:00:00.000Z",
-finishedAt: "2026-01-01T00:00:05.000Z",
-result: "ok",
-},
-{
-spawnId: "spawn-2",
-sessionId: "session-1",
-agentId: "code-reviewer",
-prompt: "review",
-status: "error",
-startedAt: "2026-01-01T00:01:00.000Z",
-finishedAt: "2026-01-01T00:01:01.000Z",
-error: "provider down",
-},
-],
-});
+  it("persists the spawn history of a session", () => {
+    const { dir, store } = makeStore();
+    store.save({
+      ...baseRecord(),
+      spawns: [
+        {
+          spawnId: "spawn-1",
+          sessionId: "session-1",
+          agentId: "coder",
+          prompt: "implement",
+          status: "done",
+          startedAt: "2026-01-01T00:00:00.000Z",
+          finishedAt: "2026-01-01T00:00:05.000Z",
+          result: "ok",
+        },
+        {
+          spawnId: "spawn-2",
+          sessionId: "session-1",
+          agentId: "code-reviewer",
+          prompt: "review",
+          status: "error",
+          startedAt: "2026-01-01T00:01:00.000Z",
+          finishedAt: "2026-01-01T00:01:01.000Z",
+          error: "provider down",
+        },
+      ],
+    });
 
-const raw = JSON.parse(
-fs.readFileSync(path.join(dir, "session-1.json"), "utf8"),
-);
+    const raw = JSON.parse(fs.readFileSync(path.join(dir, "session-1.json"), "utf8"));
 
-expect(raw.spawns).toHaveLength(2);
-expect(raw.spawns[0]).toMatchObject({ spawnId: "spawn-1", status: "done" });
-expect(raw.spawns[1]).toMatchObject({ spawnId: "spawn-2", status: "error" });
+    expect(raw.spawns).toHaveLength(2);
+    expect(raw.spawns[0]).toMatchObject({ spawnId: "spawn-1", status: "done" });
+    expect(raw.spawns[1]).toMatchObject({ spawnId: "spawn-2", status: "error" });
 
-const loaded = store.load("session-1");
-expect(loaded?.spawns).toEqual(raw.spawns);
-});
+    const loaded = store.load("session-1");
+    expect(loaded?.spawns).toEqual(raw.spawns);
+  });
 
-it("migrates a v3 record to an empty spawn history", () => {
-const { dir, store } = makeStore();
-const legacy = { ...baseRecord(), version: 3 };
-delete (legacy as { spawns?: unknown }).spawns;
+  it("migrates a v3 record to an empty spawn history", () => {
+    const { dir, store } = makeStore();
+    const legacy = { ...baseRecord(), version: 3 };
+    delete (legacy as { spawns?: unknown }).spawns;
 
-fs.writeFileSync(
-path.join(dir, "session-1.json"),
-JSON.stringify(legacy),
-"utf8",
-);
+    fs.writeFileSync(path.join(dir, "session-1.json"), JSON.stringify(legacy), "utf8");
 
-const loaded = store.load("session-1");
+    const loaded = store.load("session-1");
 
-expect(loaded?.spawns).toEqual([]);
-});
+    expect(loaded?.spawns).toEqual([]);
+  });
 
-it("keeps an empty spawn list out of the record when unused", () => {
-const { dir, store } = makeStore();
-store.save(baseRecord());
+  it("keeps an empty spawn list out of the record when unused", () => {
+    const { dir, store } = makeStore();
+    store.save(baseRecord());
 
-const raw = JSON.parse(
-fs.readFileSync(path.join(dir, "session-1.json"), "utf8"),
-);
+    const raw = JSON.parse(fs.readFileSync(path.join(dir, "session-1.json"), "utf8"));
 
-expect(raw.spawns).toBeUndefined();
-});
-
+    expect(raw.spawns).toBeUndefined();
+  });
 });

@@ -53,24 +53,24 @@ const makeContext = (): CommandContext => ({
       { id: "reviewer", name: "Reviewer" },
     ]),
     setAgent: vi.fn(async () => true),
-	listSkills: vi.fn(() => [
-		{
-			id: "deploy",
-			name: "Deploy",
-			description: "How to ship a release.",
-			tags: ["ops"],
-			source: "/skills/deploy/SKILL.md",
-		},
-	]),
-	reloadSkills: vi.fn(() => [
-		{
-			id: "deploy",
-			name: "Deploy",
-			description: "How to ship a release.",
-			tags: ["ops"],
-			source: "/skills/deploy/SKILL.md",
-		},
-	]),
+    listSkills: vi.fn(() => [
+      {
+        id: "deploy",
+        name: "Deploy",
+        description: "How to ship a release.",
+        tags: ["ops"],
+        source: "/skills/deploy/SKILL.md",
+      },
+    ]),
+    reloadSkills: vi.fn(() => [
+      {
+        id: "deploy",
+        name: "Deploy",
+        description: "How to ship a release.",
+        tags: ["ops"],
+        source: "/skills/deploy/SKILL.md",
+      },
+    ]),
     approveWith: vi.fn(),
     spawn: vi.fn((agentId: string, prompt: string) => ({
       spawnId: "spawn-1",
@@ -117,8 +117,8 @@ describe("CommandRepository", () => {
       "sessions",
       "resume",
       "compact",
-"skills",
-"skill",
+      "skills",
+      "skill",
       "status",
       "spawn",
       "children",
@@ -178,9 +178,7 @@ describe("CommandRepository", () => {
   it("renders aliases and descriptions in the help text", () => {
     const repository = new CommandRepository();
 
-    expect(repository.helpText()).toContain(
-      "/exit (/quit) — Exit the session",
-    );
+    expect(repository.helpText()).toContain("/exit (/quit) — Exit the session");
   });
 
   it("reports failed model changes", async () => {
@@ -210,9 +208,7 @@ describe("CommandRepository", () => {
     await repository.run("/provider ls", context);
 
     expect(context.notify).toHaveBeenCalledWith(
-      expect.stringContaining(
-        "openai (openai) https://api.example.com — model [default, active]",
-      ),
+      expect.stringContaining("openai (openai) https://api.example.com — model [default, active]"),
     );
   });
 
@@ -241,10 +237,7 @@ describe("CommandRepository", () => {
 
     await repository.run("/provider rm cheap", context);
 
-    expect(context.flows.removeProvider).toHaveBeenCalledWith(
-      context.harness,
-      "cheap",
-    );
+    expect(context.flows.removeProvider).toHaveBeenCalledWith(context.harness, "cheap");
     expect(context.notify).toHaveBeenCalledWith("Provider removed");
   });
 
@@ -268,10 +261,7 @@ describe("CommandRepository", () => {
 
     await repository.run("/provider cheap", context);
 
-    expect(context.flows.changeProvider).toHaveBeenCalledWith(
-      context.harness,
-      "cheap",
-    );
+    expect(context.flows.changeProvider).toHaveBeenCalledWith(context.harness, "cheap");
     expect(context.notify).toHaveBeenCalledWith("Provider updated");
   });
 
@@ -281,9 +271,7 @@ describe("CommandRepository", () => {
 
     await repository.run("/status", context);
 
-    expect(context.notify).toHaveBeenCalledWith(
-      expect.stringContaining("Session session-1"),
-    );
+    expect(context.notify).toHaveBeenCalledWith(expect.stringContaining("Session session-1"));
   });
 
   it("lists persisted sessions marking the active one", async () => {
@@ -293,9 +281,7 @@ describe("CommandRepository", () => {
     await repository.run("/sessions", context);
 
     expect(context.harness.listSessions).toHaveBeenCalledOnce();
-    expect(context.notify).toHaveBeenCalledWith(
-      expect.stringContaining("* 1) session-1 — hello"),
-    );
+    expect(context.notify).toHaveBeenCalledWith(expect.stringContaining("* 1) session-1 — hello"));
   });
 
   it("resumes a persisted session by id or index", async () => {
@@ -304,13 +290,8 @@ describe("CommandRepository", () => {
 
     await repository.run("/resume 1", context);
 
-    expect(context.flows.changeSession).toHaveBeenCalledWith(
-      context.harness,
-      "1",
-    );
-    expect(context.notify).toHaveBeenCalledWith(
-      expect.stringContaining("Session resumed"),
-    );
+    expect(context.flows.changeSession).toHaveBeenCalledWith(context.harness, "1");
+    expect(context.notify).toHaveBeenCalledWith(expect.stringContaining("Session resumed"));
   });
 
   it("reports failed session switches", async () => {
@@ -320,9 +301,7 @@ describe("CommandRepository", () => {
 
     await repository.run("/resume missing", context);
 
-    expect(context.notify).toHaveBeenCalledWith(
-      "Session not changed: missing",
-    );
+    expect(context.notify).toHaveBeenCalledWith("Session not changed: missing");
   });
 
   it("spawns a background agent from agent and prompt args", async () => {
@@ -331,13 +310,8 @@ describe("CommandRepository", () => {
 
     await repository.run("/spawn coder write the docs", context);
 
-    expect(context.harness.spawn).toHaveBeenCalledWith(
-      "coder",
-      "write the docs",
-    );
-    expect(context.notify).toHaveBeenCalledWith(
-      expect.stringContaining("Spawned spawn-1"),
-    );
+    expect(context.harness.spawn).toHaveBeenCalledWith("coder", "write the docs");
+    expect(context.notify).toHaveBeenCalledWith(expect.stringContaining("Spawned spawn-1"));
   });
 
   it("explains spawn usage when arguments are missing", async () => {
@@ -359,9 +333,7 @@ describe("CommandRepository", () => {
 
     await repository.run("/spawn coder task", context);
 
-    expect(context.notify).toHaveBeenCalledWith(
-      "Spawn failed: Spawning is disabled",
-    );
+    expect(context.notify).toHaveBeenCalledWith("Spawn failed: Spawning is disabled");
   });
 
   it("lists spawned agents", async () => {
@@ -381,9 +353,7 @@ describe("CommandRepository", () => {
 
     await repository.run("/children", context);
 
-    expect(context.notify).toHaveBeenCalledWith(
-      expect.stringContaining("[DONE] spawn-1 (coder)"),
-    );
+    expect(context.notify).toHaveBeenCalledWith(expect.stringContaining("[DONE] spawn-1 (coder)"));
   });
 
   it("joins a spawned agent and shows its result", async () => {
@@ -401,9 +371,7 @@ describe("CommandRepository", () => {
 
     await repository.run("/join spawn-1", context);
 
-    expect(context.notify).toHaveBeenCalledWith(
-      expect.stringContaining("the result"),
-    );
+    expect(context.notify).toHaveBeenCalledWith(expect.stringContaining("the result"));
   });
 
   it("reports unknown spawn ids on join", async () => {
@@ -415,62 +383,58 @@ describe("CommandRepository", () => {
     expect(context.notify).toHaveBeenCalledWith("Unknown spawn: nope");
   });
 
-	it("lists skills with their ids, names and origin", () => {
-		const context = makeContext();
+  it("lists skills with their ids, names and origin", () => {
+    const context = makeContext();
 
-		new CommandRepository().find("skills")?.run(context, []);
+    new CommandRepository().find("skills")?.run(context, []);
 
-		expect(context.notify).toHaveBeenCalledWith(
-			"- deploy (Deploy) [ops]: How to ship a release.",
-		);
-	});
+    expect(context.notify).toHaveBeenCalledWith("- deploy (Deploy) [ops]: How to ship a release.");
+  });
 
-	it("reports when there are no skills", () => {
-		const context = makeContext();
-		vi.mocked(context.harness.listSkills).mockReturnValueOnce([]);
+  it("reports when there are no skills", () => {
+    const context = makeContext();
+    vi.mocked(context.harness.listSkills).mockReturnValueOnce([]);
 
-		new CommandRepository().find("skills")?.run(context, []);
+    new CommandRepository().find("skills")?.run(context, []);
 
-		expect(context.notify).toHaveBeenCalledWith("No skills available");
-	});
+    expect(context.notify).toHaveBeenCalledWith("No skills available");
+  });
 
-	it("shows one skill without calling the model", () => {
-		const context = makeContext();
+  it("shows one skill without calling the model", () => {
+    const context = makeContext();
 
-		new CommandRepository().find("skill")?.run(context, ["deploy"]);
+    new CommandRepository().find("skill")?.run(context, ["deploy"]);
 
-		expect(context.notify).toHaveBeenCalledWith(
-			"# Deploy (deploy)\nHow to ship a release.\nsource: /skills/deploy/SKILL.md\ntags: ops",
-		);
-		expect(context.harness.ask).not.toHaveBeenCalled();
-	});
+    expect(context.notify).toHaveBeenCalledWith(
+      "# Deploy (deploy)\nHow to ship a release.\nsource: /skills/deploy/SKILL.md\ntags: ops",
+    );
+    expect(context.harness.ask).not.toHaveBeenCalled();
+  });
 
-	it("rejects an unknown skill", () => {
-		const context = makeContext();
+  it("rejects an unknown skill", () => {
+    const context = makeContext();
 
-		new CommandRepository().find("skill")?.run(context, ["nope"]);
+    new CommandRepository().find("skill")?.run(context, ["nope"]);
 
-		expect(context.notify).toHaveBeenCalledWith("Unknown skill: nope");
-	});
+    expect(context.notify).toHaveBeenCalledWith("Unknown skill: nope");
+  });
 
-	it("reloads skills and reports the new count", () => {
-		const context = makeContext();
+  it("reloads skills and reports the new count", () => {
+    const context = makeContext();
 
-		new CommandRepository().find("skill")?.run(context, ["reload"]);
+    new CommandRepository().find("skill")?.run(context, ["reload"]);
 
-		expect(context.harness.reloadSkills).toHaveBeenCalled();
-		expect(context.notify).toHaveBeenCalledWith(
-			"Skills reloaded (1)\n- deploy (Deploy) [ops]: How to ship a release.",
-		);
-	});
+    expect(context.harness.reloadSkills).toHaveBeenCalled();
+    expect(context.notify).toHaveBeenCalledWith(
+      "Skills reloaded (1)\n- deploy (Deploy) [ops]: How to ship a release.",
+    );
+  });
 
-	it("explains the skill usage when called with no arguments", () => {
-		const context = makeContext();
+  it("explains the skill usage when called with no arguments", () => {
+    const context = makeContext();
 
-		new CommandRepository().find("skill")?.run(context, []);
+    new CommandRepository().find("skill")?.run(context, []);
 
-		expect(context.notify).toHaveBeenCalledWith(
-			"Usage: /skill <id> | /skill reload",
-		);
-	});
+    expect(context.notify).toHaveBeenCalledWith("Usage: /skill <id> | /skill reload");
+  });
 });

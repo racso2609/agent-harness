@@ -1,6 +1,7 @@
 # TODO — CLI (racso-harness)
 
 ## Contexto
+
 Dos renderers sobre un mismo contrato (`UiAdapter`/`UiEvent`), decidido en `P0`:
 `CliUiAdapter` (líneas, **default**) y `TuiUiAdapter` (ink, `--tui`). `MainLoop` no
 escribe a stdout: solo emite eventos, así que la lógica del turno es idéntica en ambos.
@@ -14,119 +15,118 @@ Formato de este archivo: ver la skill `todo-format`.
 ## P0 — TUI de pantalla completa (bloquea P1)
 
 - [x] **Elegir el stack de rendering y su costo de dependencias** — DECIDIDO: ink
-decisión: **ink 8 + React 19** (`jsx: react-jsx`, sin `import React`). Coste real medido al instalarlo: `+26` paquetes en producción. Alternativa descartada: renderer propio sobre ANSI + `readline` — cero dependencias, pero obliga a reimplementar layout, scroll y repintado, que es justo donde `terminal/stdin.ts` ya acumula deuda.
-por qué encaja: ink da paneles, `useInput` y re-render incremental, y `MainLoop` ya no escribe a stdout directamente, así que los dos renderers conviven.
+      decisión: **ink 8 + React 19** (`jsx: react-jsx`, sin `import React`). Coste real medido al instalarlo: `+26` paquetes en producción. Alternativa descartada: renderer propio sobre ANSI + `readline` — cero dependencias, pero obliga a reimplementar layout, scroll y repintado, que es justo donde `terminal/stdin.ts` ya acumula deuda.
+      por qué encaja: ink da paneles, `useInput` y re-render incremental, y `MainLoop` ya no escribe a stdout directamente, así que los dos renderers conviven.
 
 - [x] **Extraer la UI detrás de una interfaz de paneles**
-hecho: `src/ui/UiAdapter.ts` define `UiEvent` (status, notice, text, reasoning, toolStart/Output/End, turnStart/End, spawn, spawnSettled, reset) y `UiAdapter` (`render`, `promptApproval`, `renderImage`, `close`). `MainLoop` solo habla esa interfaz; `renderEvents.ts#toUiEvents` traduce `ChatEvent` del core a la misma. Ningún módulo del loop escribe a stdout.
+      hecho: `src/ui/UiAdapter.ts` define `UiEvent` (status, notice, text, reasoning, toolStart/Output/End, turnStart/End, spawn, spawnSettled, reset) y `UiAdapter` (`render`, `promptApproval`, `renderImage`, `close`). `MainLoop` solo habla esa interfaz; `renderEvents.ts#toUiEvents` traduce `ChatEvent` del core a la misma. Ningún módulo del loop escribe a stdout.
 
 - [x] **Portar la pantalla base (historial + input + status bar)**
-hecho: `ui/tui/App.tsx` (dos paneles + caja de input con `useInput` + status bar + franja de hijos) y `ui/TuiUiAdapter.tsx`, que monta ink y re-renderiza por evento. Arranca con `--tui`; el modo líneas sigue siendo el default (`CliUiAdapter` implementa la misma interfaz).
-hecho (approval): `TuiUiAdapter.promptApproval` muestra la petición como pregunta seleccionable dentro del panel (`approval` en el estado) y resuelve la promesa al pulsar `y` (allow), `a` (always), `n`/`esc` (deny) o `←/→` + enter. El core ya aceptaba una promesa (`approvalHandler`), así que no hizo falta tocarlo; `always` sigue cacheándose en `SessionManager`. Una segunda petición mientras hay una en pantalla se **deniega** en vez de encolarse, para que el usuario siempre sepa qué está contestando. `close()` resuelve como `deny` cualquier approval abierta antes de desmontar.
-pendiente (approval): no hay test de interacción real (los tests fijan el estado que recibe `App`, no las teclas). Probar a mano: `/spawn` o una tool `shell` en `--tui` debe abrir la pregunta y bloquear el turno hasta responder.
-riesgo conocido: si `config.needsSetup()` es verdadero, `startSetup` corre **antes** de montar ink y compite por stdin con el renderer. Hoy no se dispara con una config existente, pero hay que decidir si el setup se pide en modo líneas aun con `--tui`, o se porta a la TUI.
+      hecho: `ui/tui/App.tsx` (dos paneles + caja de input con `useInput` + status bar + franja de hijos) y `ui/TuiUiAdapter.tsx`, que monta ink y re-renderiza por evento. Arranca con `--tui`; el modo líneas sigue siendo el default (`CliUiAdapter` implementa la misma interfaz).
+      hecho (approval): `TuiUiAdapter.promptApproval` muestra la petición como pregunta seleccionable dentro del panel (`approval` en el estado) y resuelve la promesa al pulsar `y` (allow), `a` (always), `n`/`esc` (deny) o `←/→` + enter. El core ya aceptaba una promesa (`approvalHandler`), así que no hizo falta tocarlo; `always` sigue cacheándose en `SessionManager`. Una segunda petición mientras hay una en pantalla se **deniega** en vez de encolarse, para que el usuario siempre sepa qué está contestando. `close()` resuelve como `deny` cualquier approval abierta antes de desmontar.
+      pendiente (approval): no hay test de interacción real (los tests fijan el estado que recibe `App`, no las teclas). Probar a mano: `/spawn` o una tool `shell` en `--tui` debe abrir la pregunta y bloquear el turno hasta responder.
+      riesgo conocido: si `config.needsSetup()` es verdadero, `startSetup` corre **antes** de montar ink y compite por stdin con el renderer. Hoy no se dispara con una config existente, pero hay que decidir si el setup se pide en modo líneas aun con `--tui`, o se porta a la TUI.
 
 - [x] **Definir el layout de progreso (franja de hijos + actividad)** — DECIDIDO: franja inferior colapsable
-decisión: **una sola franja inferior, dinámica y colapsable**. Reglas: (1) si no corre nada, la franja no existe — cero líneas gastadas; (2) el turno en curso se indica con `activity` dentro del input box (`working`, `thinking`), no en la franja; (3) cada hijo ocupa una línea entre la conversación y el input, con icono, agente, id y tiempo; (4) un hijo terminado permanece 5 s marcado `done`/`error` y desaparece, para que un hijo rápido sea perceptible.
-por qué no panel lateral: parte el ancho y con 80 columnas deja el texto en ~50, que es justo lo que rompe la legibilidad del historial (Claude Code lo usa porque asume pantalla ancha). Por qué no inline: el estado se pierde al hacer scroll y obliga a reescribir líneas ya pintadas, la misma deuda que `terminal/stdin.ts` arrastra.
-hecho: `ui/tui/progress.ts` concentra la lógica pura (visibilidad con ventana de 5 s, tiempo transcurrido que congela al terminar, icono y color por estado) y `App.tsx` la consume; `TuiUiAdapter` pasa `startedAt`/`finishedAt` desde el `SpawnHandle` del core. 8 tests en `tests/ui/progress.spec.ts`.
-pendiente: la `activity` del input solo se alimenta de `reasoning`/`turnStart`; cuando `P1` conecte `onSpawnEvent` conviene mostrar también el nombre de la tool en curso (`working · shell`).
+      decisión: **una sola franja inferior, dinámica y colapsable**. Reglas: (1) si no corre nada, la franja no existe — cero líneas gastadas; (2) el turno en curso se indica con `activity` dentro del input box (`working`, `thinking`), no en la franja; (3) cada hijo ocupa una línea entre la conversación y el input, con icono, agente, id y tiempo; (4) un hijo terminado permanece 5 s marcado `done`/`error` y desaparece, para que un hijo rápido sea perceptible.
+      por qué no panel lateral: parte el ancho y con 80 columnas deja el texto en ~50, que es justo lo que rompe la legibilidad del historial (Claude Code lo usa porque asume pantalla ancha). Por qué no inline: el estado se pierde al hacer scroll y obliga a reescribir líneas ya pintadas, la misma deuda que `terminal/stdin.ts` arrastra.
+      hecho: `ui/tui/progress.ts` concentra la lógica pura (visibilidad con ventana de 5 s, tiempo transcurrido que congela al terminar, icono y color por estado) y `App.tsx` la consume; `TuiUiAdapter` pasa `startedAt`/`finishedAt` desde el `SpawnHandle` del core. 8 tests en `tests/ui/progress.spec.ts`.
+      pendiente: la `activity` del input solo se alimenta de `reasoning`/`turnStart`; cuando `P1` conecte `onSpawnEvent` conviene mostrar también el nombre de la tool en curso (`working · shell`).
 
 ## P1 — Feedback mientras el turno corre
 
 - [x] **Consumir los eventos de spawn en la UI**
-hecho: `MainLoop` se suscribe con `harness.onSpawnEvent()` al inicializar y traduce cada evento a `spawn`/`spawnSettled`; el adapter del TUI actualiza la franja y el de líneas imprime una línea por arranque y por cierre (con el error del hijo si falló).
+      hecho: `MainLoop` se suscribe con `harness.onSpawnEvent()` al inicializar y traduce cada evento a `spawn`/`spawnSettled`; el adapter del TUI actualiza la franja y el de líneas imprime una línea por arranque y por cierre (con el error del hijo si falló).
 
 - [x] **Mostrar trabajo en curso**
-hecho: `activity` dentro del input box. `turnStart` → `working`, `reasoning` → `thinking`, `toolStart` → `working · <tool>`, `toolEnd` → `working`, `turnEnd` → reposo. El status bar sigue mostrando provider/modelo/agente/tokens.
-nota: el caso `working` usa texto plano, no spinner animado; un spinner necesita un tick que repinte aunque no lleguen eventos. Se deja para cuando haga falta (un `shell` largo ya muestra salida viva, que es mejor señal).
+      hecho: `activity` dentro del input box. `turnStart` → `working`, `reasoning` → `thinking`, `toolStart` → `working · <tool>`, `toolEnd` → `working`, `turnEnd` → reposo. El status bar sigue mostrando provider/modelo/agente/tokens.
+      nota: el caso `working` usa texto plano, no spinner animado; un spinner necesita un tick que repinte aunque no lleguen eventos. Se deja para cuando haga falta (un `shell` largo ya muestra salida viva, que es mejor señal).
 
 - [x] **Mostrar estado por subagente**
-hecho: cada hijo aparece con `agentId`, `spawnId`, tiempo transcurrido e icono (`◐` corriendo, `✓` done, `✗` error), y se marca al hacer `settled`; desaparece 5 s después (`progress.ts`).
+      hecho: cada hijo aparece con `agentId`, `spawnId`, tiempo transcurrido e icono (`◐` corriendo, `✓` done, `✗` error), y se marca al hacer `settled`; desaparece 5 s después (`progress.ts`).
 
 - [x] **Pintar los hijos restaurados al reanudar una sesión**
-El core ya persistía el histórico (`SessionRecord.spawns`, `SESSION_VERSION` 4) pero
-`listSpawns()` solo devuelve los del proceso actual, así que tras `/resume` la franja
-arrancaba vacía y el usuario perdía el rastro de qué hijos corrieron.
-hecho (core): `IHarness.childHistory()` devuelve el transcript persistido en orden de
-lanzamiento y como copia, y convive con `listSpawns()`: la vista viva sigue siendo la
-de este proceso, porque un hijo restaurado no se puede `poll`/`wait`/`cancel` y no debe
-parecer que sí.
-hecho (cli): `spawnHistory` en `UiEvent`, emitido por `MainLoop#showChildHistory` tras
-`initialize()` y tras cualquier comando que cambie de sesión (compara
-`status().sessionId` antes/después; solo el core sabe si hubo carga real).
-`progress.ts` gana `toSpawnEntry` y `spawnStrip`: los vivos primero, luego hasta
-`RESTORED_LIMIT` (5) restaurados y un `+N older from previous runs` para el resto, sin
-duplicar un hijo vivo que siga en el histórico. Las filas restauradas van atenuadas y no
-tickean; un hijo que seguía `running` al cerrar la sesión se lee `interrupted` en vez de
-fingir que corre. En modo líneas se imprime una línea de resumen.
-tests: 8 en `progress.spec.ts` (mapeo, reloj congelado, `interrupted`, orden, no
-duplicado, tope, ventana de linger) y 2 de `showChildHistory` (`spawnHistory` con hijos,
-silencio sin hijos). El resto del cableado va como guardas de fuente: `MainLoop` corre un
-bucle de stdin y no se puede montar en un test.
-pendiente: verificado por tests; falta verlo en una sesión real con hijos.
-Depends on: persistencia de handles (`core/TODO.md` §9.1.4, ya hecho).
-
+      El core ya persistía el histórico (`SessionRecord.spawns`, `SESSION_VERSION` 4) pero
+      `listSpawns()` solo devuelve los del proceso actual, así que tras `/resume` la franja
+      arrancaba vacía y el usuario perdía el rastro de qué hijos corrieron.
+      hecho (core): `IHarness.childHistory()` devuelve el transcript persistido en orden de
+      lanzamiento y como copia, y convive con `listSpawns()`: la vista viva sigue siendo la
+      de este proceso, porque un hijo restaurado no se puede `poll`/`wait`/`cancel` y no debe
+      parecer que sí.
+      hecho (cli): `spawnHistory` en `UiEvent`, emitido por `MainLoop#showChildHistory` tras
+      `initialize()` y tras cualquier comando que cambie de sesión (compara
+      `status().sessionId` antes/después; solo el core sabe si hubo carga real).
+      `progress.ts` gana `toSpawnEntry` y `spawnStrip`: los vivos primero, luego hasta
+      `RESTORED_LIMIT` (5) restaurados y un `+N older from previous runs` para el resto, sin
+      duplicar un hijo vivo que siga en el histórico. Las filas restauradas van atenuadas y no
+      tickean; un hijo que seguía `running` al cerrar la sesión se lee `interrupted` en vez de
+      fingir que corre. En modo líneas se imprime una línea de resumen.
+      tests: 8 en `progress.spec.ts` (mapeo, reloj congelado, `interrupted`, orden, no
+      duplicado, tope, ventana de linger) y 2 de `showChildHistory` (`spawnHistory` con hijos,
+      silencio sin hijos). El resto del cableado va como guardas de fuente: `MainLoop` corre un
+      bucle de stdin y no se puede montar en un test.
+      pendiente: verificado por tests; falta verlo en una sesión real con hijos.
+      Depends on: persistencia de handles (`core/TODO.md` §9.1.4, ya hecho).
 
 ## P2 — Contrato de retorno de los subagentes
 
 - [x] **Verificar el contrato de resultado de spawn en todos los agentes**
-`formatSpawnResult` cubría error y texto vacío, pero ningún test lo fijaba… y el bug
-estaba ahí: usaba `?? `, así que un hijo con `result: ""` inyectaba en el padre una
-cabecera sin cuerpo. `outcomeText` trata `undefined`, `""` y espacios como "sin salida".
-hecho (tests, core): 6 casos en `SessionManager.spec.ts` — `done` con texto (mensaje
-exacto), `done` sin texto (`(no output)`), `error` con y sin mensaje (`unknown error`),
-truncado por `childResultMaxChars`, y dos que fijan el shape del handle. El del texto
-vacío se verificó revirtiendo la corrección: falla sin ella.
-hecho (docs): `default`, `coder` y `senior-architect` tienen una sección "When the parent
-spawned you" (o "When you spawned a child"): el mensaje final es la respuesta al padre, el
-history no cruza la frontera, y una respuesta vacía llega como `(no output)`.
-Depends on: nada.
+      `formatSpawnResult` cubría error y texto vacío, pero ningún test lo fijaba… y el bug
+      estaba ahí: usaba `?? `, así que un hijo con `result: ""` inyectaba en el padre una
+      cabecera sin cuerpo. `outcomeText` trata `undefined`, `""` y espacios como "sin salida".
+      hecho (tests, core): 6 casos en `SessionManager.spec.ts` — `done` con texto (mensaje
+      exacto), `done` sin texto (`(no output)`), `error` con y sin mensaje (`unknown error`),
+      truncado por `childResultMaxChars`, y dos que fijan el shape del handle. El del texto
+      vacío se verificó revirtiendo la corrección: falla sin ella.
+      hecho (docs): `default`, `coder` y `senior-architect` tienen una sección "When the parent
+      spawned you" (o "When you spawned a child"): el mensaje final es la respuesta al padre, el
+      history no cruza la frontera, y una respuesta vacía llega como `(no output)`.
+      Depends on: nada.
 
 - [ ] **Notificar al usuario el estado final de cada hijo**
-  Hoy el resultado del hijo llega al padre como mensaje `system` en el turno
-  siguiente; el usuario en pantalla no ve nada en el momento en que termina.
-  Done when: al hacer `settled` la TUI pinta una línea con resultado o error del hijo.
-  Depends on: consumir los eventos de spawn.
+      Hoy el resultado del hijo llega al padre como mensaje `system` en el turno
+      siguiente; el usuario en pantalla no ve nada en el momento en que termina.
+      Done when: al hacer `settled` la TUI pinta una línea con resultado o error del hijo.
+      Depends on: consumir los eventos de spawn.
 
 - [ ] **Cerrar cada turno con qué pasó, qué falta y qué sigue**
-  Un turno que termina sin resumen obliga al usuario a inferir el estado.
-  Done when: el cierre del turno incluye estado (éxito/fallo), pendientes y el
-  siguiente paso concreto.
-  Depends on: notificar al usuario el estado final de cada hijo.
+      Un turno que termina sin resumen obliga al usuario a inferir el estado.
+      Done when: el cierre del turno incluye estado (éxito/fallo), pendientes y el
+      siguiente paso concreto.
+      Depends on: notificar al usuario el estado final de cada hijo.
 
 ## P3 — Información adicional en el UI
 
 - [x] **Mostrar el razonamiento del modelo en streaming**
-hecho: el razonamiento ya llegaba por `ChatEvent` pero el adapter lo **descartaba** (solo ponía `activity: thinking`). Ahora se acumula en su propia entrada `reasoning`, en dim y con glifo `~ `.
-hecho (config): `core` gana `ui.theme` (`user`, `reasoning`, `tool`, `answer`, `notice`; cada rol con `color`, `dim`, `bold`) con defaults aplicados en `applyDefaults`. **Solo config, sin env**, por decisión explícita. `ui/tui/theme.ts#resolveTheme` fusiona rol por rol sobre los defaults.
+      hecho: el razonamiento ya llegaba por `ChatEvent` pero el adapter lo **descartaba** (solo ponía `activity: thinking`). Ahora se acumula en su propia entrada `reasoning`, en dim y con glifo `~ `.
+      hecho (config): `core` gana `ui.theme` (`user`, `reasoning`, `tool`, `answer`, `notice`; cada rol con `color`, `dim`, `bold`) con defaults aplicados en `applyDefaults`. **Solo config, sin env**, por decisión explícita. `ui/tui/theme.ts#resolveTheme` fusiona rol por rol sobre los defaults.
 
 - [x] **Mostrar la salida viva de `shell`**
-hecho: `toolOutput` se acumula en la entrada `tool` (amarilla), y `toolStart` marca `working · <tool>` en el input.
+      hecho: `toolOutput` se acumula en la entrada `tool` (amarilla), y `toolStart` marca `working · <tool>` en el input.
 
 - [x] **Formatear el texto del stream en lugar de concatenar caracteres** — DECIDIDO: bloques incrementales
-problema: `appendToLast` concatenaba deltas en una línea, así que el markdown del modelo (`**`, `#`, fences) se veía literal mientras llegaba y solo se formateaba al final. Además **el texto final se descartaba en TUI**: `MainLoop` hacía `if (!this.isTui() && text)`, así que si el proveedor no mandaba deltas la respuesta no aparecía.
-solución: `ui/tui/markdown.ts#MarkdownStream` acumula el stream y separa **bloques cerrados** (párrafo, heading, lista, quote, regla, código con lenguaje) de la **cola abierta**. Los cerrados se pintan con su estilo final; la cola se muestra plana. Nada parpadea y el último bloque se estiliza en cuanto se cierra.
-hecho: `MainLoop` emite `answer` con el texto final autoritativo (`{ type: "answer", text }`), que reemplaza lo acumulado en TUI e imprime una línea en modo líneas. `App.tsx` renderiza por rol con glifo (`› ` usuario, `~ ` razonamiento, `⏵ ` tool, `· ` aviso, sin glifo la respuesta), así que se distinguen sin depender del color.
-bugs que encontraron los tests: (1) la última línea de un bloque abierto desaparecía si no acababa en `\n` — el caso normal de un stream real; (2) un fence sin cerrar nunca se convertía en bloque de código al terminar. Ambos corregidos y cubiertos en `tests/ui/markdown.spec.ts` (16 tests).
+      problema: `appendToLast` concatenaba deltas en una línea, así que el markdown del modelo (`**`, `#`, fences) se veía literal mientras llegaba y solo se formateaba al final. Además **el texto final se descartaba en TUI**: `MainLoop` hacía `if (!this.isTui() && text)`, así que si el proveedor no mandaba deltas la respuesta no aparecía.
+      solución: `ui/tui/markdown.ts#MarkdownStream` acumula el stream y separa **bloques cerrados** (párrafo, heading, lista, quote, regla, código con lenguaje) de la **cola abierta**. Los cerrados se pintan con su estilo final; la cola se muestra plana. Nada parpadea y el último bloque se estiliza en cuanto se cierra.
+      hecho: `MainLoop` emite `answer` con el texto final autoritativo (`{ type: "answer", text }`), que reemplaza lo acumulado en TUI e imprime una línea en modo líneas. `App.tsx` renderiza por rol con glifo (`› ` usuario, `~ ` razonamiento, `⏵ ` tool, `· ` aviso, sin glifo la respuesta), así que se distinguen sin depender del color.
+      bugs que encontraron los tests: (1) la última línea de un bloque abierto desaparecía si no acababa en `\n` — el caso normal de un stream real; (2) un fence sin cerrar nunca se convertía en bloque de código al terminar. Ambos corregidos y cubiertos en `tests/ui/markdown.spec.ts` (16 tests).
 
 - [x] **Colapsar razonamiento y tool calls** — DECIDIDO: ventana deslizante + expandir
-problema: razonamiento y salida de tools competían por el espacio con la respuesta; con un `shell` charlatán o un thinking largo el mensaje útil desaparecía de la pantalla.
-decisión: **mientras el turno corre** se ven solo las últimas `PREVIEW_LINES` (6) líneas de cada entrada, con un `…` que indica que hay más — así hay señal de vida sin inundar. **Al terminar el turno** la entrada se colapsa a su cabecera (`412 car.` / `8 líneas`). **Expandida** se ve completa. Una tool que **falló nunca se oculta**: un error no debería necesitar una tecla para verse.
-atajos: `ctrl+r` razonamiento, `ctrl+t` tools (globales, `onToggleAll`: si algo está colapsado abre todo, si no cierra todo), y `enter` con el input vacío alterna la última entrada colapsable visible. `enter` con texto sigue enviando el prompt.
-hecho: `ui/tui/collapse.ts` (puro: `estimateLines`, `tail`, `collapse`), 11 tests en `tests/ui/collapse.spec.ts`. `App.tsx` aplica la ventana a `reasoning` y `tool`; `TuiUiAdapter` guarda el set `expanded` por índice y lo **resetea al empezar cada turno**, para que el transcript no se llene de entradas abiertas de turnos anteriores.
-pendiente: el corte se calcula con `width: Infinity` (una línea lógica = una visual). Con líneas muy largas la ventana de 6 mostrará menos de lo esperado; pasa a `useStdout().stdout.columns` cuando importe.
+      problema: razonamiento y salida de tools competían por el espacio con la respuesta; con un `shell` charlatán o un thinking largo el mensaje útil desaparecía de la pantalla.
+      decisión: **mientras el turno corre** se ven solo las últimas `PREVIEW_LINES` (6) líneas de cada entrada, con un `…` que indica que hay más — así hay señal de vida sin inundar. **Al terminar el turno** la entrada se colapsa a su cabecera (`412 car.` / `8 líneas`). **Expandida** se ve completa. Una tool que **falló nunca se oculta**: un error no debería necesitar una tecla para verse.
+      atajos: `ctrl+r` razonamiento, `ctrl+t` tools (globales, `onToggleAll`: si algo está colapsado abre todo, si no cierra todo), y `enter` con el input vacío alterna la última entrada colapsable visible. `enter` con texto sigue enviando el prompt.
+      hecho: `ui/tui/collapse.ts` (puro: `estimateLines`, `tail`, `collapse`), 11 tests en `tests/ui/collapse.spec.ts`. `App.tsx` aplica la ventana a `reasoning` y `tool`; `TuiUiAdapter` guarda el set `expanded` por índice y lo **resetea al empezar cada turno**, para que el transcript no se llene de entradas abiertas de turnos anteriores.
+      pendiente: el corte se calcula con `width: Infinity` (una línea lógica = una visual). Con líneas muy largas la ventana de 6 mostrará menos de lo esperado; pasa a `useStdout().stdout.columns` cuando importe.
 
 - [ ] **Dar aire vertical al texto final (interlineado y separación de bloques)**
-Hoy las entradas y los bloques del markdown se pintan pegados uno detrás de otro
-(`App.tsx` no añade margen entre `<Line>` ni entre bloques, y el modo líneas no
-deja aire antes ni después de la respuesta), así que párrafos, listas y respuestas
-se leen como un muro de texto.
-Done when: existe una regla de espaciado declarada (línea en blanco entre entradas,
-margen antes de heading/lista/código/tabla y aire antes/después de la respuesta
-final en modo líneas) y un test la fija.
-Depends on: nada.
-Decidir antes: si el interlineado es un valor de `ui.theme` (config) o una constante del layout.
+      Hoy las entradas y los bloques del markdown se pintan pegados uno detrás de otro
+      (`App.tsx` no añade margen entre `<Line>` ni entre bloques, y el modo líneas no
+      deja aire antes ni después de la respuesta), así que párrafos, listas y respuestas
+      se leen como un muro de texto.
+      Done when: existe una regla de espaciado declarada (línea en blanco entre entradas,
+      margen antes de heading/lista/código/tabla y aire antes/después de la respuesta
+      final en modo líneas) y un test la fija.
+      Depends on: nada.
+      Decidir antes: si el interlineado es un valor de `ui.theme` (config) o una constante del layout.
 
 ## P4 — Instalación y distribución
 
@@ -135,61 +135,60 @@ Contexto: los dos paquetes están en el repo y se usan sólo desde el workspace
 exige clonar y construir. Publicar es requisito para lo de `core/TODO.md` §10.
 
 - [ ] **Publicar `@racso/core` en el registry**
-Hoy `@racso/core` no tiene ni versión publicada ni `.npmignore`, así que nada
-externo puede depender de él.
-Done when: `npm view @racso/core version` devuelve una versión y una instalación
-limpia en directorio temporal importa `createHarness` desde `@racso/core`.
-Depends on: nada.
+      Hoy `@racso/core` no tiene ni versión publicada ni `.npmignore`, así que nada
+      externo puede depender de él.
+      Done when: `npm view @racso/core version` devuelve una versión y una instalación
+      limpia en directorio temporal importa `createHarness` desde `@racso/core`.
+      Depends on: nada.
 
 - [ ] **Publicar `@racso/cli` con su binario**
-`cli/package.json` tiene `private: true` y `@racso/core` como `workspace:*`, así
-que el tarball no es instalable fuera del monorepo.
-Done when: `npm pack` en `cli/` produce un tarball cuyo `bin.racso-harness`
-resuelve `dist/main.js`, y `private` es `false` con `@racso/core` como versión
-real, no `workspace:*`.
-Depends on: publicar `@racso/core`.
+      `cli/package.json` tiene `private: true` y `@racso/core` como `workspace:*`, así
+      que el tarball no es instalable fuera del monorepo.
+      Done when: `npm pack` en `cli/` produce un tarball cuyo `bin.racso-harness`
+      resuelve `dist/main.js`, y `private` es `false` con `@racso/core` como versión
+      real, no `workspace:*`.
+      Depends on: publicar `@racso/core`.
 
 - [ ] **Fijar un smoke test de instalación limpia**
-Publicar sin probar el artefacto deja los fallos de empaquetado (alias `@/`,
-assets, `dist` incompleto) para el usuario final.
-Done when: un script del repo crea un directorio temporal, instala el tarball y
-ejecuta `racso-harness --version` (y arranca el CLI) en CI, en verde.
-Depends on: publicar `@racso/cli` con su binario.
+      Publicar sin probar el artefacto deja los fallos de empaquetado (alias `@/`,
+      assets, `dist` incompleto) para el usuario final.
+      Done when: un script del repo crea un directorio temporal, instala el tarball y
+      ejecuta `racso-harness --version` (y arranca el CLI) en CI, en verde.
+      Depends on: publicar `@racso/cli` con su binario.
 
 - [ ] **Documentar la instalación en el README**
-El README explica el diseño pero no cómo se instala ni qué hace el binario al
-arrancar por primera vez (setup de config, seed de `agents/` y `skills/`).
-Done when: el README tiene una sección de instalación con el comando exacto, la
-versión de Node requerida y qué ficheros crea en `~/.racso-harness/`.
-Depends on: fijar un smoke test de instalación limpia.
+      El README explica el diseño pero no cómo se instala ni qué hace el binario al
+      arrancar por primera vez (setup de config, seed de `agents/` y `skills/`).
+      Done when: el README tiene una sección de instalación con el comando exacto, la
+      versión de Node requerida y qué ficheros crea en `~/.racso-harness/`.
+      Depends on: fijar un smoke test de instalación limpia.
 
 ## P5 — Deuda conocida del TUI
 
 - [ ] **Probar la interacción real por teclado**
-  Los tests cubren la lógica pura (colapso, markdown, layout, tema) pero **nadie ha
-  probado las teclas**: `ctrl+r`, `ctrl+t`, `enter` sobre entrada vacía, y las flechas
-  del approval. Ink captura stdin y aquí no hay TTY interactivo.
-  Done when: un test monta `App` con stdin simulado y verifica al menos el approval y
-  los dos toggles; si ink no lo permite, se documenta como verificación manual.
+      Los tests cubren la lógica pura (colapso, markdown, layout, tema) pero **nadie ha
+      probado las teclas**: `ctrl+r`, `ctrl+t`, `enter` sobre entrada vacía, y las flechas
+      del approval. Ink captura stdin y aquí no hay TTY interactivo.
+      Done when: un test monta `App` con stdin simulado y verifica al menos el approval y
+      los dos toggles; si ink no lo permite, se documenta como verificación manual.
 
 - [ ] **Portar el setup interactivo a la TUI**
-  Si `config.needsSetup()` es verdadero, `startSetup` corre **antes** de montar ink y
-  compite por stdin con el renderer. Riesgo latente en instalación nueva.
-  Done when: existe una instalación sin config que arranca con `--tui` sin conflicto de
-  stdin (o el setup se fuerza en modo líneas y se documenta).
-
+      Si `config.needsSetup()` es verdadero, `startSetup` corre **antes** de montar ink y
+      compite por stdin con el renderer. Riesgo latente en instalación nueva.
+      Done when: existe una instalación sin config que arranca con `--tui` sin conflicto de
+      stdin (o el setup se fuerza en modo líneas y se documenta).
 
 - [ ] **Truncar tablas es agresivo en terminales estrechas**
-  Con `MIN_COLUMN_WIDTH = 3` una tabla de cuatro columnas en 50 columnas deja celdas
-  de tres caracteres (`pro`, `mod`), legibles pero poco útiles. Falta decidir si se
-  colapsa a una lista vertical cuando el ancho no alcanza.
-  Done when: está escrito el umbral (p. ej. < 40 columnas → lista) y aplicado.
+      Con `MIN_COLUMN_WIDTH = 3` una tabla de cuatro columnas en 50 columnas deja celdas
+      de tres caracteres (`pro`, `mod`), legibles pero poco útiles. Falta decidir si se
+      colapsa a una lista vertical cuando el ancho no alcanza.
+      Done when: está escrito el umbral (p. ej. < 40 columnas → lista) y aplicado.
 
 - [ ] **Los tests de lógica pura no cubren el cableado al render**
-  Dos bugs del TUI salieron en prueba visual y no en tests: la captura de razonamiento
-  dentro de un `if (content)`, y el truncado de tablas calculado pero no aplicado al
-  render. Es el mismo tipo de error (lo que se calcula no es lo que se pinta).
-  Done when: al menos un test renderiza un componente con ink y compara la salida.
+      Dos bugs del TUI salieron en prueba visual y no en tests: la captura de razonamiento
+      dentro de un `if (content)`, y el truncado de tablas calculado pero no aplicado al
+      render. Es el mismo tipo de error (lo que se calcula no es lo que se pinta).
+      Done when: al menos un test renderiza un componente con ink y compara la salida.
 
 ## Descartados
 
@@ -214,8 +213,8 @@ Depends on: fijar un smoke test de instalación limpia.
   modo de pantalla completa). Para cerrarla hay que listar 3–4 elementos concretos
   a imitar y descartar lo que no encaje antes de portar la pantalla base.
 - **¿Vale la pena usar el gateway desde el CLI?** Hoy el CLI habla `@racso/core`
-en proceso, así que meter un gateway añadiría un salto de red y un servicio que
-mantener sin resolver ningún problema actual (mono-usuario, una sesión a la vez).
-Sólo se reabre si el gateway existe (`core/TODO.md` §10) y aparece un caso real
-—varios terminales contra las mismas sesiones, o correr el CLI en otra máquina—.
-Para cerrarla hay que decidir qué se gana frente a ejecutar el core in-process.
+  en proceso, así que meter un gateway añadiría un salto de red y un servicio que
+  mantener sin resolver ningún problema actual (mono-usuario, una sesión a la vez).
+  Sólo se reabre si el gateway existe (`core/TODO.md` §10) y aparece un caso real
+  —varios terminales contra las mismas sesiones, o correr el CLI en otra máquina—.
+  Para cerrarla hay que decidir qué se gana frente a ejecutar el core in-process.

@@ -48,8 +48,7 @@ export interface SpawnManagerOptions {
 // Lifecycle notification emitted as a child progresses. Pull helpers
 // (poll/wait/collect) still work; events are pushed for reactive consumers.
 export type SpawnEvent =
-  | { type: "started"; handle: SpawnHandle }
-  | { type: "settled"; handle: SpawnHandle };
+  { type: "started"; handle: SpawnHandle } | { type: "settled"; handle: SpawnHandle };
 
 export type SpawnEventListener = (event: SpawnEvent) => void;
 
@@ -138,9 +137,7 @@ class SpawnManager {
   // final handles.
   async collect(spawnIds?: string[]): Promise<SpawnHandle[]> {
     const ids = spawnIds ?? [...this.jobs.keys()];
-    const jobs = ids
-      .map((id) => this.jobs.get(id))
-      .filter((job): job is SpawnJob => Boolean(job));
+    const jobs = ids.map((id) => this.jobs.get(id)).filter((job): job is SpawnJob => Boolean(job));
 
     await Promise.all(jobs.map((job) => job.promise));
     return jobs.map((job) => this.snapshot(job));

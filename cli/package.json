@@ -13,7 +13,9 @@
     "dev": "tsx ./src/main.ts",
     "build": "tsc && tsc-alias -f",
     "lint": "eslint .",
-    "test": "vitest"
+    "test": "vitest",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
   "dependencies": {
     "@racso/core": "workspace:*",

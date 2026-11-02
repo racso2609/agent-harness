@@ -18,21 +18,26 @@ Write it in the language the project uses. Keep it short: one line per fact.
 # TODO — <project or area>
 
 ## Contexto
+
 <2–4 lines: what the project is today, so the list can be read cold.>
 
 ## P1 — <theme>
+
 - [ ] **<Actionable title>**
-  <One sentence: what it is and why it matters.>
-  Done when: <observable, checkable condition>.
-  Depends on: <other task> _(optional)_
+      <One sentence: what it is and why it matters.>
+      Done when: <observable, checkable condition>.
+      Depends on: <other task> _(optional)_
 
 ## P2 — <theme>
+
 ...
 
 ## Descartados
+
 - **<Item>** — <why it is not worth doing> → <what replaces it / where it moved>
 
 ## Preguntas abiertas
+
 - **<Question>** — <why it is not a task yet>. To close it: <what must be decided or measured>.
 ```
 
@@ -41,7 +46,7 @@ Write it in the language the project uses. Keep it short: one line per fact.
 1. **One task per checkbox.** "Create and validate X" is two tasks.
 2. **Title starts with a verb** in infinitive/imperative: show, add, persist,
    extract. A title that cannot start with a verb ("more info on the UI") is
-   not a task yet — it belongs in *Preguntas abiertas*.
+   not a task yet — it belongs in _Preguntas abiertas_.
 3. **Description max one sentence.** What it is + why it matters. Not how to
    build it; the implementation belongs in a plan or an issue.
 4. **"Done when" is mandatory for anything non-trivial.** It must be observable
@@ -57,10 +62,10 @@ Write it in the language the project uses. Keep it short: one line per fact.
 
 ## Discarded vs open question
 
-| | Use it when | Effect |
-| --- | --- | --- |
-| `Descartados` | The item is useless, redundant, already done, or below the value bar | Closed. Record the motive so it is not re-proposed. |
-| `Preguntas abiertas` | The item might be valid but needs a decision, a measurement or a comparison first | Open. Record what closing it requires. |
+|                      | Use it when                                                                       | Effect                                              |
+| -------------------- | --------------------------------------------------------------------------------- | --------------------------------------------------- |
+| `Descartados`        | The item is useless, redundant, already done, or below the value bar              | Closed. Record the motive so it is not re-proposed. |
+| `Preguntas abiertas` | The item might be valid but needs a decision, a measurement or a comparison first | Open. Record what closing it requires.              |
 
 Nothing is deleted. Removing a bullet loses the reason it was removed, and the
 same idea comes back six months later.

@@ -123,6 +123,7 @@ tools: [readFile, listDir]
 approval: deny
 maxIterations: 6
 ---
+
 Eres un revisor de código senior. Analizas y propones diffs, no modificas archivos.
 ```
 
@@ -216,7 +217,7 @@ usage y coste.
 
 ## Skills (recetas en markdown)
 
-Una *skill* es una receta reutilizable: un `SKILL.md` con instrucciones que el
+Una _skill_ es una receta reutilizable: un `SKILL.md` con instrucciones que el
 modelo carga **solo cuando la tarea encaja**. No se meten todas en el prompt:
 se indexan por nombre y el cuerpo se pide bajo demanda.
 
@@ -270,11 +271,11 @@ pisa** una skill tuya.
 ### Cómo llega al modelo
 
 1. Al arrancar, el índice (`- <id> — <descripción>`, una línea por skill) se
-añade al final del system prompt, bajo `## Skills`. Sin skills, el system
-prompt es **idéntico** al de antes: no hay coste.
+   añade al final del system prompt, bajo `## Skills`. Sin skills, el system
+   prompt es **idéntico** al de antes: no hay coste.
 2. El modelo llama a la tool `use_skill(id)` cuando la tarea encaja.
 3. Solo entonces el cuerpo entra en la conversación, como resultado de la
-tool. El system prompt nunca contiene bodies.
+   tool. El system prompt nunca contiene bodies.
 
 ### Allowlist de tools
 
@@ -288,19 +289,18 @@ queda escrita en el agente y no se mete nada por detrás. `senior-architect`,
 
 - `/skills` — lista id, nombre, tags y descripción.
 - `/skill <id>` — imprime la skill directamente en la terminal, **sin llamar
-al modelo** y sin tocar el historial. Útil para depurar una definición.
+  al modelo** y sin tocar el historial. Útil para depurar una definición.
 - `/skill reload` — re-escanea los directorios y refresca el system prompt
-sin reiniciar la sesión.
+  sin reiniciar la sesión.
 
 ### Límites
 
 - Una skill inválida (sin descripción o sin body) se avisa con un warning y se
-ignora; el arranque nunca falla por una skill rota.
+  ignora; el arranque nunca falla por una skill rota.
 - `maxBodyChars` (16k por defecto) recorta bodies desmesurados; el recorte duro
-de 32k de las tools sigue aplicando por encima.
+  de 32k de las tools sigue aplicando por encima.
 - El índice crece con el número de skills: por eso cada descripción se recorta a
-`maxIndexChars`.
-
+  `maxIndexChars`.
 
 ## Trampas conocidas (de picoclaw) — a evitar desde el principio
 

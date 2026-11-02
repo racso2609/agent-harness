@@ -27,32 +27,30 @@ describe("WriteFileTool", () => {
     });
 
     expect(result.isError).toBeUndefined();
-    expect(fs.readFileSync(path.join(workspace, "a", "b.txt"), "utf8")).toBe(
-      "hello",
-    );
+    expect(fs.readFileSync(path.join(workspace, "a", "b.txt"), "utf8")).toBe("hello");
   });
 
   it("refuses to write outside the workspace", async () => {
     const tool = new WriteFileTool();
 
-    await expect(
-      tool.execute(ctx, { path: "../escape.txt", content: "x" }),
-    ).rejects.toThrow(/escapes the workspace/);
+    await expect(tool.execute(ctx, { path: "../escape.txt", content: "x" })).rejects.toThrow(
+      /escapes the workspace/,
+    );
   });
 
   it("refuses to write inside .git", async () => {
     const tool = new WriteFileTool();
 
-    await expect(
-      tool.execute(ctx, { path: ".git/config", content: "x" }),
-    ).rejects.toThrow(/denied path/);
+    await expect(tool.execute(ctx, { path: ".git/config", content: "x" })).rejects.toThrow(
+      /denied path/,
+    );
   });
 
   it("honours extra deny patterns from config", async () => {
     const tool = new WriteFileTool({ deny: ["secrets/*"] });
 
-    await expect(
-      tool.execute(ctx, { path: "secrets/token.txt", content: "x" }),
-    ).rejects.toThrow(/denied path/);
+    await expect(tool.execute(ctx, { path: "secrets/token.txt", content: "x" })).rejects.toThrow(
+      /denied path/,
+    );
   });
 });

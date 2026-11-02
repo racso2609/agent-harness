@@ -2,7 +2,7 @@ import type {
   ApprovalHandler,
   HarnessDeps,
   HarnessOptions,
-AskOptions,
+  AskOptions,
   IHarness,
   SpawnOptions,
 } from "@/contract";
@@ -21,8 +21,8 @@ class Harness implements IHarness {
     return this.session.initialize(options);
   }
 
-ask(prompt: string, options: AskOptions = {}): Promise<AgentResponse> {
-return this.session.ask(prompt, options.onEvent);
+  ask(prompt: string, options: AskOptions = {}): Promise<AgentResponse> {
+    return this.session.ask(prompt, options.onEvent);
   }
 
   status() {
@@ -89,13 +89,13 @@ return this.session.ask(prompt, options.onEvent);
     return this.session.listAgents();
   }
 
-	listSkills() {
-		return this.session.listSkills();
-	}
+  listSkills() {
+    return this.session.listSkills();
+  }
 
-	reloadSkills() {
-		return this.session.reloadSkills();
-	}
+  reloadSkills() {
+    return this.session.reloadSkills();
+  }
 
   setAgent(agentId: string) {
     return this.session.setAgent(agentId);
@@ -114,10 +114,10 @@ return this.session.ask(prompt, options.onEvent);
   }
 
   onSpawnEvent(listener: SpawnEventListener): () => void {
-return this.session.onSpawnEvent(listener);
-}
+    return this.session.onSpawnEvent(listener);
+  }
 
-listSpawns(): SpawnHandle[] {
+  listSpawns(): SpawnHandle[] {
     return this.session.listSpawns();
   }
 

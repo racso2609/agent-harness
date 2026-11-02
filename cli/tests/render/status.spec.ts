@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SessionStatus } from "@racso/core";
-import {
-  formatCost,
-  formatSessionStatus,
-  formatTokens,
-} from "../../src/render/status";
+import { formatCost, formatSessionStatus, formatTokens } from "../../src/render/status";
 
 const status: SessionStatus = {
   sessionId: "abc123",
@@ -36,9 +32,7 @@ describe("status formatters", () => {
     const output = formatSessionStatus(status);
 
     expect(output).toContain("Session abc123 · openai / gpt-test");
-    expect(output).toContain(
-      "Tokens 12,500 in · 3,400 out · 15,900 total · Cost $0.004200",
-    );
+    expect(output).toContain("Tokens 12,500 in · 3,400 out · 15,900 total · Cost $0.004200");
     expect(output).toContain("Context ");
     expect(output).toContain("40% (51,200 / 128,000)");
     expect(output).toContain("auto-compact at 80%");

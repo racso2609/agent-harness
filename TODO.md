@@ -1,6 +1,7 @@
 # TODO — racso-harness (índice global)
 
 ## Contexto
+
 Monorepo pnpm con dos paquetes: `core/` (`@racso/core`, SDK sin interacción, ver
 `core/CONTRACT.md`) y `cli/` (`@racso/cli`, cliente de terminal con renderer de
 líneas y TUI ink detrás de `--tui`). Este archivo es solo el índice: cada tarea
@@ -9,12 +10,12 @@ dependencias. Formato de cada lista: skill `core/skills/todo-format.md`.
 
 ## Tablero
 
-| Tema | Dónde vive | Estado |
-| --- | --- | --- |
-| Split core/cli, tooling, agents, skills, session reporting | `core/TODO.md` §0–9 | histórico + pendientes |
-| Gateway persistente (cronjobs + webhooks) | `core/TODO.md` §10 | nuevo, c3 |
-| TUI de pantalla completa y feedback del turno | `cli/TODO.md` §P0–P3 | P0/P1/P3 cerrados, P2 en curso |
-| Instalación y distribución | `cli/TODO.md` §P4 | nuevo, c3 |
+| Tema                                                       | Dónde vive           | Estado                         |
+| ---------------------------------------------------------- | -------------------- | ------------------------------ |
+| Split core/cli, tooling, agents, skills, session reporting | `core/TODO.md` §0–9  | histórico + pendientes         |
+| Gateway persistente (cronjobs + webhooks)                  | `core/TODO.md` §10   | nuevo, c3                      |
+| TUI de pantalla completa y feedback del turno              | `cli/TODO.md` §P0–P3 | P0/P1/P3 cerrados, P2 en curso |
+| Instalación y distribución                                 | `cli/TODO.md` §P4    | nuevo, c3                      |
 
 ## Origen de las tareas nuevas
 

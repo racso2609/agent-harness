@@ -10,33 +10,33 @@ export type Theme = Record<Role, UiRoleStyle>;
 // predates the ui block. Reasoning is the dimmest and the answer the
 // brightest: that hierarchy is what makes the stream readable.
 export const DEFAULT_THEME: Theme = {
-user: { color: "cyan" },
-reasoning: { color: "gray", dim: true },
-tool: { color: "yellow" },
-answer: { bold: true },
-notice: { color: "gray", dim: true },
+  user: { color: "cyan" },
+  reasoning: { color: "gray", dim: true },
+  tool: { color: "yellow" },
+  answer: { bold: true },
+  notice: { color: "gray", dim: true },
 };
 
 // Merges a configured theme over the defaults, role by role.
 export const resolveTheme = (theme?: UiTheme): Theme => {
-const merged = { ...DEFAULT_THEME };
+  const merged = { ...DEFAULT_THEME };
 
-if (!theme) return merged;
+  if (!theme) return merged;
 
-for (const role of Object.keys(DEFAULT_THEME) as Role[]) {
-const style = theme[role];
-if (style) merged[role] = { ...DEFAULT_THEME[role], ...style };
-}
+  for (const role of Object.keys(DEFAULT_THEME) as Role[]) {
+    const style = theme[role];
+    if (style) merged[role] = { ...DEFAULT_THEME[role], ...style };
+  }
 
-return merged;
+  return merged;
 };
 
 // Prefix that identifies the speaker without relying on colour alone, so the
 // transcript still reads correctly with no colour support.
 export const GLYPH: Record<Role, string> = {
-user: "› ",
-reasoning: "~ ",
-tool: "⏵ ",
-answer: "",
-notice: "· ",
+  user: "› ",
+  reasoning: "~ ",
+  tool: "⏵ ",
+  answer: "",
+  notice: "· ",
 };

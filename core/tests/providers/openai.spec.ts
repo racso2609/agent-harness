@@ -17,15 +17,12 @@ const capabilities = {
   image_edit: false,
 };
 
-const modelsPayload = (
-  models: Array<{ id: string; [key: string]: unknown }>,
-) => ({
+const modelsPayload = (models: Array<{ id: string; [key: string]: unknown }>) => ({
   object: "list",
   data: models.map((model) => ({ capabilities, ...model })),
 });
 
-const mockResponse = (payload: unknown) =>
-  ({ ok: true, json: async () => payload }) as Response;
+const mockResponse = (payload: unknown) => ({ ok: true, json: async () => payload }) as Response;
 
 const mockFetchOnce = (fetchMock: FetchMock, payload: unknown) => {
   fetchMock.mockResolvedValueOnce(mockResponse(payload));
@@ -87,9 +84,7 @@ describe("OpenAiProvider", () => {
     });
 
     it("starts with an empty model list", () => {
-      expect(() => provider.listModels()).toThrow(
-        "Please initialize model list first",
-      );
+      expect(() => provider.listModels()).toThrow("Please initialize model list first");
     });
   });
 
@@ -109,10 +104,7 @@ describe("OpenAiProvider", () => {
     it("maps the response data to Model objects", async () => {
       const models = await loadModels(provider, fetchMock);
 
-      expect(models).toEqual([
-        expectedModel(DEFAULT_MODEL),
-        expectedModel("another-model"),
-      ]);
+      expect(models).toEqual([expectedModel(DEFAULT_MODEL), expectedModel("another-model")]);
     });
 
     it("caches the fetched models", async () => {
@@ -123,18 +115,21 @@ describe("OpenAiProvider", () => {
     });
 
     it("maps context and pricing metadata returned by the API", async () => {
-      mockFetchOnce(fetchMock, modelsPayload([
-        {
-          id: DEFAULT_MODEL,
-          context_length: 128000,
-          max_output_tokens: 4096,
-          pricing: {
-            input_per_million: "0.10",
-            output_per_million: "0.40",
-            currency: "USD",
+      mockFetchOnce(
+        fetchMock,
+        modelsPayload([
+          {
+            id: DEFAULT_MODEL,
+            context_length: 128000,
+            max_output_tokens: 4096,
+            pricing: {
+              input_per_million: "0.10",
+              output_per_million: "0.40",
+              currency: "USD",
+            },
           },
-        },
-      ]));
+        ]),
+      );
 
       const models = await provider.getAvailableModels();
 
@@ -155,17 +150,13 @@ describe("OpenAiProvider", () => {
       const models = await loadModels(provider, fetchMock, []);
 
       expect(models).toEqual([]);
-      expect(() => provider.listModels()).toThrow(
-        "Please initialize model list first",
-      );
+      expect(() => provider.listModels()).toThrow("Please initialize model list first");
     });
 
     it("propagates network errors", async () => {
       fetchMock.mockRejectedValueOnce(new Error("network down"));
 
-      await expect(provider.getAvailableModels()).rejects.toThrow(
-        "network down",
-      );
+      await expect(provider.getAvailableModels()).rejects.toThrow("network down");
     });
 
     it("propagates JSON parsing errors", async () => {
@@ -176,25 +167,23 @@ describe("OpenAiProvider", () => {
         },
       } as unknown as Response);
 
-      await expect(provider.getAvailableModels()).rejects.toThrow(
-        "invalid json",
-      );
+      await expect(provider.getAvailableModels()).rejects.toThrow("invalid json");
     });
   });
 
   describe("chat transport", () => {
     it("throws when the model list is not initialized", async () => {
-      await expect(
-        provider.chat([{ role: "user", content: "hello" }]),
-      ).rejects.toThrow("Please initialize model list first");
+      await expect(provider.chat([{ role: "user", content: "hello" }])).rejects.toThrow(
+        "Please initialize model list first",
+      );
     });
 
     it("throws when the default model is not available", async () => {
       await loadModels(provider, fetchMock, [{ id: "unknown-model" }]);
 
-      await expect(
-        provider.chat([{ role: "user", content: "hello" }]),
-      ).rejects.toThrow("Model not available for this provider");
+      await expect(provider.chat([{ role: "user", content: "hello" }])).rejects.toThrow(
+        "Model not available for this provider",
+      );
     });
 
     it("returns the assistant turn without mutating any history", async () => {
@@ -206,9 +195,7 @@ describe("OpenAiProvider", () => {
         "data: [DONE]\n\n",
       ]);
 
-      const result = await provider.chat([
-        { role: "user", content: "hello" },
-      ]);
+      const result = await provider.chat([{ role: "user", content: "hello" }]);
 
       expect(result).toEqual({
         turn: {
@@ -238,9 +225,7 @@ describe("OpenAiProvider", () => {
     });
 
     it("exposes prompt plus completion tokens as current context usage", async () => {
-      await loadModels(provider, fetchMock, [
-        { id: DEFAULT_MODEL, context_length: 1000 },
-      ]);
+      await loadModels(provider, fetchMock, [{ id: DEFAULT_MODEL, context_length: 1000 }]);
       mockStreamOnce(fetchMock, [
         `data: {"choices":[{"delta":{"content":"ok"}}],"usage":{"prompt_tokens":250,"completion_tokens":5,"total_tokens":255}}\n\n`,
         "data: [DONE]\n\n",
@@ -271,9 +256,7 @@ describe("OpenAiProvider", () => {
         "data: [DONE]\n\n",
       ]);
 
-      const result = await provider.chat([
-        { role: "user", content: "hello" },
-      ]);
+      const result = await provider.chat([{ role: "user", content: "hello" }]);
 
       expect(result.costUsd).toBeCloseTo(6);
     });
@@ -281,9 +264,7 @@ describe("OpenAiProvider", () => {
 
   describe("setModel", () => {
     it("throws when the model list is not initialized", () => {
-      expect(() => provider.setModel(DEFAULT_MODEL)).toThrow(
-        "Please initialize model list first",
-      );
+      expect(() => provider.setModel(DEFAULT_MODEL)).toThrow("Please initialize model list first");
     });
 
     it("throws when the model does not exist", async () => {
@@ -302,10 +283,7 @@ describe("OpenAiProvider", () => {
     });
 
     it("sets the model by name alias", async () => {
-      mockFetchOnce(
-        fetchMock,
-        modelsPayload([{ id: "canonical-id" }]),
-      );
+      mockFetchOnce(fetchMock, modelsPayload([{ id: "canonical-id" }]));
       await provider.getAvailableModels();
       provider.setModel("canonical-id");
 
@@ -356,22 +334,19 @@ describe("OpenAiProvider", () => {
         "data: [DONE]\n\n",
       ]);
 
-      const result = await provider.chat(
-        [{ role: "user", content: "read a.txt" }],
-        {
-          tools: [
-            {
-              name: "readFile",
-              description: "Read a file",
-              parameters: {
-                type: "object",
-                properties: { path: { type: "string" } },
-                required: ["path"],
-              },
+      const result = await provider.chat([{ role: "user", content: "read a.txt" }], {
+        tools: [
+          {
+            name: "readFile",
+            description: "Read a file",
+            parameters: {
+              type: "object",
+              properties: { path: { type: "string" } },
+              required: ["path"],
             },
-          ],
-        },
-      );
+          },
+        ],
+      });
 
       expect(result.turn).toEqual({
         text: "",
@@ -465,9 +440,7 @@ describe("OpenAiProvider", () => {
         "data: [DONE]\n\n",
       ]);
 
-      const result = await provider.chat([
-        { role: "user", content: "read a.txt" },
-      ]);
+      const result = await provider.chat([{ role: "user", content: "read a.txt" }]);
 
       expect(result.turn.finishReason).toBe("toolCalls");
       expect(result.turn.toolCalls).toEqual([
@@ -489,9 +462,7 @@ describe("OpenAiProvider", () => {
         "data: [DONE]\n\n",
       ]);
 
-      const result = await provider.chat([
-        { role: "user", content: "read a.txt" },
-      ]);
+      const result = await provider.chat([{ role: "user", content: "read a.txt" }]);
 
       expect(result.turn.toolCalls).toEqual([]);
       expect(result.turn.finishReason).toBe("stop");
@@ -504,9 +475,7 @@ describe("OpenAiProvider", () => {
         "data: [DONE]\n\n",
       ]);
 
-      const result = await provider.chat([
-        { role: "user", content: "run" },
-      ]);
+      const result = await provider.chat([{ role: "user", content: "run" }]);
 
       expect(result.turn.toolCalls[0]).toMatchObject({
         id: "call_1",
@@ -517,117 +486,113 @@ describe("OpenAiProvider", () => {
     });
   });
 
-describe("chat events", () => {
-it("emits text deltas as they stream", async () => {
-await loadModels(provider, fetchMock);
-mockStreamOnce(fetchMock, [
-`data: {"choices":[{"delta":{"content":"hel"}}]}\n\n`,
-`data: {"choices":[{"delta":{"content":"lo"},"finish_reason":"stop"}]}\n\n`,
-"data: [DONE]\n\n",
-]);
+  describe("chat events", () => {
+    it("emits text deltas as they stream", async () => {
+      await loadModels(provider, fetchMock);
+      mockStreamOnce(fetchMock, [
+        `data: {"choices":[{"delta":{"content":"hel"}}]}\n\n`,
+        `data: {"choices":[{"delta":{"content":"lo"},"finish_reason":"stop"}]}\n\n`,
+        "data: [DONE]\n\n",
+      ]);
 
-const events: Array<{ type: string; delta: string }> = [];
-await provider.chat([{ role: "user", content: "hi" }], {
-onEvent: (event) => {
-if (event.type === "text") events.push({ type: event.type, delta: event.delta });
-},
-});
+      const events: Array<{ type: string; delta: string }> = [];
+      await provider.chat([{ role: "user", content: "hi" }], {
+        onEvent: (event) => {
+          if (event.type === "text") events.push({ type: event.type, delta: event.delta });
+        },
+      });
 
-expect(events).toEqual([
-{ type: "text", delta: "hel" },
-{ type: "text", delta: "lo" },
-]);
-});
+      expect(events).toEqual([
+        { type: "text", delta: "hel" },
+        { type: "text", delta: "lo" },
+      ]);
+    });
 
-it("captures reasoning_content and keeps it out of the answer text", async () => {
-await loadModels(provider, fetchMock);
-mockStreamOnce(fetchMock, [
-`data: {"choices":[{"delta":{"reasoning_content":"thinking"}}]}\n\n`,
-`data: {"choices":[{"delta":{"reasoning_content":" harder"}}]}\n\n`,
-`data: {"choices":[{"delta":{"content":"answer"},"finish_reason":"stop"}]}\n\n`,
-"data: [DONE]\n\n",
-]);
+    it("captures reasoning_content and keeps it out of the answer text", async () => {
+      await loadModels(provider, fetchMock);
+      mockStreamOnce(fetchMock, [
+        `data: {"choices":[{"delta":{"reasoning_content":"thinking"}}]}\n\n`,
+        `data: {"choices":[{"delta":{"reasoning_content":" harder"}}]}\n\n`,
+        `data: {"choices":[{"delta":{"content":"answer"},"finish_reason":"stop"}]}\n\n`,
+        "data: [DONE]\n\n",
+      ]);
 
-const reasoning: string[] = [];
-const result = await provider.chat([{ role: "user", content: "hi" }], {
-onEvent: (event) => {
-if (event.type === "reasoning") reasoning.push(event.delta);
-},
-});
+      const reasoning: string[] = [];
+      const result = await provider.chat([{ role: "user", content: "hi" }], {
+        onEvent: (event) => {
+          if (event.type === "reasoning") reasoning.push(event.delta);
+        },
+      });
 
-expect(reasoning).toEqual(["thinking", " harder"]);
-expect(result.turn.text).toBe("answer");
-expect(result.turn.reasoning).toBe("thinking harder");
-});
+      expect(reasoning).toEqual(["thinking", " harder"]);
+      expect(result.turn.text).toBe("answer");
+      expect(result.turn.reasoning).toBe("thinking harder");
+    });
 
-it("falls back to the reasoning field used by other gateways", async () => {
-await loadModels(provider, fetchMock);
-mockStreamOnce(fetchMock, [
-`data: {"choices":[{"delta":{"reasoning":"plan"}}]}\n\n`,
-`data: {"choices":[{"delta":{"content":"done"},"finish_reason":"stop"}]}\n\n`,
-"data: [DONE]\n\n",
-]);
+    it("falls back to the reasoning field used by other gateways", async () => {
+      await loadModels(provider, fetchMock);
+      mockStreamOnce(fetchMock, [
+        `data: {"choices":[{"delta":{"reasoning":"plan"}}]}\n\n`,
+        `data: {"choices":[{"delta":{"content":"done"},"finish_reason":"stop"}]}\n\n`,
+        "data: [DONE]\n\n",
+      ]);
 
-const result = await provider.chat([{ role: "user", content: "hi" }]);
+      const result = await provider.chat([{ role: "user", content: "hi" }]);
 
-expect(result.turn.reasoning).toBe("plan");
-expect(result.turn.text).toBe("done");
-});
+      expect(result.turn.reasoning).toBe("plan");
+      expect(result.turn.text).toBe("done");
+    });
 
-it("omits reasoning on the turn when the provider sends none", async () => {
-await loadModels(provider, fetchMock);
-mockStreamOnce(fetchMock, [
-`data: {"choices":[{"delta":{"content":"plain"},"finish_reason":"stop"}]}\n\n`,
-"data: [DONE]\n\n",
-]);
+    it("omits reasoning on the turn when the provider sends none", async () => {
+      await loadModels(provider, fetchMock);
+      mockStreamOnce(fetchMock, [
+        `data: {"choices":[{"delta":{"content":"plain"},"finish_reason":"stop"}]}\n\n`,
+        "data: [DONE]\n\n",
+      ]);
 
-const result = await provider.chat([{ role: "user", content: "hi" }]);
+      const result = await provider.chat([{ role: "user", content: "hi" }]);
 
-expect(result.turn.reasoning).toBeUndefined();
-expect("reasoning" in result.turn).toBe(false);
-});
+      expect(result.turn.reasoning).toBeUndefined();
+      expect("reasoning" in result.turn).toBe(false);
+    });
 
-it("emits toolCallEnd once per tool call with the final id", async () => {
-await loadModels(provider, fetchMock);
-mockStreamOnce(fetchMock, [
-`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"readFile","arguments":"{}"}}]}}]}\n\n`,
-`data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}\n\n`,
-"data: [DONE]\n\n",
-]);
+    it("emits toolCallEnd once per tool call with the final id", async () => {
+      await loadModels(provider, fetchMock);
+      mockStreamOnce(fetchMock, [
+        `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"readFile","arguments":"{}"}}]}}]}\n\n`,
+        `data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}\n\n`,
+        "data: [DONE]\n\n",
+      ]);
 
-const ends: string[] = [];
-await provider.chat([{ role: "user", content: "read" }], {
-onEvent: (event) => {
-if (event.type === "toolCallEnd") ends.push(`${event.id}:${event.name}`);
-},
-});
+      const ends: string[] = [];
+      await provider.chat([{ role: "user", content: "read" }], {
+        onEvent: (event) => {
+          if (event.type === "toolCallEnd") ends.push(`${event.id}:${event.name}`);
+        },
+      });
 
-expect(ends).toEqual(["call_1:readFile"]);
-});
+      expect(ends).toEqual(["call_1:readFile"]);
+    });
 
-it("behaves exactly the same when onEvent is omitted", async () => {
-await loadModels(provider, fetchMock);
-mockStreamOnce(fetchMock, [
-`data: {"choices":[{"delta":{"reasoning_content":"r"}}]}\n\n`,
-`data: {"choices":[{"delta":{"content":"answer"},"finish_reason":"stop"}]}\n\n`,
-"data: [DONE]\n\n",
-]);
+    it("behaves exactly the same when onEvent is omitted", async () => {
+      await loadModels(provider, fetchMock);
+      mockStreamOnce(fetchMock, [
+        `data: {"choices":[{"delta":{"reasoning_content":"r"}}]}\n\n`,
+        `data: {"choices":[{"delta":{"content":"answer"},"finish_reason":"stop"}]}\n\n`,
+        "data: [DONE]\n\n",
+      ]);
 
-const result = await provider.chat([{ role: "user", content: "hi" }]);
+      const result = await provider.chat([{ role: "user", content: "hi" }]);
 
-expect(result.turn.text).toBe("answer");
-expect(result.turn.finishReason).toBe("stop");
-expect(result.turn.toolCalls).toEqual([]);
-});
-});
-
+      expect(result.turn.text).toBe("answer");
+      expect(result.turn.finishReason).toBe("stop");
+      expect(result.turn.toolCalls).toEqual([]);
+    });
+  });
 
   describe("model aliasing", () => {
     it("matches models by name and by id", async () => {
-      mockFetchOnce(
-        fetchMock,
-        modelsPayload([{ id: "id-only" }, { id: "alias-name" }]),
-      );
+      mockFetchOnce(fetchMock, modelsPayload([{ id: "id-only" }, { id: "alias-name" }]));
       await provider.getAvailableModels();
 
       expect(provider.setModel("id-only")).toBe(true);

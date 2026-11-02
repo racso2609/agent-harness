@@ -62,8 +62,7 @@ const PATTERNS: Pattern[] = [
     strip: (text) => text.replace(TOOL_CALL_TAG, ""),
   },
   {
-    match: (text) =>
-      [...text.matchAll(FENCE)].map((m) => ({ raw: m[1], json: m[1] })),
+    match: (text) => [...text.matchAll(FENCE)].map((m) => ({ raw: m[1], json: m[1] })),
     strip: (text) => text.replace(FENCE, ""),
   },
   {

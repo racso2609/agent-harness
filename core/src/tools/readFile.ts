@@ -42,9 +42,7 @@ class ReadFileTool implements Tool {
       return { output: content };
     }
 
-    const sliced = Buffer.from(content, "utf8")
-      .subarray(0, MAX_BYTES)
-      .toString("utf8");
+    const sliced = Buffer.from(content, "utf8").subarray(0, MAX_BYTES).toString("utf8");
 
     return { output: `${sliced}\n[file truncated]` };
   }

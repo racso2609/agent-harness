@@ -28,9 +28,7 @@ describe("parseFrontmatter", () => {
   });
 
   it("supports multi-line bullet lists", () => {
-    const raw = ["---", "tools:", "  - readFile", "  - listDir", "---", "x"].join(
-      "\n",
-    );
+    const raw = ["---", "tools:", "  - readFile", "  - listDir", "---", "x"].join("\n");
 
     const { data } = parseFrontmatter(raw);
 
@@ -90,13 +88,7 @@ describe("parseAgentFile", () => {
   });
 
   it("rejects invalid approval and maxIterations", () => {
-    const raw = [
-      "---",
-      "approval: sometimes",
-      "maxIterations: 0",
-      "---",
-      "body",
-    ].join("\n");
+    const raw = ["---", "approval: sometimes", "maxIterations: 0", "---", "body"].join("\n");
 
     const { definition, errors } = parseAgentFile(raw, "x");
 
