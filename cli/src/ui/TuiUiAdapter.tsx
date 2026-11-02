@@ -1,7 +1,14 @@
 import type { ApprovalDecision, ApprovalRequest, ILogger, UiTheme } from "@racso/core";
 import { createLogger } from "@racso/core";
 import { render } from "ink";
+import { formatSpawnOutcome, formatTurnOutcome } from "./outcome";
 import { App, type TuiApproval, type TuiLine, type TuiState } from "./tui/App";
+import {
+noAnchors,
+trimAnchored,
+writeAnchored,
+type RoleAnchors,
+} from "./tui/entries";
 import { MarkdownStream } from "./tui/markdown";
 import { toSpawnEntry } from "./tui/progress";
 import { resolveTheme, type Theme } from "./tui/theme";
@@ -22,6 +29,10 @@ protected pendingApproval: ((decision: ApprovalDecision) => void) | null = null;
 // Markdown accumulators for the two streamed roles. Kept out of the state so
 // keystrokes never re-parse what already arrived.
 protected streams: Partial<Record<"answer" | "reasoning", MarkdownStream>> = {};
+// Index of the entry each streamed role is writing. Anchoring by role instead
+// of by position keeps a delta going into its own entry when something else
+// (a child settling, a tool line) lands in between.
+protected anchors: RoleAnchors = noAnchors();
 
 constructor(theme?: UiTheme) {
 this.state = {
@@ -119,9 +130,14 @@ this.mount();
 }
 
 protected pushLine(line: TuiLine) {
-const lines = [...this.state.lines, line];
+const written = trimAnchored(
+[...this.state.lines, line],
+this.anchors,
+MAX_LINES,
+);
 
-this.state = { ...this.state, lines: lines.slice(-MAX_LINES) };
+this.anchors = written.anchors;
+this.state = { ...this.state, lines: written.lines };
 this.mount();
 }
 
@@ -152,16 +168,17 @@ const doc = stream.finish();
 
 this.streams[role] = undefined;
 
-const lines = [...this.state.lines];
-const last = lines.at(-1);
+const entry: TuiLine = { role, doc };
+const written = writeAnchored(
+this.state.lines,
+this.anchors,
+role,
+() => entry,
+MAX_LINES,
+);
 
-if (last && last.role === role) {
-lines[lines.length - 1] = { role, doc };
-} else {
-lines.push({ role, doc });
-}
-
-this.state = { ...this.state, lines: lines.slice(-MAX_LINES) };
+this.anchors = written.anchors;
+this.state = { ...this.state, lines: written.lines };
 this.mount();
 }
 
@@ -169,20 +186,20 @@ protected replaceStreamEntry(
 role: "answer" | "reasoning",
 doc: ReturnType<MarkdownStream["push"]>,
 ) {
-const lines = [...this.state.lines];
-const last = lines.at(-1);
-
 const entry: TuiLine = { role, doc };
 
-// The streamed role occupies the last entry while it is being written; once
-// another role interrupts, a fresh entry is started.
-if (last && last.role === role) {
-lines[lines.length - 1] = entry;
-} else {
-lines.push(entry);
-}
+// The delta continues the entry this role opened, wherever it sits: another
+// role may have written in between without splitting the stream in two.
+const written = writeAnchored(
+this.state.lines,
+this.anchors,
+role,
+() => entry,
+MAX_LINES,
+);
 
-this.state = { ...this.state, lines: lines.slice(-MAX_LINES) };
+this.anchors = written.anchors;
+this.state = { ...this.state, lines: written.lines };
 this.mount();
 }
 
@@ -210,6 +227,8 @@ case "toolStart":
 // The input box reports what the turn is doing right now.
 this.state = { ...this.state, activity: `working · ${event.name}` };
 this.pushLine({ role: "tool", text: `→ ${event.name}` });
+// The chunks of this command land in this entry, wherever it sits.
+this.anchors = { ...this.anchors, tool: this.state.lines.length - 1 };
 return;
 case "toolOutput":
 this.appendToolOutput(event.chunk);
@@ -218,6 +237,8 @@ case "toolEnd":
 this.state = { ...this.state, activity: "working" };
 break;
 case "turnStart":
+// A new turn opens with no entry in progress for any role.
+this.anchors = noAnchors();
 this.pushLine({ role: "user", text: event.prompt });
 // A new turn starts settled: every reasoning/tool entry collapses by
 // default, so the transcript stays readable as it grows.
@@ -232,11 +253,10 @@ case "turnEnd":
 this.finishStream("answer");
 this.finishStream("reasoning");
 this.state = { ...this.state, activity: undefined, running: false };
-if (event.outcome && event.outcome.pending.length) {
-this.pushLine({
-role: "notice",
-text: `pending: ${event.outcome.pending.join(", ")}`,
-});
+// A completed turn says nothing: the answer is the closing line already.
+const closing = formatTurnOutcome(event.outcome);
+if (closing) {
+this.pushLine({ role: "notice", text: closing });
 return;
 }
 break;
@@ -258,6 +278,9 @@ break;
       };
       break;
 case "spawnSettled":
+// The strip only shows the child is no longer running; the transcript
+// still owes the user its result or its error.
+this.pushLine({ role: "notice", text: formatSpawnOutcome(event.handle) });
 this.state = {
 ...this.state,
 spawns: this.state.spawns.map((spawn) =>
@@ -274,6 +297,7 @@ finishedAt: event.handle.finishedAt,
 break;
 case "reset":
 this.streams = {};
+this.anchors = noAnchors();
 this.state = { ...this.state, lines: [] };
 break;
 }
@@ -281,19 +305,24 @@ break;
 this.mount();
 }
 
-// Live tool output: appended to the last tool entry so a chatty command does
-// not create one line per chunk.
+// Live tool output: appended to the entry of the running command so a chatty
+// command does not create one line per chunk.
 protected appendToolOutput(chunk: string) {
-const lines = [...this.state.lines];
-const last = lines.at(-1);
+// Concatenated into the entry of the running command, so a notice arriving
+// mid-command cannot split its output in two.
+const written = writeAnchored<TuiLine>(
+this.state.lines,
+this.anchors,
+"tool",
+(open) => ({
+role: "tool",
+text: (open?.role === "tool" ? open.text : "") + chunk,
+}),
+MAX_LINES,
+);
 
-if (last && last.role === "tool") {
-lines[lines.length - 1] = { role: "tool", text: last.text + chunk };
-} else {
-lines.push({ role: "tool", text: chunk });
-}
-
-this.state = { ...this.state, lines: lines.slice(-MAX_LINES) };
+this.anchors = written.anchors;
+this.state = { ...this.state, lines: written.lines };
 this.mount();
 }
 

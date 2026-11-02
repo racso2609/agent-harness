@@ -6,6 +6,7 @@ LoggerSink,
 } from "@racso/core";
 import { createLogger } from "@racso/core";
 import { clearPrompt, input, printImage, printLogo, restorePrompt } from "@/terminal/stdin";
+import { formatSpawnOutcome, formatTurnOutcome } from "./outcome";
 import type { UiAdapter, UiEvent, UiStatus } from "./UiAdapter";
 
 // Formats the status bar line shared by both renderers.
@@ -76,11 +77,12 @@ this.notify(event.text);
 break;
 case "turnStart":
 break;
-case "turnEnd":
-if (event.outcome && event.outcome.pending.length) {
-this.notify(`pending: ${event.outcome.pending.join(", ")}`);
-}
+case "turnEnd": {
+// A completed turn says nothing: the answer is its summary.
+const closing = formatTurnOutcome(event.outcome);
+if (closing) this.notify(closing);
 break;
+}
 case "spawn":
 this.notify(`spawn ${event.handle.spawnId} started (${event.handle.agentId})`);
 break;
@@ -98,10 +100,7 @@ this.notify(
 }
 break;
 case "spawnSettled":
-this.notify(
-`spawn ${event.handle.spawnId} ${event.handle.status}` +
-(event.handle.error ? `: ${event.handle.error}` : ""),
-);
+this.notify(formatSpawnOutcome(event.handle));
 break;
 case "reset":
 this.reset();
