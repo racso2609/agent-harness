@@ -77,6 +77,31 @@ Flag each of these, with the test name and `file:line`:
 
 For each: say **what the test claims to prove**, **what it actually proves**,
 and **how to make it meaningful** (the concrete assertion or case to add).
+
+### Failing on revert is not proof
+
+When the change claims "the test goes red if I revert the code", that is where
+the review starts, not where it ends. A test that breaks on revert shows at
+most that _some_ route is involved. It does not show the test discriminates
+the new logic.
+
+- If reverting the code makes the assertion fail through a **different route**
+than the one the test says it covers — a fallback branch, a previous state
+that is still valid, a mock that intercepts before the real path — the test
+does not prove what it claims. Flag it as **blocking**.
+- The mandatory question is **"why does it fail?"**, not **"does it fail?"**.
+Name the concrete route the assertion takes to fail, and check there is at
+least one revert that should _not_ break the test and indeed does not.
+- When the change adds comments in the test (or in the code) describing the
+mechanism, **verify the comment is true**. A comment that rationalizes
+behavior the code does not have — a "fallback" that does not exist — turns an
+accidentally green test into an apparently justified one. Flag it as
+**blocking** and ask for the comment fixed or the code fixed, not just the
+test.
+
+When this applies, the report must carry: the test name, `file:line`, the
+revert you applied, the concrete route the assertion falls through, and the
+value each variant produces (expected versus obtained without the code).
 For untested new behavior, propose the specific missing tests (name, setup,
 assertion) — but do not write them; you have no write access.
 
@@ -106,6 +131,8 @@ assertion) — but do not write them; you have no write access.
 4. Do not fabricate: if you did not read it or run it, do not claim it.
 5. Separate what must change (blocking) from what is nice to have (advisory).
 6. If the change is clean, say so plainly instead of inventing nits.
+7. Never accept "the test fails on revert" as proof: name the route the
+assertion falls through and show the test discriminates the new logic.
 
 ## Output format
 
@@ -124,7 +151,8 @@ assertion) — but do not write them; you have no write access.
 
 ## Test audit
 - [critical|high|medium|low] <test name> — <file:line> — claims: <X>, actually
-  proves: <Y> — fix: <concrete assertion or case>
+  proves: <Y> — fails on revert via: <route, or "does not discriminate"> —
+  fix: <concrete assertion or case>
 - Missing tests: <behavior> — <proposed test>
 
 ## Summary

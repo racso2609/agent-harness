@@ -16,9 +16,6 @@ input: vi.fn(),
 }));
 
 const { CliUiAdapter } = await import("../../src/ui/CliUiAdapter");
-const { formatSpawnOutcome, formatTurnOutcome } = await import(
-"../../src/ui/outcome"
-);
 
 const settled = (overrides: Partial<SpawnHandle> = {}): SpawnHandle => ({
 spawnId: "spawn-1",
@@ -49,51 +46,50 @@ vi.restoreAllMocks();
 });
 
 // The default renderer is what most sessions actually see, so its two closing
-// notices are pinned against the shared formatters: if either side changes
-// what the user reads, the test says so.
+// notices are pinned to the literal text the user reads: each assertion spells
+// out the whole line, ending in the newline notify adds. This way a change in
+// the renderer, or in the pure formatters it delegates to, turns the test red.
+// The formatters' own contract is covered by outcome.spec.ts.
 describe("the line renderer", () => {
 describe("settling a child", () => {
 it("reports the result of a child that finished", () => {
-const handle = settled({ result: "all tests pass" });
-const output = printed([{ type: "spawnSettled", handle }]);
+const output = printed([
+{ type: "spawnSettled", handle: settled({ result: "all tests pass" }) },
+]);
 
-expect(output).toContain(formatSpawnOutcome(handle));
-expect(output).toContain("all tests pass");
+expect(output).toBe("spawn spawn-1 done (coder): all tests pass\n");
 });
 
 it("reports the error of a child that failed", () => {
-const handle = settled({ status: "error", error: "provider down" });
-const output = printed([{ type: "spawnSettled", handle }]);
+const output = printed([
+{
+type: "spawnSettled",
+handle: settled({ status: "error", error: "provider down" }),
+},
+]);
 
-expect(output).toContain(formatSpawnOutcome(handle));
-expect(output).toContain("provider down");
+expect(output).toBe("spawn spawn-1 error (coder): provider down\n");
 });
 
 it("says (no output) instead of a header with an empty body", () => {
-const handle = settled({ result: "" });
-const output = printed([{ type: "spawnSettled", handle }]);
-const line = output.trim();
+const output = printed([
+{ type: "spawnSettled", handle: settled({ result: "" }) },
+]);
 
-expect(line).toContain("(no output)");
-// No dangling separator: the line has a body, not just a colon.
-expect(line.endsWith(":")).toBe(false);
-expect(line.endsWith("(no output)")).toBe(true);
+expect(output).toBe("spawn spawn-1 done (coder): (no output)\n");
 });
 });
 
 describe("closing a turn", () => {
 it("reports the status, the pending work and the next step", () => {
-const outcome = {
-status: "toolError",
-pending: ["shell"],
-next: "retry",
-};
-const output = printed([{ type: "turnEnd", outcome }]);
+const output = printed([
+{
+type: "turnEnd",
+outcome: { status: "toolError", pending: ["shell"], next: "retry" },
+},
+]);
 
-expect(output).toContain(formatTurnOutcome(outcome));
-expect(output).toContain("turn failed");
-expect(output).toContain("pending: shell");
-expect(output).toContain("next: retry");
+expect(output).toBe("turn failed · pending: shell · next: retry\n");
 });
 
 it("says nothing when the turn completed", () => {
@@ -102,9 +98,6 @@ const output = printed([
 ]);
 
 expect(output).toBe("");
-expect(output).not.toContain("turn failed");
-expect(output).not.toContain("turn incomplete");
-expect(output).not.toContain("pending:");
 });
 
 it("says nothing when the turn carries no outcome", () => {

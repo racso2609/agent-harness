@@ -5,9 +5,8 @@ Dos renderers sobre un mismo contrato (`UiAdapter`/`UiEvent`), decidido en `P0`:
 `CliUiAdapter` (líneas, **default**) y `TuiUiAdapter` (ink, `--tui`). `MainLoop` no
 escribe a stdout: solo emite eventos, así que la lógica del turno es idéntica en ambos.
 
-Hecho hasta hoy: `P0`, `P1` y `P3` cerrados y el core (§9.1) completo. Quedan el contrato
-de retorno de los subagentes (`P2`), el aviso al usuario del estado final de cada hijo
-(`P2`), la deuda del TUI (`P5`) y la instalación (`P4`).
+Hecho hasta hoy: `P0`, `P1`, `P2` y `P3` cerrados y el core (§9.1) completo. Quedan la
+deuda del TUI (`P5`, que gana dos pendientes al cerrar `P2`) y la instalación (`P4`).
 
 Formato de este archivo: ver la skill `todo-format`.
 
@@ -207,6 +206,40 @@ Depends on: fijar un smoke test de instalación limpia.
   dentro de un `if (content)`, y el truncado de tablas calculado pero no aplicado al
   render. Es el mismo tipo de error (lo que se calcula no es lo que se pinta).
   Done when: al menos un test renderiza un componente con ink y compara la salida.
+
+- [ ] **Los tests del renderer de líneas fijaban el texto con aserciones tautológicas**
+`cli/tests/ui/cliAdapter.spec.ts` afirmaba `expect(output).toContain(
+formatSpawnOutcome(handle))`, es decir, comparaba la salida del adaptador contra la
+**misma** función que el adaptador usa por dentro (`CliUiAdapter.ts:103`,
+`TuiUiAdapter.tsx:283`). El test fijaba que el renderer delega en el formateador, no lo
+que el usuario lee: cambiando el separador de `": "` a `" =>> "` en
+`cli/src/ui/outcome.ts:34,38`, `cliAdapter.spec.ts` seguía en verde 6/6 y solo lo
+cazaba `outcome.spec.ts`. Es el patrón "aserción debilitada / tautológica" de la
+regla 7 de `core/agents/code-reviewer.md`.
+Hecho (parcial, sin commitear): el árbol de trabajo ya pasó los seis casos a `toBe` con
+el literal completo —hijo `done` (`cliAdapter.spec.ts:60`), hijo `error`,
+`(no output)`, turno `toolError` y los dos silencios—, y el test ya falla si el
+separador vuelve a `" =>> "`.
+Pendiente: (1) commitear el arreglo; (2) auditarlo con el revert real, volviendo a
+`": "` → `" =>> "` en `outcome.ts` y comprobando que `cliAdapter.spec.ts` se pone
+rojo (si no, la aserción sigue débil); (3) el caso hijo `error` tiene que fijar también
+el `unknown error` del error vacío, no solo el mensaje con texto.
+Done when: `cliAdapter.spec.ts` no importa `formatSpawnOutcome` ni `formatTurnOutcome`,
+sus seis casos comparan con `toBe` el literal completo y el barrido de revert del
+separador deja el fichero en rojo.
+Depends on: nada.
+
+## Deuda de proceso
+
+- [ ] **Decidir si se reescribe el asunto del commit `ec23080`**
+El slice de `P2` ya está cerrado (producción, tests y este TODO), pero su asunto dice
+`wip(cli): report the outcome of a turn and of every child`. Un `rebase -i` lo
+convertiría en `feat(cli): ...`; hacerlo reescribe historia y la rama es compartida,
+así que la decisión —reescribir o dejarlo— tiene que quedar explícita. Hoy el `wip` es
+lo único que contradice el estado del TODO.
+Done when: está escrito, con la decisión y su motivo, si el asunto se reescribe o se
+deja — y si se reescribe, `git log --oneline` ya no muestra ningún `wip(`.
+Depends on: nada.
 
 ## Descartados
 
