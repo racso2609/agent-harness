@@ -6,8 +6,8 @@ Dos renderers sobre un mismo contrato (`UiAdapter`/`UiEvent`), decidido en `P0`:
 escribe a stdout: solo emite eventos, así que la lógica del turno es idéntica en ambos.
 
 Hecho hasta hoy: `P0`, `P1` y `P3` cerrados y el core (§9.1) completo. Quedan el contrato
-de retorno de los subagentes (`P2`), pintar los hijos persistidos al reanudar, la deuda
-del TUI (`P5`) y la instalación (`P4`).
+de retorno de los subagentes (`P2`), el aviso al usuario del estado final de cada hijo
+(`P2`), la deuda del TUI (`P5`) y la instalación (`P4`).
 
 Formato de este archivo: ver la skill `todo-format`.
 
@@ -44,24 +44,44 @@ nota: el caso `working` usa texto plano, no spinner animado; un spinner necesita
 - [x] **Mostrar estado por subagente**
 hecho: cada hijo aparece con `agentId`, `spawnId`, tiempo transcurrido e icono (`◐` corriendo, `✓` done, `✗` error), y se marca al hacer `settled`; desaparece 5 s después (`progress.ts`).
 
-- [ ] **Pintar los hijos restaurados al reanudar una sesión**
-  El core ya persiste el histórico (`SessionRecord.spawns`, `SESSION_VERSION` 4) pero
-  `listSpawns()` solo devuelve los del proceso actual, así que tras `/resume` la franja
-  arranca vacía y el usuario pierde el rastro de qué hijos corrieron.
-  Done when: al reanudar, la franja muestra los hijos persistidos atenuados (sin tiempo
-  corriendo, con su `status` final) y un contador cuando son muchos, sin mezclarse con
-  los que estén vivos.
-  Depends on: persistencia de handles (`core/TODO.md` §9.1.4, ya hecho).
+- [x] **Pintar los hijos restaurados al reanudar una sesión**
+El core ya persistía el histórico (`SessionRecord.spawns`, `SESSION_VERSION` 4) pero
+`listSpawns()` solo devuelve los del proceso actual, así que tras `/resume` la franja
+arrancaba vacía y el usuario perdía el rastro de qué hijos corrieron.
+hecho (core): `IHarness.childHistory()` devuelve el transcript persistido en orden de
+lanzamiento y como copia, y convive con `listSpawns()`: la vista viva sigue siendo la
+de este proceso, porque un hijo restaurado no se puede `poll`/`wait`/`cancel` y no debe
+parecer que sí.
+hecho (cli): `spawnHistory` en `UiEvent`, emitido por `MainLoop#showChildHistory` tras
+`initialize()` y tras cualquier comando que cambie de sesión (compara
+`status().sessionId` antes/después; solo el core sabe si hubo carga real).
+`progress.ts` gana `toSpawnEntry` y `spawnStrip`: los vivos primero, luego hasta
+`RESTORED_LIMIT` (5) restaurados y un `+N older from previous runs` para el resto, sin
+duplicar un hijo vivo que siga en el histórico. Las filas restauradas van atenuadas y no
+tickean; un hijo que seguía `running` al cerrar la sesión se lee `interrupted` en vez de
+fingir que corre. En modo líneas se imprime una línea de resumen.
+tests: 8 en `progress.spec.ts` (mapeo, reloj congelado, `interrupted`, orden, no
+duplicado, tope, ventana de linger) y 2 de `showChildHistory` (`spawnHistory` con hijos,
+silencio sin hijos). El resto del cableado va como guardas de fuente: `MainLoop` corre un
+bucle de stdin y no se puede montar en un test.
+pendiente: verificado por tests; falta verlo en una sesión real con hijos.
+Depends on: persistencia de handles (`core/TODO.md` §9.1.4, ya hecho).
 
 
 ## P2 — Contrato de retorno de los subagentes
 
-- [ ] **Verificar el contrato de resultado de spawn en todos los agentes**
-  `formatSpawnResult` ya cubre error y texto vacío (`(no output)`, "unknown error"),
-  pero ningún test lo fija como contrato: se puede romper sin que nadie lo note.
-  Done when: un test por caso (`done` con texto, `done` sin texto, `error`) y una
-  nota en `core/agents/*.md` de que el mensaje final es la respuesta al padre.
-  Depends on: nada.
+- [x] **Verificar el contrato de resultado de spawn en todos los agentes**
+`formatSpawnResult` cubría error y texto vacío, pero ningún test lo fijaba… y el bug
+estaba ahí: usaba `?? `, así que un hijo con `result: ""` inyectaba en el padre una
+cabecera sin cuerpo. `outcomeText` trata `undefined`, `""` y espacios como "sin salida".
+hecho (tests, core): 6 casos en `SessionManager.spec.ts` — `done` con texto (mensaje
+exacto), `done` sin texto (`(no output)`), `error` con y sin mensaje (`unknown error`),
+truncado por `childResultMaxChars`, y dos que fijan el shape del handle. El del texto
+vacío se verificó revirtiendo la corrección: falla sin ella.
+hecho (docs): `default`, `coder` y `senior-architect` tienen una sección "When the parent
+spawned you" (o "When you spawned a child"): el mensaje final es la respuesta al padre, el
+history no cruza la frontera, y una respuesta vacía llega como `(no output)`.
+Depends on: nada.
 
 - [ ] **Notificar al usuario el estado final de cada hijo**
   Hoy el resultado del hijo llega al padre como mensaje `system` en el turno

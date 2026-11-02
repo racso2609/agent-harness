@@ -13,7 +13,7 @@ dependencias. Formato de cada lista: skill `core/skills/todo-format.md`.
 | --- | --- | --- |
 | Split core/cli, tooling, agents, skills, session reporting | `core/TODO.md` §0–9 | histórico + pendientes |
 | Gateway persistente (cronjobs + webhooks) | `core/TODO.md` §10 | nuevo, c3 |
-| TUI de pantalla completa y feedback del turno | `cli/TODO.md` §P0–P3 | P0/P1/P3 casi cerrados, P2 abierto |
+| TUI de pantalla completa y feedback del turno | `cli/TODO.md` §P0–P3 | P0/P1/P3 cerrados, P2 en curso |
 | Instalación y distribución | `cli/TODO.md` §P4 | nuevo, c3 |
 
 ## Origen de las tareas nuevas

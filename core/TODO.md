@@ -128,7 +128,7 @@
 - [ ] **`~/.racso-harness/agents/*.md` divergió del repo** (`coder` y `default` con `approval: auto` allí y `ask` en `core/agents/`, más diferencias de texto). `seed.ts` no pisa ficheros existentes, así que ambas copias hay que editarlas a mano — ya pasó con `use_skill`. Decidir si se sincroniza o se documenta el ritual.
 
 9. session reporting (lo que necesita la UI)
-ESTADO: **§9.1 cerrado** (6/6). Lo que queda es la superficie que consume el histórico desde el CLI, no core.
+ESTADO: **§9 cerrado** (7/7). La superficie que consume el histórico desde el CLI ya existe (`childHistory()`) y el CLI la pinta al reanudar (`cli/TODO.md` §P1).
 Formato de esta sección: ver la skill `todo-format`. Las secciones 0–8 se dejan como están (histórico de decisiones).
 Contexto: el CLI va a una TUI de pantalla completa (ver `cli/TODO.md` §P0) que necesita saber *qué está corriendo ahora mismo* y *qué pasó*. Hoy `SpawnManager` emite `started`/`settled` in-memory y `SessionManager` inyecta el resultado al padre en el turno siguiente, pero no hay forma pública de reconstruir el estado ni de recibir eventos sin acoplarse a `SessionManagerImpl`.
 
@@ -141,10 +141,19 @@ review: `SpawnManager.on()` ya devolvía el unsubscribe y `emit()` aislaba error
 hecho: `SessionManager.onSpawnEvent()` construye el manager on-demand (un listener registrado antes del primer spawn igual lo recibe) y `IHarness`/`harness.ts` lo delegan. Semántica A: solo en vivo, sin replay; el estado inicial es `listSpawns()`. La suscripción interna del mensaje `system` sigue intacta (test explícito). 4 tests en `SessionManager.spec.ts` (started→settled, unsubscribe, coexistencia con la inyección, listener que lanza). Build + 199 tests (core) + 49 (cli) + lint verdes.
 Depends on: exponer `SpawnEvent` y `SpawnStatus` en el contrato público. [x]
 
-- [ ] **Devolver estado consultable de los hijos**
-  `SessionManager.listSpawns()` existe, pero hay que confirmar que devuelve lo que la UI necesita: `agentId`, `status`, `startedAt`, `finishedAt` y un resumen del prompt.
-  Done when: un test fija exactamente ese shape y `listSpawns()` está en `IHarness`.
-  Depends on: añadir un listener de spawn al `IHarness`.
+- [x] **Devolver estado consultable de los hijos**
+review: `listSpawns()` ya devuelve lo que la franja lee (`spawnId`, `sessionId`, `agentId`,
+`prompt`, `status`, `startedAt` y, al asentar, `finishedAt`/`result`/`error`) y está en
+`IHarness` desde §9.1.1. Lo que faltaba era el test y, sobre todo, el histórico:
+`listSpawns()` solo ve este proceso.
+hecho: 3 tests en `SessionManager.spec.ts` — shape exacto de un hijo recién lanzado,
+campos que se añaden al asentar, y `childHistory()` tras reanudar (transcript persistido
+intacto, `listSpawns()`/`pollSpawn()` vacíos para esos hijos) + uno que verifica que
+devuelve una copia. `IHarness.childHistory()` entra al contrato para que el CLI pinte lo
+persistido sin acoplarse a `SessionManagerImpl`.
+nota: `listSpawns()` ordena por `startedAt` descendente y `childHistory()` en orden de
+lanzamiento; la franja normaliza ambas en `spawnStrip`.
+Depends on: añadir un listener de spawn al `IHarness`.
 
 - [x] **Persistir eventos de spawn en la sesión**
 review: los handles vivían solo en `SpawnManager`, así que tras `/resume` no había rastro de qué hijos corrieron ni cómo terminaron, y la franja del TUI se perdía entera.
@@ -152,7 +161,7 @@ decisión de formato: se guarda el **handle final** (`SpawnHandle[]`), no los ev
 decisión de I/O: `save()` ya hace `writeFileSync` completo y se llama ~7 veces por turno; añadir una escritura por evento habría duplicado I/O sobre un JSON que crece con el historial. En su lugar, `SessionManager` acumula `spawnHistory` en memoria y lo persiste dentro del `save()` existente. Excepción: al hacer `settled` sí se llama a `save()`, porque un hijo puede terminar sin que haya otro turno y su estado no debe perderse.
 hecho: `SessionRecord.spawns?: SpawnHandle[]`, `SESSION_VERSION` 3 → 4, migración en `load` (`record.spawns ??= []`, así los llamadores no ramifican por versión). El campo se **omite** del JSON cuando no hay hijos (test). Al restaurar es histórico de **solo lectura**: los hijos no se reanudan y conservan el `status` con el que se persistieron.
 tests: 3 en `SessionStore.spec.ts` (round-trip con un hijo `done` y otro `error`, migración v3 → v4, campo omitido si no hay hijos) + 3 en `SessionManager.spec.ts` (persiste el hijo al terminar, persiste el error, no escribe el campo sin hijos). Build + 220 tests (core) + 103 (cli) + lint verdes.
-pendiente: no hay superficie que **muestre** este histórico al reanudar; `listSpawns()` sigue devolviendo solo los del proceso actual. Pintar los hijos restaurados en la franja del TUI (atenuados, sin tiempo corriendo) es el siguiente paso natural.
+pendiente: cerrado en `cli/TODO.md` §P1 (franja con los hijos restaurados) y en §9 «Devolver estado consultable» (`childHistory()`).
 
 - [x] **Emitir progreso del turno desde `ask()`**
 review: `ask()` devolvía solo el `AgentResponse` final y, aunque `OpenAiProvider` ya tenía un `_onChunk` en el constructor, era global del provider (no por llamada) y solo transportaba texto: no había forma de atribuir eventos a un turno ni de ver tool calls o razonamiento.
