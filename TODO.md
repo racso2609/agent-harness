@@ -1,6 +1,7 @@
 # TODO — racso-harness (índice global)
 
 ## Contexto
+
 Monorepo pnpm con dos paquetes: `core/` (`@racso/core`, SDK sin interacción, ver
 `core/CONTRACT.md`) y `cli/` (`@racso/cli`, cliente de terminal con renderer de
 líneas y TUI ink detrás de `--tui`). Este archivo es solo el índice: cada tarea
@@ -9,12 +10,13 @@ dependencias. Formato de cada lista: skill `core/skills/todo-format.md`.
 
 ## Tablero
 
-| Tema | Dónde vive | Estado |
-| --- | --- | --- |
-| Split core/cli, tooling, agents, skills, session reporting | `core/TODO.md` §0–9 | histórico + pendientes |
-| Gateway persistente (cronjobs + webhooks) | `core/TODO.md` §10 | nuevo, c3 |
-| TUI de pantalla completa y feedback del turno | `cli/TODO.md` §P0–P3 | P0/P1/P3 cerrados, P2 en curso |
-| Instalación y distribución | `cli/TODO.md` §P4 | nuevo, c3 |
+| Tema                                                       | Dónde vive           | Estado                                                       |
+| ---------------------------------------------------------- | -------------------- | ------------------------------------------------------------ |
+| Split core/cli, tooling, agents, skills, session reporting | `core/TODO.md` §0–9  | histórico + pendientes                                       |
+| Gateway persistente (cronjobs + webhooks)                  | `core/TODO.md` §10   | nuevo, c3                                                    |
+| TUI de pantalla completa y feedback del turno              | `cli/TODO.md` §P0–P3 | P0–P3 cerrados salvo las tareas nuevas abiertas en §P1 y §P3 |
+| Progreso en vivo de los hijos                              | `core/TODO.md` §11   | nuevo, c3                                                    |
+| Instalación y distribución                                 | `cli/TODO.md` §P4    | nuevo, c3                                                    |
 
 ## Origen de las tareas nuevas
 
@@ -25,8 +27,22 @@ Los tres puntos que había en este archivo se trocearon así:
 - **analizar si vale la pena usar el gateway en el CLI** → no es tarea mientras el
   gateway no exista: queda como pregunta abierta en `cli/TODO.md`.
 
+Las cuatro notas sueltas que había en este archivo se cerraron así:
+
+- **logs de los hijos como summary en el card del proceso delegado** → se partió en
+  dos: el progreso en vivo en el contrato (`core/TODO.md` §11) y el card con resumen y
+  duración en `cli/TODO.md` §P1.
+- **scroll inestable mientras el modelo va generando** → `cli/TODO.md` §P3.
+- **animación del cursor para saber dónde está el foco** → `cli/TODO.md` §P3.
+- **limitar el número de caracteres de las secciones colapsadas (`ctrl+t`/`ctrl+r`)**
+  → `cli/TODO.md` §P3.
+
 ## Descartados
 
 - **Duplicar las tareas en este archivo** — dos copias de la misma lista se
   desincronizan (ya pasó con `~/.racso-harness/agents/*.md` vs `core/agents/`) →
   un solo índice con punteros.
+- **Conservar la nota de scroll tal cual** — la nota acababa en «…cuando vaa
+  generando los», es decir, sin objeto completo → se registró el problema observable
+  (la vista salta durante el streaming) y el criterio de cierre queda en la tarea de
+  `cli/TODO.md` §P3, no en la nota.
