@@ -4,6 +4,7 @@ import type { Config } from "../../src/configuration";
 import { OpenAiProvider } from "../../src/providers/openai";
 import { SessionManager } from "../../src/session/SessionManager";
 import type { SessionStore } from "../../src/session/SessionStore";
+import type { SpawnHandle } from "../../src/session/spawn";
 
 const makeConfig = (overrides: Record<string, unknown> = {}) => {
   const config = { providers: {}, ...overrides };
@@ -998,6 +999,81 @@ describe("SessionManager spawn", () => {
         role: "system",
         content: expect.stringContaining(`[spawn ${handle.spawnId} · coder · error]`),
       }),
+    );
+  });
+
+  // The final message of a child is the answer to the parent: it is the only
+  // thing that crosses the session boundary. These cases pin the contract so
+  // it cannot regress into a blank system message.
+  it("injects the child text as the answer to the parent", async () => {
+    stubProvider("the child answer");
+    const session = makeSession();
+
+    const handle = session.spawn("coder", "do the thing");
+    await session.waitSpawn(handle.spawnId);
+
+    expect(session.history).toContainEqual({
+      role: "system",
+      content: `[spawn ${handle.spawnId} · coder · done]\nthe child answer`,
+    });
+  });
+
+  it("marks a child that answered nothing instead of injecting a blank line", async () => {
+    stubProvider("");
+    const session = makeSession();
+
+    const handle = session.spawn("coder", "do the thing");
+    await session.waitSpawn(handle.spawnId);
+
+    expect(session.history).toContainEqual({
+      role: "system",
+      content: `[spawn ${handle.spawnId} · coder · done]\n(no output)`,
+    });
+  });
+
+  // The formatting is inspected directly for the error paths: launching a
+  // child that fails would need a live provider, and the contract is the text
+  // injected into the parent, not how the child died.
+  const handleWith = (overrides: Partial<SpawnHandle> = {}): SpawnHandle => ({
+    spawnId: "spawn-1",
+    sessionId: "session-1",
+    agentId: "coder",
+    prompt: "do the thing",
+    status: "done",
+    startedAt: new Date(0).toISOString(),
+    ...overrides,
+  });
+
+  const formatter = (session: ReturnType<typeof makeSession>) =>
+    (
+      session as unknown as {
+        formatSpawnResult: (handle: SpawnHandle) => string;
+      }
+    ).formatSpawnResult.bind(session);
+
+  it("marks a failed child with its error and no answer section", () => {
+    const session = makeSession();
+
+    expect(
+      formatter(session)(
+        handleWith({ status: "error", error: "provider down" }),
+      ),
+    ).toBe("[spawn spawn-1 · coder · error] provider down");
+  });
+
+  it("falls back to unknown error when a failed child carries no message", () => {
+    const session = makeSession();
+
+    expect(formatter(session)(handleWith({ status: "error" }))).toBe(
+      "[spawn spawn-1 · coder · error] unknown error",
+    );
+  });
+
+  it("caps the child answer to the configured budget", () => {
+    const session = makeSession({ sessions: { childResultMaxChars: 3 } });
+
+    expect(formatter(session)(handleWith({ result: "abcdef" }))).toBe(
+      "[spawn spawn-1 · coder · done]\nabc…",
     );
   });
 

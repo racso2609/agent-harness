@@ -94,6 +94,12 @@ const applyProviderOptions = (
 const truncateText = (text: string, max: number) =>
   text.length > max ? `${text.slice(0, max)}…` : text;
 
+// A settled child can come back with nothing useful: undefined (never set) and
+// an empty or blank string are the same case for the parent, so both fall back
+// to a placeholder instead of injecting a blank system message.
+const outcomeText = (value: string | undefined, fallback: string) =>
+  value && value.trim() ? value : fallback;
+
 // Public contract of the session manager.
 // Concrete implementation is SessionManagerImpl below.
 interface SessionManager {
@@ -625,9 +631,9 @@ return this.spawnManager().on(listener);
     const header = `[spawn ${handle.spawnId} · ${handle.agentId} · ${handle.status}]`;
 
     if (handle.status === "error") {
-      return `${header} ${truncateText(handle.error ?? "unknown error", max)}`;
+      return `${header} ${truncateText(outcomeText(handle.error, "unknown error"), max)}`;
     }
-    return `${header}\n${truncateText(handle.result ?? "(no output)", max)}`;
+    return `${header}\n${truncateText(outcomeText(handle.result, "(no output)"), max)}`;
   }
 
   // Compacts the session history using the configured threshold.
