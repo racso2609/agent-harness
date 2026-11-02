@@ -1148,6 +1148,89 @@ it("rejects spawning when disabled by config", () => {
     expect(() => session.spawn("coder", "x")).toThrow(/disabled/);
   });
 
+  it("pins the shape the UI reads off every child", async () => {
+    stubProvider("child answer");
+    const session = makeSession();
+
+    session.spawn("coder", "do the thing", { context: "ctx" });
+    const [child] = session.listSpawns();
+
+    // The progress strip needs the identity, the status and the two
+    // timestamps; anything less and it cannot render a row.
+    expect(child).toEqual({
+      spawnId: expect.stringMatching(/^spawn-/),
+      sessionId: session.sessionId,
+      agentId: "coder",
+      prompt: "do the thing",
+      status: "running",
+      startedAt: expect.any(String),
+    });
+    expect(Number.isNaN(Date.parse(child!.startedAt))).toBe(false);
+  });
+
+  it("adds the result and the finish time once the child settles", async () => {
+    stubProvider("child answer");
+    const session = makeSession();
+
+    const handle = session.spawn("coder", "do the thing");
+    await session.waitSpawn(handle.spawnId);
+
+    expect(session.listSpawns()[0]).toMatchObject({
+      status: "done",
+      result: "child answer",
+      finishedAt: expect.any(String),
+    });
+  });
+
+  it("keeps the children of a resumed session as read-only history", async () => {
+    stubProvider();
+    const session = makeSession();
+    const persisted = [
+      handleWith({
+        spawnId: "spawn-old",
+        status: "done",
+        finishedAt: new Date(1_000).toISOString(),
+        result: "done before the restart",
+      }),
+      handleWith({
+        spawnId: "spawn-older",
+        status: "error",
+        startedAt: new Date(-1_000).toISOString(),
+        finishedAt: new Date(0).toISOString(),
+        error: "provider down",
+      }),
+    ];
+
+    session.store.load = vi.fn(() => ({
+      id: "session-1",
+      createdAt: new Date(0).toISOString(),
+      updatedAt: new Date(0).toISOString(),
+      provider: "openai",
+      model: "model",
+      agentId: "default",
+      history: [],
+      spawns: persisted,
+    })) as unknown as typeof session.store.load;
+
+    await expect(session.load("session-1")).resolves.toBe(true);
+
+    // The persisted transcript survives (launch order, final status) but the
+    // live view stays empty: those children cannot be polled or cancelled.
+    expect(session.childHistory()).toEqual(persisted);
+    expect(session.listSpawns()).toEqual([]);
+    expect(session.pollSpawn("spawn-old")).toBeUndefined();
+  });
+
+  it("hands out a copy of the child history, not its own array", async () => {
+    stubProvider("child answer");
+    const session = makeSession();
+
+    session.spawn("coder", "do the thing");
+    session.childHistory().pop();
+
+    expect(session.childHistory()).toHaveLength(1);
+  });
+
   it("returns undefined/empty results when nothing was spawned", async () => {
     const session = makeSession();
 

@@ -116,7 +116,11 @@ export interface IHarness {
   // --- background children ---
   spawn(agentId: string, prompt: string, options?: SpawnOptions): SpawnHandle;
   pollSpawn(spawnId: string): SpawnHandle | undefined;
+  // Live children of the current process only.
   listSpawns(): SpawnHandle[];
+  // Every child this session ever launched, including the ones restored from a
+  // previous run. Read-only: a restored child is never reattached.
+  childHistory(): SpawnHandle[];
 // Live-only subscription to children starting/finishing. Returns unsubscribe.
 onSpawnEvent(listener: SpawnEventListener): () => void;
   waitSpawn(spawnId: string): Promise<SpawnHandle | undefined>;

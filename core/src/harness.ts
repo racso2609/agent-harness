@@ -121,6 +121,10 @@ listSpawns(): SpawnHandle[] {
     return this.session.listSpawns();
   }
 
+  childHistory(): SpawnHandle[] {
+    return this.session.childHistory();
+  }
+
   waitSpawn(spawnId: string) {
     return this.session.waitSpawn(spawnId);
   }

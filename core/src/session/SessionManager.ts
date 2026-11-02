@@ -148,6 +148,8 @@ interface SessionManager {
   pollSpawn: (spawnId: string) => SpawnHandle | undefined;
   // Lists every background child spawned by this session.
   listSpawns: () => SpawnHandle[];
+  // Children of this session, persisted across runs. Read-only after /resume.
+  childHistory: () => SpawnHandle[];
   // Waits for a background child to settle.
   waitSpawn: (spawnId: string) => Promise<SpawnHandle | undefined>;
   // Waits for every child (or the given ids) and returns their handles.
@@ -559,6 +561,13 @@ return handle;
 
   listSpawns() {
     return this.spawns?.list() ?? [];
+  }
+
+  // Children this session launched, including the ones restored from a
+  // previous run. listSpawns() is the live view (this process only); this is
+  // the persisted transcript, in launch order and read-only after a resume.
+  childHistory(): SpawnHandle[] {
+    return [...this.spawnHistory];
   }
 
   waitSpawn(spawnId: string) {
