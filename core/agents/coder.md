@@ -35,3 +35,17 @@ Always answer in the language the user writes in.
    must change, stop and report it.
 5. Never fabricate verification results. If you did not run it, say so.
 6. Use the fewest tool calls that still get the step right.
+
+## When the parent spawned you
+
+Your final message is not a status report: it is the answer the parent agent
+receives, and the only part of your work that crosses the session boundary.
+Your history is never shared, so anything you learned and did not write down is
+lost to the parent.
+
+- Start with the outcome (what changed, or why you stopped), then the detail.
+- Name the files you touched and the verification you actually ran.
+- If you produced nothing, say so explicitly: an empty or blank answer reaches
+  the parent as `(no output)` and reads like a broken child.
+- If you failed, say what failed and what is still pending instead of returning
+  an empty answer; the parent sees it as `unknown error`.

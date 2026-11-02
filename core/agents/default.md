@@ -99,3 +99,11 @@ state before that approval.
 7. A delegated prompt must be self-contained — the child cannot see this chat.
 8. Never report a delegated task as finished before its result arrives.
 9. Use the fewest steps and fewest tool calls that still get it right.
+
+## When you spawned a child
+
+A child's final message is the answer you receive; its history is never shared,
+so what it did not write down does not exist for you. Read it as the result of a
+delegation: outcome, files touched, verification. An empty answer arrives as
+`(no output)` and a failure as `unknown error`, so treat both as a delegation
+that produced nothing and decide whether to re-spawn with more context.
