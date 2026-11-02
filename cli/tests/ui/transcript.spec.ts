@@ -225,6 +225,86 @@ const tools = ui.of("tool");
 expect(tools).toHaveLength(1);
 expect(ui.text(tools[0]!)).toBe("→ shellline one\nline two\n");
 });
+
+// The notice that actually lands mid-command is the one a settled child
+// writes, not only the explicit `notice` event. The interrupted command must
+// still be the single entry its chunks are appended to.
+it("concatenates the output of a tool across a settled child", () => {
+const ui = play([
+{ type: "turnStart", prompt: "hola" },
+{ type: "toolStart", id: "c1", name: "shell" },
+{ type: "toolOutput", id: "c1", name: "shell", chunk: "line one\n" },
+{ type: "spawnSettled", handle: settled({ result: "ok" }) },
+{ type: "toolOutput", id: "c1", name: "shell", chunk: "line two\n" },
+{ type: "toolEnd", id: "c1", name: "shell" },
+]);
+const tools = ui.of("tool");
+
+expect(tools).toHaveLength(1);
+expect(ui.text(tools[0]!)).toBe("→ shellline one\nline two\n");
+// The child still has to be reported, between the two pieces.
+expect(ui.lines.map((line) => line.role)).toEqual(["user", "tool", "notice"]);
+});
+
+// Two commands cannot share an entry: the output of c2 must not land under
+// c1, or the user reads one command that ran twice. `toolStart` is what makes
+// that true, and it is easy to lose: the header goes in through `pushLine`,
+// which leaves the `tool` anchor where it was, so the index has to be stored
+// again right after. Drop that store and the anchor still points at a `tool`
+// entry — the one the previous `toolOutput` opened — which `writeAnchored`
+// accepts as valid, so c2's chunk is appended there instead of under its own
+// header: three entries, `→ shell`, `a\nb\n`, `→ read_file`. With no valid
+// anchor at all the chunk would open yet another entry: four, `→ shell`,
+// `a\n`, `→ read_file`, `b\n`. Both wrong variants differ from the two
+// entries asserted below, so this sequence only passes when every command
+// opens — and keeps — its own entry.
+it("opens one entry per command when a notice lands in between", () => {
+const ui = play([
+{ type: "turnStart", prompt: "hola" },
+{ type: "toolStart", id: "c1", name: "shell" },
+{ type: "toolOutput", id: "c1", name: "shell", chunk: "a\n" },
+{ type: "spawnSettled", handle: settled({ result: "ok" }) },
+{ type: "toolStart", id: "c2", name: "read_file" },
+{ type: "toolOutput", id: "c2", name: "read_file", chunk: "b\n" },
+{ type: "toolEnd", id: "c2", name: "read_file" },
+{ type: "turnEnd" },
+]);
+const tools = ui.of("tool");
+
+expect(tools).toHaveLength(2);
+expect(ui.text(tools[0]!)).toBe("→ shella\n");
+expect(ui.text(tools[1]!)).toBe("→ read_fileb\n");
+});
+
+// The same split across two commands, each streamed in two chunks with a
+// notice between commands. Every chunk has to reach the entry of its own
+// command, in order, and the notice has to stay between them.
+it("keeps each command's chunks in its own entry, in order", () => {
+const ui = play([
+{ type: "turnStart", prompt: "hola" },
+{ type: "toolStart", id: "c1", name: "shell" },
+{ type: "toolOutput", id: "c1", name: "shell", chunk: "ls\n" },
+{ type: "toolOutput", id: "c1", name: "shell", chunk: "done\n" },
+{ type: "spawnSettled", handle: settled({ result: "ok" }) },
+{ type: "toolStart", id: "c2", name: "read_file" },
+{ type: "toolOutput", id: "c2", name: "read_file", chunk: "a.ts\n" },
+{ type: "toolOutput", id: "c2", name: "read_file", chunk: "b.ts\n" },
+{ type: "turnEnd" },
+]);
+const tools = ui.of("tool");
+
+expect(tools).toHaveLength(2);
+expect(ui.text(tools[0]!)).toBe("→ shellls\ndone\n");
+expect(ui.text(tools[1]!)).toBe("→ read_filea.ts\nb.ts\n");
+// The notice of the settled child must sit between the two commands, not
+// inside either of them.
+expect(ui.lines.map((line) => line.role)).toEqual([
+"user",
+"tool",
+"notice",
+"tool",
+]);
+});
 });
 
 // Anchors are indices, so trimming the transcript has to move them. Covered
