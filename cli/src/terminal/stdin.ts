@@ -2,12 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import terminalImage from "terminal-image";
 import type { CommandOption } from "@/commands/CommandRepository";
-import {
-  clampSelection,
-  filterCommands,
-  moveSelection,
-  visibleCommands,
-} from "./commandMenu";
+import { clampSelection, filterCommands, moveSelection, visibleCommands } from "./commandMenu";
 
 // State of the prompt currently waiting for input, kept so async output
 // (logs) can wipe and redraw the line without losing what the user typed.
@@ -53,10 +48,7 @@ const renderMenuLines = (): string[] => {
 
   if (!commands.length) return ["  No matching commands"];
 
-  const maxVisible = Math.max(
-    1,
-    Math.min(MAX_VISIBLE_COMMANDS, (process.stdout.rows ?? 24) - 4),
-  );
+  const maxVisible = Math.max(1, Math.min(MAX_VISIBLE_COMMANDS, (process.stdout.rows ?? 24) - 4));
   const visible = visibleCommands(commands, state.selected, maxVisible);
   const width = Math.max(20, (process.stdout.columns ?? 80) - 1);
 
@@ -65,14 +57,9 @@ const renderMenuLines = (): string[] => {
       ? ` (${command.aliases.map((alias) => `/${alias}`).join(", ")})`
       : "";
     const label = `  /${command.name}${aliases}  ${command.description}`;
-    const text =
-      label.length > width
-        ? `${label.slice(0, Math.max(0, width - 1))}…`
-        : label;
+    const text = label.length > width ? `${label.slice(0, Math.max(0, width - 1))}…` : label;
 
-    return command === commands[state.selected]
-      ? `\x1b[7m${text}\x1b[0m`
-      : text;
+    return command === commands[state.selected] ? `\x1b[7m${text}\x1b[0m` : text;
   });
 };
 
@@ -106,10 +93,7 @@ export interface InputOptions {
   commands?: CommandOption[];
 }
 
-export function input(
-  message: string,
-  options: InputOptions = {},
-): Promise<string> {
+export function input(message: string, options: InputOptions = {}): Promise<string> {
   return new Promise((resolve) => {
     activePrompt = message;
     typed = "";
@@ -140,11 +124,7 @@ export function input(
             i += 2;
             if (menu) {
               const delta = rest.startsWith("\u001b[A") ? -1 : 1;
-              menu.selected = moveSelection(
-                menu.selected,
-                delta,
-                matches().length,
-              );
+              menu.selected = moveSelection(menu.selected, delta, matches().length);
               render();
             }
             continue;
@@ -253,10 +233,7 @@ export function closeInput() {
   reset();
 }
 
-export async function select(
-  message: string,
-  options: string[],
-): Promise<string> {
+export async function select(message: string, options: string[]): Promise<string> {
   if (!options.length) throw new Error("select requires at least one option");
 
   write(message);
@@ -318,10 +295,7 @@ export function askHidden(message: string): Promise<string> {
 }
 
 export const loadLogo = () => {
-  return fs.readFileSync(
-    path.join(import.meta.dirname, "..", "..", "racso-logo.txt"),
-    "utf8",
-  );
+  return fs.readFileSync(path.join(import.meta.dirname, "..", "..", "racso-logo.txt"), "utf8");
 };
 
 export const printLogo = () => {

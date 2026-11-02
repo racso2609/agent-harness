@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  classifyCommand,
-  isDeniedCommand,
-} from "../../src/tools/shellPolicy";
+import { classifyCommand, isDeniedCommand } from "../../src/tools/shellPolicy";
 
 describe("shellPolicy", () => {
   describe("classifyCommand", () => {

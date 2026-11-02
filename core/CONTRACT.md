@@ -39,9 +39,7 @@ export interface ILogger {
 // Recibe una línea ya formateada. El sink NO conoce prompts ni cursor.
 export type LoggerSink = (line: string) => void;
 
-export type ApprovalHandler = (
-  request: ApprovalRequest,
-) => Promise<ApprovalDecision>;
+export type ApprovalHandler = (request: ApprovalRequest) => Promise<ApprovalDecision>;
 
 export interface HarnessDeps {
   // Logger del harness. Por defecto escribe a stderr.
@@ -71,12 +69,12 @@ export interface IHarness {
 
   // Turno principal. `images` es dato de dominio; el CLI decide cómo pintarlo.
   ask(prompt: string, options?: AskOptions): Promise<AgentResponse>;
-// AgentResponse.outcome?: TurnOutcome = { status, pending[], next? }, para reportar
-// estado sin parsear texto. status: "completed" | "toolError" | "incomplete".
-// AskOptions.onEvent recibe el progreso del turno mientras se produce:
-// { type: "text" | "reasoning", delta }, { type: "toolCallStart" | "toolCallEnd", id, name }
-// y { type: "toolOutput", id, name, chunk } (salida viva de la tool, con throttle).
-// Omitirlo mantiene el comportamiento bloqueante de siempre.
+  // AgentResponse.outcome?: TurnOutcome = { status, pending[], next? }, para reportar
+  // estado sin parsear texto. status: "completed" | "toolError" | "incomplete".
+  // AskOptions.onEvent recibe el progreso del turno mientras se produce:
+  // { type: "text" | "reasoning", delta }, { type: "toolCallStart" | "toolCallEnd", id, name }
+  // y { type: "toolOutput", id, name, chunk } (salida viva de la tool, con throttle).
+  // Omitirlo mantiene el comportamiento bloqueante de siempre.
 
   // Snapshot de uso/coste/contexto y del agente/provider activos.
   status(): SessionStatus;
@@ -90,17 +88,17 @@ export interface IHarness {
   save(): void;
 
   // --- providers / modelos ---
-listProviders(): string[];
-listProviderDetails(): ProviderDetail[];
-// Crea o reemplaza una instancia (id libre + type de backend).
-configureProvider(
-id: string,
-provider: ProviderConfig,
-options?: { makeDefault?: boolean; model?: string },
-): void;
-// Borra una instancia. false si no existe.
-removeProvider(id: string): boolean;
-setProvider(name: string): Promise<boolean>;
+  listProviders(): string[];
+  listProviderDetails(): ProviderDetail[];
+  // Crea o reemplaza una instancia (id libre + type de backend).
+  configureProvider(
+    id: string,
+    provider: ProviderConfig,
+    options?: { makeDefault?: boolean; model?: string },
+  ): void;
+  // Borra una instancia. false si no existe.
+  removeProvider(id: string): boolean;
+  setProvider(name: string): Promise<boolean>;
   listModels(): Model[];
   setModel(model: string): boolean;
 
@@ -108,11 +106,11 @@ setProvider(name: string): Promise<boolean>;
   listAgents(): AgentSummary[];
   setAgent(agentId: string): Promise<boolean>;
 
-// --- skills ---
-// Skills cargadas en la sesion activa. Solo el indice: nunca el body.
-listSkills(): SkillSummary[];
-// Re-escanea config.skills.dirs y recompone el system prompt.
-reloadSkills(): SkillSummary[];
+  // --- skills ---
+  // Skills cargadas en la sesion activa. Solo el indice: nunca el body.
+  listSkills(): SkillSummary[];
+  // Re-escanea config.skills.dirs y recompone el system prompt.
+  reloadSkills(): SkillSummary[];
 
   // --- aprobaciones ---
   // Instala el handler que el CLI usa para preguntar (y/N/always).
@@ -122,9 +120,9 @@ reloadSkills(): SkillSummary[];
   spawn(agentId: string, prompt: string, options?: { context?: string }): SpawnHandle;
   pollSpawn(spawnId: string): SpawnHandle | undefined;
   listSpawns(): SpawnHandle[];
-// Suscripción en vivo a arranque/fin de hijos. Devuelve el unsubscribe.
-// No reenvía eventos pasados: el estado inicial se lee con listSpawns().
-onSpawnEvent(listener: SpawnEventListener): () => void;
+  // Suscripción en vivo a arranque/fin de hijos. Devuelve el unsubscribe.
+  // No reenvía eventos pasados: el estado inicial se lee con listSpawns().
+  onSpawnEvent(listener: SpawnEventListener): () => void;
   waitSpawn(spawnId: string): Promise<SpawnHandle | undefined>;
   collectSpawns(spawnIds?: string[]): Promise<SpawnHandle[]>;
 
@@ -178,19 +176,19 @@ export { logger }; // proxy al logger activo
 
 ```ts
 class Config {
-needsSetup(): boolean; // antes setupComplete()
-validateConfig(): {
-ok: boolean;
-errors: string[]; // provider default ausente, URL/key...
-};
-configureProvider(
-id: string,
-provider: ProviderConfig,
-options?: { makeDefault?: boolean; model?: string },
-): void;
-removeProvider(id: string): boolean;
-listProviderDetails(): ProviderDetail[];
-writeConfig(): void;
+  needsSetup(): boolean; // antes setupComplete()
+  validateConfig(): {
+    ok: boolean;
+    errors: string[]; // provider default ausente, URL/key...
+  };
+  configureProvider(
+    id: string,
+    provider: ProviderConfig,
+    options?: { makeDefault?: boolean; model?: string },
+  ): void;
+  removeProvider(id: string): boolean;
+  listProviderDetails(): ProviderDetail[];
+  writeConfig(): void;
 }
 ```
 
@@ -288,28 +286,28 @@ activo.
 
 ## Mapa: método interactivo actual → primitivas + flujo CLI
 
-| Hoy (core) | Ahora en core | Flujo CLI |
-| --- | --- | --- |
-| `changeProvider(name?)` | `listProviders()`, `setProvider(name)` | `flows/changeProvider.ts` pregunta con `select` |
-| `changeModel(model?)` | `listModels()`, `setModel(model)` | `flows/changeModel.ts` pregunta con `select` |
-| `changeAgent(id?)` | `listAgents()`, `setAgent(id)` | `flows/changeAgent.ts` pregunta con `select` |
-| `changeSession(target?)` + `pickSession` | `listSessions()`, `resolveSession(target)`, `loadSession(target)` | `flows/pickSession.ts` pregunta y llama `loadSession` |
-| `promptApproval(request)` | `approveWith(handler)` | `flows/promptApproval.ts` pregunta `y/N/always` |
-| `Config.startSetup()` | `needsSetup()`, `validateConfig()`, `configureProvider()`, `writeConfig()` | `flows/startSetup.ts` pregunta URL/key/model |
-| — (nuevo) | `listProviderDetails()`, `configureProvider()`, `removeProvider()` | `flows/addProvider.ts`, `flows/removeProvider.ts`, `/provider add\|rm\|ls\|id` |
+| Hoy (core)                               | Ahora en core                                                              | Flujo CLI                                                                      |
+| ---------------------------------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `changeProvider(name?)`                  | `listProviders()`, `setProvider(name)`                                     | `flows/changeProvider.ts` pregunta con `select`                                |
+| `changeModel(model?)`                    | `listModels()`, `setModel(model)`                                          | `flows/changeModel.ts` pregunta con `select`                                   |
+| `changeAgent(id?)`                       | `listAgents()`, `setAgent(id)`                                             | `flows/changeAgent.ts` pregunta con `select`                                   |
+| `changeSession(target?)` + `pickSession` | `listSessions()`, `resolveSession(target)`, `loadSession(target)`          | `flows/pickSession.ts` pregunta y llama `loadSession`                          |
+| `promptApproval(request)`                | `approveWith(handler)`                                                     | `flows/promptApproval.ts` pregunta `y/N/always`                                |
+| `Config.startSetup()`                    | `needsSetup()`, `validateConfig()`, `configureProvider()`, `writeConfig()` | `flows/startSetup.ts` pregunta URL/key/model                                   |
+| — (nuevo)                                | `listProviderDetails()`, `configureProvider()`, `removeProvider()`         | `flows/addProvider.ts`, `flows/removeProvider.ts`, `/provider add\|rm\|ls\|id` |
 
 ## Mapa de archivos que se mudan a `cli`
 
-| Origen (core) | Destino (cli) |
-| --- | --- |
-| `src/utils/stdin.ts` | `src/terminal/stdin.ts` |
-| `src/utils/status.ts` | `src/render/status.ts` |
-| `src/utils/commandMenu.ts` | `src/terminal/commandMenu.ts` |
-| `src/session/MainLoop.ts` | `src/MainLoop.ts` |
+| Origen (core)                       | Destino (cli)                       |
+| ----------------------------------- | ----------------------------------- |
+| `src/utils/stdin.ts`                | `src/terminal/stdin.ts`             |
+| `src/utils/status.ts`               | `src/render/status.ts`              |
+| `src/utils/commandMenu.ts`          | `src/terminal/commandMenu.ts`       |
+| `src/session/MainLoop.ts`           | `src/MainLoop.ts`                   |
 | `src/commands/CommandRepository.ts` | `src/commands/CommandRepository.ts` |
-| `racso-logo.txt` | `racso-logo.txt` |
-| `tests/utils/` | `tests/terminal/` + `tests/render/` |
-| `tests/commands/` | `tests/commands/` |
+| `racso-logo.txt`                    | `racso-logo.txt`                    |
+| `tests/utils/`                      | `tests/terminal/` + `tests/render/` |
+| `tests/commands/`                   | `tests/commands/`                   |
 
 Se quedan en core: `types/`, `providers/`, `tools/`, `agents/`,
 `configuration/`, `session/{SessionManager,SessionStore,classifyAction,history,spawn}.ts`,

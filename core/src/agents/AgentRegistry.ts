@@ -26,9 +26,7 @@ class AgentRegistry {
   }
 
   list(): AgentDefinition[] {
-    return [...this.agents.values()].sort((left, right) =>
-      left.id.localeCompare(right.id),
-    );
+    return [...this.agents.values()].sort((left, right) => left.id.localeCompare(right.id));
   }
 
   summaries(): AgentSummary[] {

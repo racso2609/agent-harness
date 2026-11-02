@@ -40,9 +40,7 @@ const mapFinishReason = (reason?: string | null): FinishReason => {
   }
 };
 
-const parseArguments = (
-  raw: string,
-): { args: unknown; parseError?: string } => {
+const parseArguments = (raw: string): { args: unknown; parseError?: string } => {
   if (!raw.trim()) return { args: {} };
 
   try {
@@ -70,8 +68,7 @@ export class OpenAiProvider extends BasicProvider implements Provider {
   // When true, tool calls emitted as text markup are normalized (see
   // normalizeToolMarkup). Enabled by default; toggled via config.
   normalizeTextToolCalls = true;
-  protected _onChunk: (content: string, done: boolean) => Promise<void> =
-    async () => {};
+  protected _onChunk: (content: string, done: boolean) => Promise<void> = async () => {};
 
   constructor(
     url: string,
@@ -89,11 +86,7 @@ export class OpenAiProvider extends BasicProvider implements Provider {
   }
 
   async getAvailableModels() {
-    const models = await this._fetcher<OpenAIModelsResponse>(
-      "/models",
-      {},
-      false,
-    );
+    const models = await this._fetcher<OpenAIModelsResponse>("/models", {}, false);
     const mappedModels = models.data.map((model) => this.mapModel(model));
 
     this.models = mappedModels;
@@ -110,8 +103,7 @@ export class OpenAiProvider extends BasicProvider implements Provider {
     };
 
     if (model.context_length != null) mapped.contextLength = model.context_length;
-    if (model.max_output_tokens != null)
-      mapped.maxOutputTokens = model.max_output_tokens;
+    if (model.max_output_tokens != null) mapped.maxOutputTokens = model.max_output_tokens;
 
     if (model.pricing) {
       mapped.pricing = {
@@ -151,32 +143,27 @@ export class OpenAiProvider extends BasicProvider implements Provider {
 
       for (const line of lines) {
         const trimmed = line.trim();
-        if (!trimmed || trimmed.startsWith(":") || trimmed === "data: [DONE]")
-          continue;
+        if (!trimmed || trimmed.startsWith(":") || trimmed === "data: [DONE]") continue;
 
         if (trimmed.startsWith("data: ")) {
           try {
-            const json = JSON.parse(
-              trimmed.replace("data: ", ""),
-            ) as OpenAIStreamChunk;
+            const json = JSON.parse(trimmed.replace("data: ", "")) as OpenAIStreamChunk;
             const choice = json.choices?.[0];
             const content = choice?.delta?.content;
 
             if (content) {
               fullAssistantResponse += content;
               if (this._onChunk) this._onChunk?.(content, done); // Notificas al exterior en tiempo real
-    onEvent?.({ type: "text", delta: content });
-
+              onEvent?.({ type: "text", delta: content });
             }
 
-    // Reasoning is streamed by DeepSeek-style gateways and stays out of the
-    // answer text; it is emitted live and kept on the turn for the UI.
-    const reasoningDelta =
-    choice?.delta?.reasoning_content ?? choice?.delta?.reasoning;
-    if (reasoningDelta) {
-    fullReasoning += reasoningDelta;
-    onEvent?.({ type: "reasoning", delta: reasoningDelta });
-    }
+            // Reasoning is streamed by DeepSeek-style gateways and stays out of the
+            // answer text; it is emitted live and kept on the turn for the UI.
+            const reasoningDelta = choice?.delta?.reasoning_content ?? choice?.delta?.reasoning;
+            if (reasoningDelta) {
+              fullReasoning += reasoningDelta;
+              onEvent?.({ type: "reasoning", delta: reasoningDelta });
+            }
 
             if (choice?.finish_reason) finishReason = choice.finish_reason;
 
@@ -189,10 +176,8 @@ export class OpenAiProvider extends BasicProvider implements Provider {
               };
 
               if (delta.id) current.id = delta.id;
-              if (delta.function?.name)
-                current.name += delta.function.name;
-              if (delta.function?.arguments)
-                current.rawArgs += delta.function.arguments;
+              if (delta.function?.name) current.name += delta.function.name;
+              if (delta.function?.arguments) current.rawArgs += delta.function.arguments;
 
               partialCalls.set(index, current);
             }
@@ -231,7 +216,7 @@ export class OpenAiProvider extends BasicProvider implements Provider {
       finishReason: effectiveFinishReason,
     };
 
-if (fullReasoning) turn.reasoning = fullReasoning;
+    if (fullReasoning) turn.reasoning = fullReasoning;
 
     if (this.normalizeTextToolCalls) {
       const normalized = normalizeToolMarkup(turn);
@@ -242,7 +227,7 @@ if (fullReasoning) turn.reasoning = fullReasoning;
     }
 
     for (const call of turn.toolCalls) {
-    onEvent?.({ type: "toolCallEnd", id: call.id, name: call.name });
+      onEvent?.({ type: "toolCallEnd", id: call.id, name: call.name });
     }
 
     return { turn, usage };
@@ -280,10 +265,7 @@ if (fullReasoning) turn.reasoning = fullReasoning;
       },
       true,
     )) as Response;
-    const { turn, usage } = await this._handleStream(
-    response,
-    options.onEvent,
-  );
+    const { turn, usage } = await this._handleStream(response, options.onEvent);
 
     this.lastContextTokens = usage
       ? usage.promptTokens + usage.completionTokens
@@ -297,8 +279,7 @@ if (fullReasoning) turn.reasoning = fullReasoning;
     const model = this.finModel(this.model);
 
     if (!model) throw new Error(Errors.MODEL_NOT_FOUND);
-    if (!model.capabilities.streaming)
-      throw new Error(Errors.MISSING_CAPABILITIES + "streaming");
+    if (!model.capabilities.streaming) throw new Error(Errors.MISSING_CAPABILITIES + "streaming");
 
     return model;
   }
@@ -319,9 +300,7 @@ if (fullReasoning) turn.reasoning = fullReasoning;
       };
 
       if (message.role === "assistant" && message.toolCalls?.length) {
-        wire.tool_calls = message.toolCalls.map((call) =>
-          this.toWireToolCall(call),
-        );
+        wire.tool_calls = message.toolCalls.map((call) => this.toWireToolCall(call));
       }
 
       return wire;
@@ -351,10 +330,7 @@ if (fullReasoning) turn.reasoning = fullReasoning;
   }
 
   protected estimateHistoryTokens(messages: History[]) {
-    const characters = messages.reduce(
-      (total, message) => total + message.content.length,
-      0,
-    );
+    const characters = messages.reduce((total, message) => total + message.content.length, 0);
 
     return Math.ceil(characters / 4);
   }

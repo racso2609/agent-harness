@@ -2,8 +2,7 @@ import type { SessionStatus, SessionSummary } from "@racso/core";
 
 const numberFormat = new Intl.NumberFormat("en-US");
 
-const formatTokens = (value: number) =>
-  numberFormat.format(Math.max(0, Math.round(value)));
+const formatTokens = (value: number) => numberFormat.format(Math.max(0, Math.round(value)));
 
 const formatCost = (value: number) => {
   const decimals = value > 0 && value < 0.01 ? 6 : 4;

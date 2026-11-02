@@ -8,10 +8,10 @@
 // block simply gains its styling the moment it closes.
 
 export type InlineSpan = {
-text: string;
-bold?: boolean;
-italic?: boolean;
-code?: boolean;
+  text: string;
+  bold?: boolean;
+  italic?: boolean;
+  code?: boolean;
 };
 
 export type Alignment = "left" | "center" | "right";
@@ -178,36 +178,33 @@ export const parseTable = (lines: string[]): TableBlock | null => {
     kind: "table",
     header,
     align: header.map((_, index) => align[index] ?? "left"),
-    rows: rows.map((row) =>
-      Array.from({ length: width }, (_, index) => row[index] ?? []),
-    ),
+    rows: rows.map((row) => Array.from({ length: width }, (_, index) => row[index] ?? [])),
   };
 };
 
 // Parses list lines, keeping nesting from indentation and ordinal numbers.
 export const parseList = (lines: string[]): Block => {
-// Groups: 1 = indentation, 2 = marker, 3 = text.
-const ordered = /\d/.test(LIST_ITEM.exec(lines[0]!)![2]!);
-let counter = 0;
+  // Groups: 1 = indentation, 2 = marker, 3 = text.
+  const ordered = /\d/.test(LIST_ITEM.exec(lines[0]!)![2]!);
+  let counter = 0;
 
-const items: ListItem[] = lines.map((line) => {
-const match = LIST_ITEM.exec(line)!;
-const indent = match[1]!.length;
-const marker = match[2]!;
-const isOrdinal = /\d/.test(marker);
+  const items: ListItem[] = lines.map((line) => {
+    const match = LIST_ITEM.exec(line)!;
+    const indent = match[1]!.length;
+    const marker = match[2]!;
+    const isOrdinal = /\d/.test(marker);
 
-if (isOrdinal) counter++;
+    if (isOrdinal) counter++;
 
-return {
-depth: Math.floor(indent / 2),
-marker: isOrdinal ? `${counter}.` : "-",
-spans: parseInline(match[3]!),
+    return {
+      depth: Math.floor(indent / 2),
+      marker: isOrdinal ? `${counter}.` : "-",
+      spans: parseInline(match[3]!),
+    };
+  });
+
+  return { kind: "list", ordered, items };
 };
-});
-
-return { kind: "list", ordered, items };
-};
-
 
 // Accumulates streamed markdown without re-parsing what is already closed.
 export class MarkdownStream {
@@ -318,13 +315,13 @@ export class MarkdownStream {
         if (!LIST_ITEM.test(rest.split("\n")[0] ?? "")) this.flushOpen();
       }
 
- // Table rows accumulate until a line that cannot belong to a table
- // arrives; without this each row became its own paragraph.
- if (this.pending.includes("|") && rest.trim()) {
- const next = rest.split("\n")[0] ?? "";
+      // Table rows accumulate until a line that cannot belong to a table
+      // arrives; without this each row became its own paragraph.
+      if (this.pending.includes("|") && rest.trim()) {
+        const next = rest.split("\n")[0] ?? "";
 
- if (!next.includes("|") && next.trim()) this.flushOpen();
- }
+        if (!next.includes("|") && next.trim()) this.flushOpen();
+      }
     }
   }
 

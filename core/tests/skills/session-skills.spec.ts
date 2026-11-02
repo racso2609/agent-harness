@@ -15,191 +15,181 @@ description: How to ship a release.
 Run the smoke tests, then tag.`;
 
 const makeConfig = (overrides: Record<string, unknown> = {}) => {
-	const config = { providers: {}, ...overrides };
+  const config = { providers: {}, ...overrides };
 
-	return {
-		config,
-		listProviders: () => Object.keys(config.providers),
-		listProviderDetails: () => [],
-		configureProvider: vi.fn(),
-		removeProvider: vi.fn(),
-		writeConfig: vi.fn(),
-	} as unknown as Config;
+  return {
+    config,
+    listProviders: () => Object.keys(config.providers),
+    listProviderDetails: () => [],
+    configureProvider: vi.fn(),
+    removeProvider: vi.fn(),
+    writeConfig: vi.fn(),
+  } as unknown as Config;
 };
 
 const makeStore = () =>
-	({
-		save: vi.fn(),
-		load: vi.fn(() => null),
-		list: vi.fn(() => []),
-	}) as unknown as SessionStore;
-
-
+  ({
+    save: vi.fn(),
+    load: vi.fn(() => null),
+    list: vi.fn(() => []),
+  }) as unknown as SessionStore;
 
 let skillsDir: string;
 
 beforeEach(() => {
-	skillsDir = fs.mkdtempSync(path.join(os.tmpdir(), "racso-session-skills-"));
+  skillsDir = fs.mkdtempSync(path.join(os.tmpdir(), "racso-session-skills-"));
 });
 
 afterEach(() => {
-	fs.rmSync(skillsDir, { recursive: true, force: true });
-	vi.restoreAllMocks();
+  fs.rmSync(skillsDir, { recursive: true, force: true });
+  vi.restoreAllMocks();
 });
 
 const writeSkill = (id: string, content = SKILL) => {
-	const dir = path.join(skillsDir, id);
-	fs.mkdirSync(dir, { recursive: true });
-	fs.writeFileSync(path.join(dir, "SKILL.md"), content, "utf8");
+  const dir = path.join(skillsDir, id);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, "SKILL.md"), content, "utf8");
 };
 
 // Builds an initialized session. Tools and prompt are applied by initialize;
 // the provider is stubbed so no network call happens.
-const makeSession = async (
-	overrides: Record<string, unknown> = {},
-	agentTools?: string[],
-) => {
-	vi.spyOn(OpenAiProvider.prototype, "initialize").mockResolvedValue();
-	vi.spyOn(OpenAiProvider.prototype, "getModel").mockReturnValue("model");
+const makeSession = async (overrides: Record<string, unknown> = {}, agentTools?: string[]) => {
+  vi.spyOn(OpenAiProvider.prototype, "initialize").mockResolvedValue();
+  vi.spyOn(OpenAiProvider.prototype, "getModel").mockReturnValue("model");
 
-	const config = makeConfig({
-		defaultProvider: "openai",
-		model: "model",
-		providers: { openai: { url: "http://localhost", apikey: "k" } },
-		skills: { dirs: [skillsDir] },
-		...overrides,
-	});
+  const config = makeConfig({
+    defaultProvider: "openai",
+    model: "model",
+    providers: { openai: { url: "http://localhost", apikey: "k" } },
+    skills: { dirs: [skillsDir] },
+    ...overrides,
+  });
 
-	const session = new SessionManager(config, makeStore());
-	await session.initialize();
-	if (agentTools) {
-		// setAgent rebuilds the tools with the agent allowlist.
-		session.agentRegistry.register({
-			id: "limited",
-			name: "Limited",
-			personality: "Read only.",
-			tools: agentTools,
-		});
-		expect(await session.setAgent("limited")).toBe(true);
-	}
-	return session;
+  const session = new SessionManager(config, makeStore());
+  await session.initialize();
+  if (agentTools) {
+    // setAgent rebuilds the tools with the agent allowlist.
+    session.agentRegistry.register({
+      id: "limited",
+      name: "Limited",
+      personality: "Read only.",
+      tools: agentTools,
+    });
+    expect(await session.setAgent("limited")).toBe(true);
+  }
+  return session;
 };
 
-const toolNames = (session: SessionManager) =>
-	session.tools.list().map((tool) => tool.name);
+const toolNames = (session: SessionManager) => session.tools.list().map((tool) => tool.name);
 
 describe("SessionManager skills", () => {
-	it("injects the skill index into the system prompt", async () => {
-		writeSkill("deploy");
-		const session = await makeSession();
+  it("injects the skill index into the system prompt", async () => {
+    writeSkill("deploy");
+    const session = await makeSession();
 
-		const prompt = session.history[0].content as string;
-		expect(prompt).toContain("## Skills");
-		expect(prompt).toContain("- deploy — How to ship a release.");
-		expect(prompt).not.toContain("Run the smoke tests");
-	});
+    const prompt = session.history[0].content as string;
+    expect(prompt).toContain("## Skills");
+    expect(prompt).toContain("- deploy — How to ship a release.");
+    expect(prompt).not.toContain("Run the smoke tests");
+  });
 
-	it("seeds the bundled skills into an empty directory", async () => {
-		// The loader seeds config.skills.dirs[0] on a clean install, so the
-		// example skill is what a first run sees.
-		const session = await makeSession();
+  it("seeds the bundled skills into an empty directory", async () => {
+    // The loader seeds config.skills.dirs[0] on a clean install, so the
+    // example skill is what a first run sees.
+    const session = await makeSession();
 
-		expect(session.listSkills().map((skill) => skill.id)).toContain(
-			"frontend-design",
-		);
-	});
+    expect(session.listSkills().map((skill) => skill.id)).toContain("frontend-design");
+  });
 
-	it("does not seed over an existing skill directory", async () => {
-		writeSkill("mine");
-		const before = fs.readdirSync(skillsDir).sort();
+  it("does not seed over an existing skill directory", async () => {
+    writeSkill("mine");
+    const before = fs.readdirSync(skillsDir).sort();
 
-		await makeSession();
+    await makeSession();
 
-		// The seed skips a directory that already holds a skill, so the
-		// example never lands next to the user's own definitions.
-		expect(fs.readdirSync(skillsDir).sort()).toEqual(before);
-	});
+    // The seed skips a directory that already holds a skill, so the
+    // example never lands next to the user's own definitions.
+    expect(fs.readdirSync(skillsDir).sort()).toEqual(before);
+  });
 
-	it("keeps the prompt free of skills when disabled", async () => {
-		writeSkill("deploy");
-		const session = await makeSession({ skills: { enabled: false, dirs: [skillsDir] } });
+  it("keeps the prompt free of skills when disabled", async () => {
+    writeSkill("deploy");
+    const session = await makeSession({ skills: { enabled: false, dirs: [skillsDir] } });
 
-		expect(session.history[0].content as string).not.toContain("## Skills");
-		expect(toolNames(session)).not.toContain("use_skill");
-	});
+    expect(session.history[0].content as string).not.toContain("## Skills");
+    expect(toolNames(session)).not.toContain("use_skill");
+  });
 
-	it("offers use_skill when the agent declares no allowlist", async () => {
-		writeSkill("deploy");
-		const session = await makeSession();
+  it("offers use_skill when the agent declares no allowlist", async () => {
+    writeSkill("deploy");
+    const session = await makeSession();
 
-		expect(toolNames(session)).toContain("use_skill");
-	});
+    expect(toolNames(session)).toContain("use_skill");
+  });
 
-	it("does not offer use_skill when the agent declares an allowlist", async () => {
-		writeSkill("deploy");
-		const session = await makeSession({}, ["readFile"]);
+  it("does not offer use_skill when the agent declares an allowlist", async () => {
+    writeSkill("deploy");
+    const session = await makeSession({}, ["readFile"]);
 
-		expect(toolNames(session)).toEqual(["readFile"]);
-	});
+    expect(toolNames(session)).toEqual(["readFile"]);
+  });
 
-	it("returns the body through use_skill", async () => {
-		writeSkill("deploy");
-		const session = await makeSession();
+  it("returns the body through use_skill", async () => {
+    writeSkill("deploy");
+    const session = await makeSession();
 
-		const result = await session.tools.execute(session["toolContext"](), {
-			id: "call-1",
-			name: "use_skill",
-			args: { id: "deploy" },
-		});
+    const result = await session.tools.execute(session["toolContext"](), {
+      id: "call-1",
+      name: "use_skill",
+      args: { id: "deploy" },
+    });
 
-		expect(result.isError).toBeFalsy();
-		expect(result.output).toContain("Run the smoke tests, then tag.");
-	});
+    expect(result.isError).toBeFalsy();
+    expect(result.output).toContain("Run the smoke tests, then tag.");
+  });
 
-	it("lists the available ids for an unknown skill", async () => {
-		writeSkill("deploy");
-		const session = await makeSession();
+  it("lists the available ids for an unknown skill", async () => {
+    writeSkill("deploy");
+    const session = await makeSession();
 
-		const result = await session.tools.execute(session["toolContext"](), {
-			id: "call-1",
-			name: "use_skill",
-			args: { id: "nope" },
-		});
+    const result = await session.tools.execute(session["toolContext"](), {
+      id: "call-1",
+      name: "use_skill",
+      args: { id: "nope" },
+    });
 
-		expect(result.isError).toBe(true);
-		expect(result.output).toContain("Unknown skill: nope");
-		expect(result.output).toContain("deploy");
-	});
+    expect(result.isError).toBe(true);
+    expect(result.output).toContain("Unknown skill: nope");
+    expect(result.output).toContain("deploy");
+  });
 
-	it("lists skills without bodies", async () => {
-		writeSkill("deploy");
-		const session = await makeSession();
+  it("lists skills without bodies", async () => {
+    writeSkill("deploy");
+    const session = await makeSession();
 
-		const [first, ...rest] = session.listSkills();
-		expect(first).toEqual({
-			id: "deploy",
-			name: "Deploy",
-			description: "How to ship a release.",
-			source: path.join(skillsDir, "deploy", "SKILL.md"),
-		});
-		// A user skill already present means no seed, so deploy stands alone.
-		expect(rest).toEqual([]);
-	});
+    const [first, ...rest] = session.listSkills();
+    expect(first).toEqual({
+      id: "deploy",
+      name: "Deploy",
+      description: "How to ship a release.",
+      source: path.join(skillsDir, "deploy", "SKILL.md"),
+    });
+    // A user skill already present means no seed, so deploy stands alone.
+    expect(rest).toEqual([]);
+  });
 
-	it("reload picks up a new skill and refreshes the prompt once", async () => {
-		const session = await makeSession();
-		const before = (session.history[0].content as string).match(/- /g)?.length;
+  it("reload picks up a new skill and refreshes the prompt once", async () => {
+    const session = await makeSession();
+    const before = (session.history[0].content as string).match(/- /g)?.length;
 
-		writeSkill("deploy");
-		const summaries = session.reloadSkills();
+    writeSkill("deploy");
+    const summaries = session.reloadSkills();
 
-		expect(summaries.map((skill) => skill.id)).toContain("deploy");
+    expect(summaries.map((skill) => skill.id)).toContain("deploy");
 
-		const systems = session.history.filter((m) => m.role === "system");
-		expect(systems).toHaveLength(1);
-		expect((systems[0].content as string).match(/- /g)?.length).toBe(
-			(before ?? 0) + 1,
-		);
-		expect(systems[0].content as string).toContain("- deploy — ");
-	});
+    const systems = session.history.filter((m) => m.role === "system");
+    expect(systems).toHaveLength(1);
+    expect((systems[0].content as string).match(/- /g)?.length).toBe((before ?? 0) + 1);
+    expect(systems[0].content as string).toContain("- deploy — ");
+  });
 });

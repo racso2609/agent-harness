@@ -8,11 +8,7 @@ import {
   DEFAULT_AGENT_ID,
   strictestApproval,
 } from "@/agents";
-import {
-  Config,
-  DEFAULT_PROVIDER_TYPE,
-  ProviderDetail,
-} from "@/configuration";
+import { Config, DEFAULT_PROVIDER_TYPE, ProviderDetail } from "@/configuration";
 import { OpenAiProvider } from "@/providers/openai";
 import { ensureSkillsDir, SkillLoader, SkillRegistry } from "@/skills";
 import type { SkillSummary } from "@/skills";
@@ -20,28 +16,20 @@ import { createToolRegistry, ToolContext, ToolRegistry } from "@/tools";
 import type { ApprovalDecision, ApprovalRequest } from "@/tools";
 import {
   AgentResponse,
-ChatEventListener,
+  ChatEventListener,
   History,
   Provider,
   TokenUsage,
-TurnOutcome,
+  TurnOutcome,
   ToolCall,
   ToolResult,
 } from "@/types/providers";
-import {
-  SessionStatus,
-  SessionSummary,
-  SessionUsage,
-} from "@/types/session";
+import { SessionStatus, SessionSummary, SessionUsage } from "@/types/session";
 import { generateSessionId } from "@/utils/session";
 import { logger } from "@/utils/logger";
 import type { ApprovalHandler } from "@/contract";
 import { ClassifiedAction, classifyAction } from "./classifyAction";
-import {
-  compactHistory,
-  DEFAULT_COMPACT_THRESHOLD,
-  estimateHistoryTokens,
-} from "./history";
+import { compactHistory, DEFAULT_COMPACT_THRESHOLD, estimateHistoryTokens } from "./history";
 import { SessionRecord, SessionStore } from "./SessionStore";
 import { SpawnEventListener, SpawnHandle, SpawnManager } from "./spawn";
 
@@ -68,25 +56,18 @@ const PROVIDER_FACTORIES: Record<
   string,
   (config: { url: string; apikey: string }, model: string) => Provider
 > = {
-  openai: (config, model) =>
-    new OpenAiProvider(config.url, config.apikey, model),
+  openai: (config, model) => new OpenAiProvider(config.url, config.apikey, model),
 };
 
 // Resolves the backend type of a provider entry, defaulting to "openai" so
 // configs written before instance ids existed keep working.
-const providerType = (config: { type?: string }) =>
-  config.type ?? DEFAULT_PROVIDER_TYPE;
+const providerType = (config: { type?: string }) => config.type ?? DEFAULT_PROVIDER_TYPE;
 
-const applyProviderOptions = (
-  provider: Provider,
-  config: Config,
-  type: string,
-) => {
+const applyProviderOptions = (provider: Provider, config: Config, type: string) => {
   if (type !== "openai") return provider;
 
   const openai = provider as OpenAiProvider;
-  openai.normalizeTextToolCalls =
-    config.config.tools?.normalizeTextToolCalls ?? true;
+  openai.normalizeTextToolCalls = config.config.tools?.normalizeTextToolCalls ?? true;
   return provider;
 };
 
@@ -176,8 +157,8 @@ class SessionManagerImpl implements SessionManager {
   agent?: AgentDefinition;
   // Available agent definitions; starts with only the embedded default.
   agentRegistry = new AgentRegistry([builtInDefaultAgent()]);
-	// Skill definitions loaded from config.skills.dirs; undefined when disabled.
-	skillRegistry?: SkillRegistry;
+  // Skill definitions loaded from config.skills.dirs; undefined when disabled.
+  skillRegistry?: SkillRegistry;
   protected agentsLoaded = false;
   // Active provider instance, undefined until initialize() succeeds.
   provider?: Provider;
@@ -208,16 +189,16 @@ class SessionManagerImpl implements SessionManager {
   protected approvalHandler?: ApprovalHandler;
   // Background child agents launched by this session. Created lazily.
   protected spawns?: SpawnManager;
-// Children this session launched, kept in launch order so the transcript
-// survives /resume. Restored read-only: children are never reattached.
-protected spawnHistory: SpawnHandle[] = [];
+  // Children this session launched, kept in launch order so the transcript
+  // survives /resume. Restored read-only: children are never reattached.
+  protected spawnHistory: SpawnHandle[] = [];
 
   constructor(config = new Config(), store = new SessionStore()) {
     this.config = config;
     this.store = store;
-		this.tools = createToolRegistry(this.config, undefined, {
-			skills: this.skillRegistry,
-		});
+    this.tools = createToolRegistry(this.config, undefined, {
+      skills: this.skillRegistry,
+    });
     this.createdAt = new Date().toISOString();
   }
 
@@ -229,26 +210,22 @@ protected spawnHistory: SpawnHandle[] = [];
 
     this.loadAgentRegistry();
 
-this.loadSkillRegistry();
+    this.loadSkillRegistry();
 
-    const agent = this.resolveAgent(
-      options.agent ?? this.config.config.agents?.default,
-    );
+    const agent = this.resolveAgent(options.agent ?? this.config.config.agents?.default);
     this.agent = agent;
     this.agentId = agent.id;
-		this.tools = createToolRegistry(this.config, agent.tools, {
-			skills: this.skillRegistry,
-		});
+    this.tools = createToolRegistry(this.config, agent.tools, {
+      skills: this.skillRegistry,
+    });
 
-    const providerName =
-      agent.provider ?? this.config.config.defaultProvider;
+    const providerName = agent.provider ?? this.config.config.defaultProvider;
     if (!providerName) throw new Error("No default provider configured");
 
     const providerConfig = this.config.config.providers[providerName];
     if (!providerConfig) throw new Error(`Missing config for ${providerName}`);
 
-    const model =
-      agent.model ?? providerConfig.model ?? this.config.config.model;
+    const model = agent.model ?? providerConfig.model ?? this.config.config.model;
     if (!model) throw new Error("No default model configured");
 
     this.provider = this.createProvider(providerName, providerConfig, model);
@@ -276,29 +253,23 @@ this.loadSkillRegistry();
     const providerConfig = this.config.config.providers[record.provider];
     if (!providerConfig) return false;
 
-    const provider = this.createProvider(
-      record.provider,
-      providerConfig,
-      record.model,
-    );
+    const provider = this.createProvider(record.provider, providerConfig, record.model);
     await provider.initialize();
     if (!provider.setModel(record.model)) return false;
 
-this.loadSkillRegistry();
+    this.loadSkillRegistry();
 
-    const agent = this.resolveAgent(
-      record.agentId ?? this.config.config.agents?.default,
-    );
+    const agent = this.resolveAgent(record.agentId ?? this.config.config.agents?.default);
     this.agent = agent;
     this.agentId = agent.id;
-		this.tools = createToolRegistry(this.config, agent.tools, {
-			skills: this.skillRegistry,
-		});
+    this.tools = createToolRegistry(this.config, agent.tools, {
+      skills: this.skillRegistry,
+    });
 
     this.history = record.history ?? [];
-// Children from a previous run are history only: they cannot be
-// reattached, and their status is whatever it was when persisted.
-this.spawnHistory = record.spawns ?? [];
+    // Children from a previous run are history only: they cannot be
+    // reattached, and their status is whatever it was when persisted.
+    this.spawnHistory = record.spawns ?? [];
     // Sessions persisted with an agent already start with its persona. Older
     // sessions keep their system messages (e.g. compacted memory) untouched.
     this.applySystemPrompt(Boolean(record.agentId));
@@ -356,9 +327,7 @@ this.spawnHistory = record.spawns ?? [];
 
   // Builds a short title from the first user message of a session.
   protected sessionTitle(history: History[]) {
-    const message = history.find(
-      (entry) => entry.role === "user" && entry.content.trim(),
-    );
+    const message = history.find((entry) => entry.role === "user" && entry.content.trim());
     if (!message) return undefined;
 
     const text = message.content.replace(/\s+/g, " ").trim();
@@ -380,7 +349,7 @@ this.spawnHistory = record.spawns ?? [];
       history: this.history,
       usage: this.usage,
       costUsd: this.costUsd,
-spawns: this.spawnHistory.length ? this.spawnHistory : undefined,
+      spawns: this.spawnHistory.length ? this.spawnHistory : undefined,
     };
 
     this.store.save(record);
@@ -461,18 +430,18 @@ spawns: this.spawnHistory.length ? this.spawnHistory : undefined,
     return this.agentRegistry.summaries();
   }
 
-// Skills visible to this session, for CLI listings and diagnostics.
-listSkills(): SkillSummary[] {
-	return this.skillRegistry?.summaries() ?? [];
-}
+  // Skills visible to this session, for CLI listings and diagnostics.
+  listSkills(): SkillSummary[] {
+    return this.skillRegistry?.summaries() ?? [];
+  }
 
-// Re-scans the skills directories and recomposes the system prompt so a
-// reload is visible without restarting the session.
-reloadSkills(): SkillSummary[] {
-	this.loadSkillRegistry();
-	if (this.agent) this.applySystemPrompt(true);
-	return this.listSkills();
-}
+  // Re-scans the skills directories and recomposes the system prompt so a
+  // reload is visible without restarting the session.
+  reloadSkills(): SkillSummary[] {
+    this.loadSkillRegistry();
+    if (this.agent) this.applySystemPrompt(true);
+    return this.listSkills();
+  }
 
   // Swaps the active agent and applies its provider, model, tools and persona.
   // Returns false when the agent or its provider/model is unavailable.
@@ -486,8 +455,7 @@ reloadSkills(): SkillSummary[] {
       return false;
     }
 
-    const providerName =
-      agent.provider ?? this.providerName ?? this.config.config.defaultProvider;
+    const providerName = agent.provider ?? this.providerName ?? this.config.config.defaultProvider;
     if (!providerName) return false;
 
     // Injected sessions may have a provider without a config entry (unit tests,
@@ -505,11 +473,7 @@ reloadSkills(): SkillSummary[] {
     if (!model) return false;
     if (switching || model !== this.model) {
       try {
-        const provider = this.createProvider(
-          providerName,
-          providerConfig ?? {},
-          model,
-        );
+        const provider = this.createProvider(providerName, providerConfig ?? {}, model);
         await provider.initialize();
         if (!this.selectModel(provider, providerConfig ?? {})) return false;
 
@@ -524,9 +488,9 @@ reloadSkills(): SkillSummary[] {
 
     this.agent = agent;
     this.agentId = agent.id;
-		this.tools = createToolRegistry(this.config, agent.tools, {
-			skills: this.skillRegistry,
-		});
+    this.tools = createToolRegistry(this.config, agent.tools, {
+      skills: this.skillRegistry,
+    });
     this.applySystemPrompt(true);
 
     await this.initializeClassifier();
@@ -543,16 +507,16 @@ reloadSkills(): SkillSummary[] {
       throw new Error("Spawning is disabled (sessions.spawnEnabled = false)");
     }
 
-const handle = this.spawnManager().spawn({
+    const handle = this.spawnManager().spawn({
       agentId,
       sessionId: this.sessionId,
       prompt,
       context: options.context,
     });
 
-this.spawnHistory = [...this.spawnHistory, handle];
+    this.spawnHistory = [...this.spawnHistory, handle];
 
-return handle;
+    return handle;
   }
 
   pollSpawn(spawnId: string) {
@@ -581,14 +545,14 @@ return handle;
   }
 
   // Subscribes an external consumer (the CLI UI) to spawn lifecycle events.
-// Live only: past events are not replayed, read listSpawns() for the current
-// state. The manager is built here so a listener registered before the first
-// spawn still receives it.
-onSpawnEvent(listener: SpawnEventListener): () => void {
-return this.spawnManager().on(listener);
-}
+  // Live only: past events are not replayed, read listSpawns() for the current
+  // state. The manager is built here so a listener registered before the first
+  // spawn still receives it.
+  onSpawnEvent(listener: SpawnEventListener): () => void {
+    return this.spawnManager().on(listener);
+  }
 
-// Builds the spawn manager on first use. The runner spins up a fresh child
+  // Builds the spawn manager on first use. The runner spins up a fresh child
   // SessionManager per spawn so history, usage and provider state stay
   // isolated from the parent turn.
   protected spawnManager(): SpawnManager {
@@ -615,12 +579,12 @@ return this.spawnManager().on(listener);
     // history is never shared; the text is capped to avoid inflating context.
     this.spawns.on((event) => {
       if (event.type === "settled") {
-      // Keep the persisted history in sync with the real outcome.
-      this.spawnHistory = this.spawnHistory.map((entry) =>
-      entry.spawnId === event.handle.spawnId ? event.handle : entry,
-      );
-      // A child can finish without another turn, so persist here too.
-      this.save();
+        // Keep the persisted history in sync with the real outcome.
+        this.spawnHistory = this.spawnHistory.map((entry) =>
+          entry.spawnId === event.handle.spawnId ? event.handle : entry,
+        );
+        // A child can finish without another turn, so persist here too.
+        this.save();
       }
 
       if (event.type !== "settled") return;
@@ -683,7 +647,10 @@ return this.spawnManager().on(listener);
 
   // ReAct loop: LLM -> tool calls -> tool results -> repeat, capped by
   // tools.maxIterations so a confused model cannot spin forever.
-  protected async runAgentLoop(prompt: string, onEvent?: ChatEventListener): Promise<AgentResponse> {
+  protected async runAgentLoop(
+    prompt: string,
+    onEvent?: ChatEventListener,
+  ): Promise<AgentResponse> {
     const provider = this.provider;
     if (!provider) throw new Error("Session not initialized");
 
@@ -704,9 +671,9 @@ return this.spawnManager().on(listener);
     let costUsd = 0;
     let lastText = "";
 
-// Work the turn could not finish, surfaced in the response outcome so the
-// caller can report it without parsing text.
-const failedTools: string[] = [];
+    // Work the turn could not finish, surfaced in the response outcome so the
+    // caller can report it without parsing text.
+    const failedTools: string[] = [];
 
     for (let iteration = 0; iteration < maxIterations; iteration++) {
       const result = await provider.chat(this.history, { tools: specs, onEvent });
@@ -717,21 +684,20 @@ const failedTools: string[] = [];
       this.appendAssistant(result.turn.text, result.turn.toolCalls);
 
       const readyToAnswer =
-        result.turn.finishReason !== "toolCalls" ||
-        result.turn.toolCalls.length === 0;
+        result.turn.finishReason !== "toolCalls" || result.turn.toolCalls.length === 0;
 
       if (readyToAnswer) {
-return {
-text: result.turn.text,
-usage,
-costUsd,
-outcome: this.outcomeOf(failedTools),
-};
+        return {
+          text: result.turn.text,
+          usage,
+          costUsd,
+          outcome: this.outcomeOf(failedTools),
+        };
       }
 
       for (const call of result.turn.toolCalls) {
-const toolResult = await this.runTool(call, onEvent);
- if (toolResult.isError) failedTools.push(call.name);
+        const toolResult = await this.runTool(call, onEvent);
+        if (toolResult.isError) failedTools.push(call.name);
         const content = toolResult.isError
           ? `[tool error] ${toolResult.output}`
           : toolResult.output;
@@ -744,39 +710,35 @@ const toolResult = await this.runTool(call, onEvent);
     }
 
     return {
-text: lastText || "Stopped: maximum tool iterations reached",
+      text: lastText || "Stopped: maximum tool iterations reached",
       usage,
       costUsd,
- outcome: {
- status: "incomplete",
- pending: [...failedTools, "finish the turn within tools.maxIterations"],
- next: "Reply with a smaller scope, or raise tools.maxIterations.",
- },
+      outcome: {
+        status: "incomplete",
+        pending: [...failedTools, "finish the turn within tools.maxIterations"],
+        next: "Reply with a smaller scope, or raise tools.maxIterations.",
+      },
     };
   }
 
   // Tool calls run sequentially in v1 so ordering and logs stay predictable.
-// Builds the structured outcome for a turn that reached its answer.
-protected outcomeOf(failedTools: string[]): TurnOutcome {
-if (failedTools.length) {
-return {
-status: "toolError",
-pending: failedTools,
-next: "Review the failing tool output and retry.",
-};
-}
+  // Builds the structured outcome for a turn that reached its answer.
+  protected outcomeOf(failedTools: string[]): TurnOutcome {
+    if (failedTools.length) {
+      return {
+        status: "toolError",
+        pending: failedTools,
+        next: "Review the failing tool output and retry.",
+      };
+    }
 
-return { status: "completed", pending: [] };
-}
+    return { status: "completed", pending: [] };
+  }
 
-
-protected async runTool(
-call: ToolCall,
-onEvent?: ChatEventListener,
-): Promise<ToolResult> {
+  protected async runTool(call: ToolCall, onEvent?: ChatEventListener): Promise<ToolResult> {
     logger.info(`Tool call: ${call.name} ${this.preview(call.args)}`);
 
-const result = await this.tools.execute(this.toolContext(call, onEvent), call);
+    const result = await this.tools.execute(this.toolContext(call, onEvent), call);
 
     if (result.isError) {
       logger.warn(`Tool ${call.name} failed: ${this.preview(result.output)}`);
@@ -795,39 +757,39 @@ const result = await this.tools.execute(this.toolContext(call, onEvent), call);
     this.history.push(message);
   }
 
-protected toolContext(call?: ToolCall, onEvent?: ChatEventListener): ToolContext {
-		return {
-			cwd: this.config.config.tools?.workspace ?? process.cwd(),
-			sessionId: this.sessionId,
-			approve: (request) => this.approve(request),
-			spawn: (agentId, prompt) => this.spawn(agentId, prompt),
-			getSkillBody: (id) => this.skillBody(id),
-			listSkillIds: () => this.skillIds(),
- // Streams shell/tool output live, tagged with the originating call so the
- // UI can attribute it.
- onOutput: (chunk) => {
- if (!call) return;
- onEvent?.({ type: "toolOutput", id: call.id, name: call.name, chunk });
- },
-		};
+  protected toolContext(call?: ToolCall, onEvent?: ChatEventListener): ToolContext {
+    return {
+      cwd: this.config.config.tools?.workspace ?? process.cwd(),
+      sessionId: this.sessionId,
+      approve: (request) => this.approve(request),
+      spawn: (agentId, prompt) => this.spawn(agentId, prompt),
+      getSkillBody: (id) => this.skillBody(id),
+      listSkillIds: () => this.skillIds(),
+      // Streams shell/tool output live, tagged with the originating call so the
+      // UI can attribute it.
+      onOutput: (chunk) => {
+        if (!call) return;
+        onEvent?.({ type: "toolOutput", id: call.id, name: call.name, chunk });
+      },
+    };
   }
 
-	// Ids of the loaded skills, so use_skill can list them on a bad id.
-	protected skillIds(): string[] {
-		return this.skillRegistry?.list().map((skill) => skill.id) ?? [];
-	}
+  // Ids of the loaded skills, so use_skill can list them on a bad id.
+  protected skillIds(): string[] {
+    return this.skillRegistry?.list().map((skill) => skill.id) ?? [];
+  }
 
-	// Body handed to use_skill, capped by skills.maxBodyChars so a long
-	// recipe cannot swallow the turn.
-	protected skillBody(id: string): string | undefined {
-		const skill = this.skillRegistry?.get(id);
-		if (!skill) return undefined;
+  // Body handed to use_skill, capped by skills.maxBodyChars so a long
+  // recipe cannot swallow the turn.
+  protected skillBody(id: string): string | undefined {
+    const skill = this.skillRegistry?.get(id);
+    if (!skill) return undefined;
 
-		const max = this.config.config.skills?.maxBodyChars ?? 16_000;
-		if (skill.body.length <= max) return skill.body;
+    const max = this.config.config.skills?.maxBodyChars ?? 16_000;
+    if (skill.body.length <= max) return skill.body;
 
-		return `${skill.body.slice(0, max)}\n[skill truncated]`;
-	}
+    return `${skill.body.slice(0, max)}\n[skill truncated]`;
+  }
 
   // Approval gate. The effective mode is the strictest of the configured
   // global policy and the active agent's policy:
@@ -871,8 +833,7 @@ protected toolContext(call?: ToolCall, onEvent?: ChatEventListener): ToolContext
   }
 
   protected preview(value: unknown) {
-    const text =
-      typeof value === "string" ? value : JSON.stringify(value ?? {});
+    const text = typeof value === "string" ? value : JSON.stringify(value ?? {});
     return text.length > 200 ? `${text.slice(0, 200)}…` : text;
   }
 
@@ -887,11 +848,8 @@ protected toolContext(call?: ToolCall, onEvent?: ChatEventListener): ToolContext
   // Current session usage, cost and context occupancy.
   status(): SessionStatus {
     const contextWindow = this.provider?.getContextWindow();
-    const contextTokens =
-      this.provider?.getContextTokens() || estimateHistoryTokens(this.history);
-    const contextUsage = contextWindow
-      ? Math.min(contextTokens / contextWindow, 1)
-      : 0;
+    const contextTokens = this.provider?.getContextTokens() || estimateHistoryTokens(this.history);
+    const contextUsage = contextWindow ? Math.min(contextTokens / contextWindow, 1) : 0;
 
     return {
       sessionId: this.sessionId,
@@ -948,10 +906,8 @@ protected toolContext(call?: ToolCall, onEvent?: ChatEventListener): ToolContext
   // Builds the secondary provider used only for prompt classification.
   // Falls back to the main provider when no dedicated one is configured.
   protected async initializeClassifier() {
-    const name =
-      this.config.config.classificationProvider ?? this.providerName;
-    const model =
-      this.config.config.classificationModel ?? this.config.config.model;
+    const name = this.config.config.classificationProvider ?? this.providerName;
+    const model = this.config.config.classificationModel ?? this.config.config.model;
 
     if (!name || !model) {
       this.classifierProvider = undefined;
@@ -990,22 +946,22 @@ protected toolContext(call?: ToolCall, onEvent?: ChatEventListener): ToolContext
     this.agentsLoaded = true;
   }
 
-// Loads the skill registry from config.skills.dirs. Disabled skills leave it
-// undefined, which keeps the system prompt byte-identical to older builds.
-protected loadSkillRegistry() {
-	if (this.config.config.skills?.enabled === false) {
-		this.skillRegistry = undefined;
-		return;
-	}
+  // Loads the skill registry from config.skills.dirs. Disabled skills leave it
+  // undefined, which keeps the system prompt byte-identical to older builds.
+  protected loadSkillRegistry() {
+    if (this.config.config.skills?.enabled === false) {
+      this.skillRegistry = undefined;
+      return;
+    }
 
-	const dirs = this.config.config.skills?.dirs ?? [];
-	const [primary] = dirs;
-	// Copy the bundled examples on a clean install, mirroring the agent
-	// seed: an existing directory is never touched.
-	if (primary) ensureSkillsDir(primary);
+    const dirs = this.config.config.skills?.dirs ?? [];
+    const [primary] = dirs;
+    // Copy the bundled examples on a clean install, mirroring the agent
+    // seed: an existing directory is never touched.
+    if (primary) ensureSkillsDir(primary);
 
-	this.skillRegistry = new SkillLoader(dirs).load();
-}
+    this.skillRegistry = new SkillLoader(dirs).load();
+  }
 
   protected ensureAgentRegistry() {
     if (!this.agentsLoaded) this.loadAgentRegistry();
@@ -1028,10 +984,10 @@ protected loadSkillRegistry() {
     const agent = this.agent ?? builtInDefaultAgent();
     const message: History = {
       role: "system",
-content: composeSystemPrompt(
-	agent,
-	this.skillRegistry?.indexText(this.config.config.skills?.maxIndexChars),
-),
+      content: composeSystemPrompt(
+        agent,
+        this.skillRegistry?.indexText(this.config.config.skills?.maxIndexChars),
+      ),
     };
 
     if (replace && this.history[0]?.role === "system") {
@@ -1046,10 +1002,7 @@ content: composeSystemPrompt(
   // it, falls back to the instance's preferred model and finally to the first
   // model it advertises, so switching between instances with different
   // catalogues keeps working.
-  protected selectModel(
-    provider: Provider,
-    providerConfig: { model?: string },
-  ): boolean {
+  protected selectModel(provider: Provider, providerConfig: { model?: string }): boolean {
     if (provider.setModel(provider.getModel())) return true;
 
     let available: string[] = [];
@@ -1059,8 +1012,8 @@ content: composeSystemPrompt(
       // A provider that has not loaded its catalogue just keeps the fallbacks.
     }
 
-    const candidates = [providerConfig.model, ...available].filter(
-      (model): model is string => Boolean(model),
+    const candidates = [providerConfig.model, ...available].filter((model): model is string =>
+      Boolean(model),
     );
 
     for (const candidate of candidates) {

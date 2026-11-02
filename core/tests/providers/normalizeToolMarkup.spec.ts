@@ -11,9 +11,7 @@ const turn = (text: string): AssistantTurn => ({
 describe("normalizeToolMarkup", () => {
   it("parses <tool_call> tags", () => {
     const result = normalizeToolMarkup(
-      turn(
-        'Calling now <tool_call>{"name":"readFile","arguments":{"path":"a.txt"}}</tool_call>',
-      ),
+      turn('Calling now <tool_call>{"name":"readFile","arguments":{"path":"a.txt"}}</tool_call>'),
     );
 
     expect(result.toolCalls).toEqual([
@@ -47,9 +45,7 @@ describe("normalizeToolMarkup", () => {
 
   it("parses DeepSeek markup", () => {
     const result = normalizeToolMarkup(
-      turn(
-        '<|tool▁calls▁begin|>{"name":"listDir","arguments":{"path":"."}}<|tool▁calls▁end|>',
-      ),
+      turn('<|tool▁calls▁begin|>{"name":"listDir","arguments":{"path":"."}}<|tool▁calls▁end|>'),
     );
 
     expect(result.toolCalls).toEqual([
@@ -71,10 +67,7 @@ describe("normalizeToolMarkup", () => {
     );
 
     expect(result.toolCalls.map((call) => call.name)).toEqual(["a", "b"]);
-    expect(result.toolCalls.map((call) => call.id)).toEqual([
-      "textCall0",
-      "textCall1",
-    ]);
+    expect(result.toolCalls.map((call) => call.id)).toEqual(["textCall0", "textCall1"]);
   });
 
   it("keeps static text intact when there is no markup (false positive)", () => {
@@ -91,7 +84,7 @@ describe("normalizeToolMarkup", () => {
 
   it("ignores turns that already carry structured tool calls", () => {
     const original: AssistantTurn = {
-      text: "<tool_call>{\"name\":\"x\",\"arguments\":{}}</tool_call>",
+      text: '<tool_call>{"name":"x","arguments":{}}</tool_call>',
       toolCalls: [{ id: "call_1", name: "x", args: {} }],
       finishReason: "toolCalls",
     };

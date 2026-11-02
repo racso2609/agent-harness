@@ -1,9 +1,6 @@
 import type { IHarness, SkillSummary, SpawnHandle } from "@racso/core";
 import type { Flows } from "@/flows";
-import {
-  formatSessionList,
-  formatSessionStatus,
-} from "@/render/status";
+import { formatSessionList, formatSessionStatus } from "@/render/status";
 
 export interface CommandOption {
   name: string;
@@ -53,8 +50,7 @@ const BUILT_IN_COMMANDS: CommandDefinition[] = [
   {
     name: "provider",
     aliases: ["providers"],
-    description:
-      "List, switch, add or remove providers: /provider [add|rm|ls] [id]",
+    description: "List, switch, add or remove providers: /provider [add|rm|ls] [id]",
     run: async (context, args) => {
       const [action, id] = args;
 
@@ -81,10 +77,7 @@ const BUILT_IN_COMMANDS: CommandDefinition[] = [
 
       if (action === "rm" || action === "remove") {
         try {
-          const removed = await context.flows.removeProvider(
-            context.harness,
-            id,
-          );
+          const removed = await context.flows.removeProvider(context.harness, id);
           context.notify(removed ? "Provider removed" : "Provider not removed");
         } catch (err) {
           context.notify(`Provider not removed: ${errorMessage(err)}`);
@@ -114,9 +107,7 @@ const BUILT_IN_COMMANDS: CommandDefinition[] = [
       }
 
       const changed = await context.flows.changeAgent(context.harness, name);
-      context.notify(
-        changed ? `Agent updated to ${name}` : `Agent not changed: ${name}`,
-      );
+      context.notify(changed ? `Agent updated to ${name}` : `Agent not changed: ${name}`);
     },
   },
   {
@@ -125,9 +116,7 @@ const BUILT_IN_COMMANDS: CommandDefinition[] = [
     description: "List persisted sessions",
     run: (context) => {
       const current = context.harness.status().sessionId;
-      context.notify(
-        formatSessionList(context.harness.listSessions(), current),
-      );
+      context.notify(formatSessionList(context.harness.listSessions(), current));
     },
   },
   {
@@ -142,9 +131,7 @@ const BUILT_IN_COMMANDS: CommandDefinition[] = [
         return;
       }
 
-      context.notify(
-        `Session resumed\n${formatSessionStatus(context.harness.status())}`,
-      );
+      context.notify(`Session resumed\n${formatSessionStatus(context.harness.status())}`);
     },
   },
   {
@@ -155,51 +142,45 @@ const BUILT_IN_COMMANDS: CommandDefinition[] = [
       context.notify(compacted ? "Session compacted" : "Nothing to compact");
     },
   },
-  	{
-		name: "skills",
-		description: "List the available skills",
-		run: (context) => {
-			context.notify(formatSkillList(context.harness.listSkills()));
-		},
-	},
-	{
-		name: "skill",
-		description:
-			"Inspect a skill (no model call) or reload: /skill <id> | reload",
-		run: (context, args) => {
-			const [target] = args;
+  {
+    name: "skills",
+    description: "List the available skills",
+    run: (context) => {
+      context.notify(formatSkillList(context.harness.listSkills()));
+    },
+  },
+  {
+    name: "skill",
+    description: "Inspect a skill (no model call) or reload: /skill <id> | reload",
+    run: (context, args) => {
+      const [target] = args;
 
-			if (!target) {
-				context.notify("Usage: /skill <id> | /skill reload");
-				return;
-			}
+      if (!target) {
+        context.notify("Usage: /skill <id> | /skill reload");
+        return;
+      }
 
-			if (target === "reload") {
-				const skills = context.harness.reloadSkills();
-				context.notify(
-					`Skills reloaded (${skills.length})\n${formatSkillList(skills)}`,
-				);
-				return;
-			}
+      if (target === "reload") {
+        const skills = context.harness.reloadSkills();
+        context.notify(`Skills reloaded (${skills.length})\n${formatSkillList(skills)}`);
+        return;
+      }
 
-			// Reads the registry directly: no model call and no history entry,
-			// which makes it useful when debugging a skill definition.
-			const skill = context.harness
-				.listSkills()
-				.find((entry) => entry.id === target.toLowerCase());
-			if (!skill) {
-				context.notify(`Unknown skill: ${target}`);
-				return;
-			}
+      // Reads the registry directly: no model call and no history entry,
+      // which makes it useful when debugging a skill definition.
+      const skill = context.harness.listSkills().find((entry) => entry.id === target.toLowerCase());
+      if (!skill) {
+        context.notify(`Unknown skill: ${target}`);
+        return;
+      }
 
-			context.notify(formatSkill(skill));
-		},
-	},
-	{
+      context.notify(formatSkill(skill));
+    },
+  },
+  {
     name: "status",
     description: "Show session usage, cost and context",
-    run: (context) =>
-      context.notify(formatSessionStatus(context.harness.status())),
+    run: (context) => context.notify(formatSessionStatus(context.harness.status())),
   },
   {
     name: "spawn",
@@ -214,13 +195,9 @@ const BUILT_IN_COMMANDS: CommandDefinition[] = [
 
       try {
         const handle = context.harness.spawn(agent, prompt);
-        context.notify(
-          `Spawned ${handle.spawnId} (agent ${handle.agentId})`,
-        );
+        context.notify(`Spawned ${handle.spawnId} (agent ${handle.agentId})`);
       } catch (err) {
-        context.notify(
-          `Spawn failed: ${err instanceof Error ? err.message : String(err)}`,
-        );
+        context.notify(`Spawn failed: ${err instanceof Error ? err.message : String(err)}`);
       }
     },
   },
@@ -254,32 +231,28 @@ const BUILT_IN_COMMANDS: CommandDefinition[] = [
 ];
 
 const formatSkill = (skill: SkillSummary) =>
-	[
-		`# ${skill.name} (${skill.id})`,
-		skill.description,
-		skill.source ? `source: ${skill.source}` : undefined,
-		(skill.tags ?? []).length ? `tags: ${skill.tags?.join(", ")}` : undefined,
-	]
-		.filter(Boolean)
-		.join("\n");
+  [
+    `# ${skill.name} (${skill.id})`,
+    skill.description,
+    skill.source ? `source: ${skill.source}` : undefined,
+    (skill.tags ?? []).length ? `tags: ${skill.tags?.join(", ")}` : undefined,
+  ]
+    .filter(Boolean)
+    .join("\n");
 
 const formatSkillList = (skills: SkillSummary[]) =>
-	skills.length
-		? skills
-				.map((skill) => {
-					const tags = (skill.tags ?? []).length
-						? ` [${skill.tags?.join(", ")}]`
-						: "";
-					return `- ${skill.id} (${skill.name})${tags}: ${skill.description}`;
-				})
-				.join("\n")
-		: "No skills available";
+  skills.length
+    ? skills
+        .map((skill) => {
+          const tags = (skill.tags ?? []).length ? ` [${skill.tags?.join(", ")}]` : "";
+          return `- ${skill.id} (${skill.name})${tags}: ${skill.description}`;
+        })
+        .join("\n")
+    : "No skills available";
 
-const truncate = (text: string, max = 100) =>
-  text.length > max ? `${text.slice(0, max)}…` : text;
+const truncate = (text: string, max = 100) => (text.length > max ? `${text.slice(0, max)}…` : text);
 
-const errorMessage = (err: unknown) =>
-  err instanceof Error ? err.message : String(err);
+const errorMessage = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
 // One line per provider instance, marking the default and the active one.
 const formatProviderList = (context: CommandContext) => {

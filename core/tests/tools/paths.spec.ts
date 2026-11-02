@@ -22,9 +22,7 @@ describe("resolveInWorkspace", () => {
   });
 
   it("resolves a relative path inside the workspace", () => {
-    expect(resolveInWorkspace(workspace, "a/b.txt")).toBe(
-      path.join(workspace, "a", "b.txt"),
-    );
+    expect(resolveInWorkspace(workspace, "a/b.txt")).toBe(path.join(workspace, "a", "b.txt"));
   });
 
   it("accepts an absolute path inside the workspace", () => {
@@ -43,17 +41,15 @@ describe("resolveInWorkspace", () => {
   });
 
   it("rejects an absolute path outside the workspace", () => {
-    expect(() =>
-      resolveInWorkspace(workspace, path.join(outside, "secret.txt")),
-    ).toThrow(/escapes the workspace/);
+    expect(() => resolveInWorkspace(workspace, path.join(outside, "secret.txt"))).toThrow(
+      /escapes the workspace/,
+    );
   });
 
   it("rejects a symlink pointing outside the workspace", () => {
     const link = path.join(workspace, "link.txt");
     fs.symlinkSync(path.join(outside, "secret.txt"), link);
 
-    expect(() => resolveInWorkspace(workspace, "link.txt")).toThrow(
-      /escapes the workspace/,
-    );
+    expect(() => resolveInWorkspace(workspace, "link.txt")).toThrow(/escapes the workspace/);
   });
 });

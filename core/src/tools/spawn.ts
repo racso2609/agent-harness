@@ -27,8 +27,7 @@ class SpawnTool implements Tool {
       context: {
         type: "string" as const,
         description:
-          "Optional context prepended to the prompt (files, constraints, " +
-          "prior decisions).",
+          "Optional context prepended to the prompt (files, constraints, " + "prior decisions).",
       },
     },
     required: ["agent", "prompt"],
@@ -37,9 +36,7 @@ class SpawnTool implements Tool {
 
   async execute(ctx: ToolContext, args: unknown): Promise<ToolResult> {
     const input = args as
-      | { agent?: unknown; prompt?: unknown; context?: unknown }
-      | null
-      | undefined;
+      { agent?: unknown; prompt?: unknown; context?: unknown } | null | undefined;
 
     if (typeof input?.agent !== "string" || !input.agent.trim()) {
       throw new Error("spawn expects 'agent' to be a non-empty string");
@@ -69,9 +66,7 @@ class SpawnTool implements Tool {
     }
 
     try {
-      const prompt = input.context
-        ? `${input.context}\n\n${input.prompt}`
-        : input.prompt;
+      const prompt = input.context ? `${input.context}\n\n${input.prompt}` : input.prompt;
       const { spawnId } = ctx.spawn(agent, prompt);
       return {
         output:

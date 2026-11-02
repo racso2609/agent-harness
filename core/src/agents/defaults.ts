@@ -13,26 +13,18 @@ export const builtInDefaultAgent = (): AgentDefinition => ({
     "You are a helpful coding assistant. Explain decisions when useful and prefer minimal, correct changes.",
 });
 
-export const composeSystemPrompt = (
-	agent: AgentDefinition,
-	skillIndex?: string,
-) => {
-	const base = [HARNESS_SYSTEM_PROMPT, agent.personality]
-		.map((part) => part.trim())
-		.filter(Boolean)
-		.join("\n\n");
+export const composeSystemPrompt = (agent: AgentDefinition, skillIndex?: string) => {
+  const base = [HARNESS_SYSTEM_PROMPT, agent.personality]
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .join("\n\n");
 
-	// Without skills the prompt stays byte-identical to older versions, so
-	// sessions without a skill directory keep the exact same context.
-	const index = skillIndex?.trim();
-	if (!index) return base;
+  // Without skills the prompt stays byte-identical to older versions, so
+  // sessions without a skill directory keep the exact same context.
+  const index = skillIndex?.trim();
+  if (!index) return base;
 
-	return [
-		base,
-		`## Skills`,
-		`Load with use_skill(id) when the task matches:`,
-		index,
-	].join("\n\n");
+  return [base, `## Skills`, `Load with use_skill(id) when the task matches:`, index].join("\n\n");
 };
 
 const APPROVAL_STRICTNESS: Record<AgentApproval, number> = {
@@ -42,8 +34,5 @@ const APPROVAL_STRICTNESS: Record<AgentApproval, number> = {
 };
 
 // Combines two approval policies, keeping the stricter one.
-export const strictestApproval = (
-  left: AgentApproval,
-  right: AgentApproval,
-): AgentApproval =>
+export const strictestApproval = (left: AgentApproval, right: AgentApproval): AgentApproval =>
   APPROVAL_STRICTNESS[right] > APPROVAL_STRICTNESS[left] ? right : left;

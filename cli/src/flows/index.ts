@@ -15,16 +15,12 @@ export interface Flows {
   changeSession(harness: IHarness, target?: string): Promise<boolean>;
 }
 
-const pick = (
-  message: string,
-  options: string[],
-): Promise<string | undefined> =>
+const pick = (message: string, options: string[]): Promise<string | undefined> =>
   options.length ? select(message, options) : Promise.resolve(undefined);
 
 export const createFlows = (types: string[] = []): Flows => ({
   async changeProvider(harness, name) {
-    const selected =
-      name ?? (await pick("Select the provider:", harness.listProviders()));
+    const selected = name ?? (await pick("Select the provider:", harness.listProviders()));
     if (!selected) return false;
     return harness.setProvider(selected);
   },
@@ -42,7 +38,10 @@ export const createFlows = (types: string[] = []): Flows => ({
   async changeModel(harness, model) {
     const selected =
       model ??
-      (await pick("Select the model:", harness.listModels().map((m) => m.id)));
+      (await pick(
+        "Select the model:",
+        harness.listModels().map((m) => m.id),
+      ));
     if (!selected) return false;
     return harness.setModel(selected);
   },
@@ -50,7 +49,10 @@ export const createFlows = (types: string[] = []): Flows => ({
   async changeAgent(harness, name) {
     const selected =
       name ??
-      (await pick("Select the agent:", harness.listAgents().map((a) => a.id)));
+      (await pick(
+        "Select the agent:",
+        harness.listAgents().map((a) => a.id),
+      ));
     if (!selected) return false;
     return harness.setAgent(selected);
   },

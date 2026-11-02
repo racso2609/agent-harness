@@ -25,9 +25,7 @@ describe("AgentLoader", () => {
   });
 
   it("returns only the default when the directory is missing", () => {
-    const registry = new AgentLoader(
-      path.join(os.tmpdir(), "does-not-exist-agents"),
-    ).load();
+    const registry = new AgentLoader(path.join(os.tmpdir(), "does-not-exist-agents")).load();
 
     expect(registry.list().map((agent) => agent.id)).toEqual(["default"]);
   });
@@ -52,11 +50,7 @@ describe("AgentLoader", () => {
   it("skips invalid files and keeps valid ones", () => {
     const dir = makeDir();
     fs.writeFileSync(path.join(dir, "broken.md"), "---\nname: x\n---", "utf8");
-    fs.writeFileSync(
-      path.join(dir, "good.md"),
-      "---\n---\nValid persona.",
-      "utf8",
-    );
+    fs.writeFileSync(path.join(dir, "good.md"), "---\n---\nValid persona.", "utf8");
 
     const registry = new AgentLoader(dir).load();
 

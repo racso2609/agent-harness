@@ -1,10 +1,7 @@
 import type { CommandOption } from "@/commands/CommandRepository";
 
 // Filters by name or alias prefix. Empty query returns every command.
-export const filterCommands = (
-  commands: CommandOption[],
-  query: string,
-): CommandOption[] => {
+export const filterCommands = (commands: CommandOption[], query: string): CommandOption[] => {
   const needle = query.trim().toLowerCase();
   if (!needle) return commands;
 
@@ -22,11 +19,7 @@ export const clampSelection = (selected: number, length: number): number => {
 };
 
 // Moves the selection with wrap-around, like most command palettes.
-export const moveSelection = (
-  selected: number,
-  delta: number,
-  length: number,
-): number => {
+export const moveSelection = (selected: number, delta: number, length: number): number => {
   if (length <= 0) return 0;
   return (clampSelection(selected, length) + delta + length) % length;
 };
@@ -40,10 +33,7 @@ export const visibleCommands = (
   if (commands.length <= maxVisible) return commands;
 
   const half = Math.floor(maxVisible / 2);
-  const start = Math.min(
-    Math.max(selected - half, 0),
-    commands.length - maxVisible,
-  );
+  const start = Math.min(Math.max(selected - half, 0), commands.length - maxVisible);
 
   return commands.slice(start, start + maxVisible);
 };

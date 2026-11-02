@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  compactHistory,
-  estimateHistoryTokens,
-  summarizeHistory,
-} from "../../src/session/history";
+import { compactHistory, estimateHistoryTokens, summarizeHistory } from "../../src/session/history";
 import type { History } from "../../src/types/providers";
 
 const userMessages = (...contents: string[]): History[] =>
@@ -60,8 +56,7 @@ describe("compactHistory", () => {
     expect(compacted).toEqual([
       {
         role: "system",
-        content:
-          "[Memoria previa compactada]: user: u1 | assistant: a1 | user: u2 | assistant: a2",
+        content: "[Memoria previa compactada]: user: u1 | assistant: a1 | user: u2 | assistant: a2",
       },
       { role: "user", content: "u3" },
       { role: "assistant", content: "a3" },

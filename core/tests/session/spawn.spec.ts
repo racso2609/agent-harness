@@ -1,9 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import {
-  SpawnHandle,
-  SpawnManager,
-  SpawnManagerOptions,
-} from "../../src/session/spawn";
+import { SpawnHandle, SpawnManager, SpawnManagerOptions } from "../../src/session/spawn";
 
 const deferred = () => {
   let resolve!: () => void;

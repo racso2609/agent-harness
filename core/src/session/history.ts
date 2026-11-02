@@ -5,29 +5,19 @@ export const DEFAULT_COMPACT_THRESHOLD = 4;
 // Rough character-based token estimate used when the provider has not reported
 // usage yet (for example right after resuming a persisted session).
 export const estimateHistoryTokens = (messages: History[]) => {
-  const characters = messages.reduce(
-    (total, message) => total + message.content.length,
-    0,
-  );
+  const characters = messages.reduce((total, message) => total + message.content.length, 0);
 
   return Math.ceil(characters / 4);
 };
 
-export const summarizeHistory = (
-  messages: History[],
-  contextWindow?: number,
-) => {
-  const budget = contextWindow
-    ? Math.min(Math.floor(contextWindow * 0.2), 200_000)
-    : 16_000;
+export const summarizeHistory = (messages: History[], contextWindow?: number) => {
+  const budget = contextWindow ? Math.min(Math.floor(contextWindow * 0.2), 200_000) : 16_000;
   const parts: string[] = [];
   let used = 0;
 
   for (const message of messages) {
     const content =
-      message.content.length > 500
-        ? `${message.content.slice(0, 500)}…`
-        : message.content;
+      message.content.length > 500 ? `${message.content.slice(0, 500)}…` : message.content;
     const part = `${message.role}: ${content}`;
 
     if (used + part.length > budget) break;

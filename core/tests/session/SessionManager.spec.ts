@@ -85,11 +85,7 @@ describe("SessionManager status", () => {
     session.model = "model";
     vi.spyOn(session, "classifyAction").mockResolvedValue("textGeneration");
     provider.chat = vi.fn(async () =>
-      stopTurn(
-        "ok",
-        { promptTokens: 100, completionTokens: 50, totalTokens: 150 },
-        0.25,
-      ),
+      stopTurn("ok", { promptTokens: 100, completionTokens: 50, totalTokens: 150 }, 0.25),
     );
 
     await session.ask("first");
@@ -168,10 +164,7 @@ describe("SessionManager agent definition", () => {
   });
 
   const makeSession = (overrides: Record<string, unknown> = {}) => {
-    const session = new SessionManager(
-      makeConfig({ autoCompact: false, ...overrides }),
-      store,
-    );
+    const session = new SessionManager(makeConfig({ autoCompact: false, ...overrides }), store);
     session.provider = provider;
     session.providerName = "openai";
     session.model = "model";
@@ -319,18 +312,14 @@ describe("SessionManager agent definition", () => {
       providers: { openai: { url: "https://api.example.com", apikey: "key" } },
     });
     const created: Array<{ provider: string; model: string }> = [];
-    session["createProvider"] = ((
-      name: string,
-      _config: unknown,
-      model: string,
-    ) => {
+    session["createProvider"] = ((name: string, _config: unknown, model: string) => {
       created.push({ provider: name, model });
       const fake = new OpenAiProvider("https://api.example.com", "key", model);
       fake.initialize = vi.fn(async () => {});
       fake.setModel = vi.fn(() => true);
       fake.getModel = () => model;
       return fake;
-    }) as unknown as typeof session["createProvider"];
+    }) as unknown as (typeof session)["createProvider"];
     session["agentsLoaded"] = true;
     session.agentRegistry.register({
       id: "coder",
@@ -355,18 +344,14 @@ describe("SessionManager agent definition", () => {
       providers: { openai: { url: "https://api.example.com", apikey: "key" } },
     });
     const created: Array<{ provider: string; model: string }> = [];
-    session["createProvider"] = ((
-      name: string,
-      _config: unknown,
-      model: string,
-    ) => {
+    session["createProvider"] = ((name: string, _config: unknown, model: string) => {
       created.push({ provider: name, model });
       const fake = new OpenAiProvider("https://api.example.com", "key", model);
       fake.initialize = vi.fn(async () => {});
       fake.setModel = vi.fn(() => true);
       fake.getModel = () => model;
       return fake;
-    }) as unknown as typeof session["createProvider"];
+    }) as unknown as (typeof session)["createProvider"];
     session["agentsLoaded"] = true;
     session.agentRegistry.register({
       id: "plain",
@@ -467,10 +452,7 @@ describe("SessionManager agent loop", () => {
   });
 
   const makeSession = (overrides: Record<string, unknown> = {}) => {
-    const session = new SessionManager(
-      makeConfig({ autoCompact: false, ...overrides }),
-      store,
-    );
+    const session = new SessionManager(makeConfig({ autoCompact: false, ...overrides }), store);
     session.provider = provider;
     session.providerName = "openai";
     session.model = "model";
@@ -494,9 +476,7 @@ describe("SessionManager agent loop", () => {
       .mockResolvedValueOnce({
         turn: {
           text: "",
-          toolCalls: [
-            { id: "call_1", name: "echo", args: { value: "hi" } },
-          ],
+          toolCalls: [{ id: "call_1", name: "echo", args: { value: "hi" } }],
           finishReason: "toolCalls",
         },
         usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
@@ -649,253 +629,248 @@ describe("SessionManager agent loop", () => {
 });
 
 describe("SessionManager turn outcome", () => {
-let provider: OpenAiProvider;
-let store: SessionStore;
+  let provider: OpenAiProvider;
+  let store: SessionStore;
 
-beforeEach(() => {
-provider = new OpenAiProvider("https://api.example.com", "key", "model");
-store = makeStore();
+  beforeEach(() => {
+    provider = new OpenAiProvider("https://api.example.com", "key", "model");
+    store = makeStore();
+  });
+
+  const makeSession = () => {
+    const session = new SessionManager(makeConfig({ autoCompact: false }), store);
+    session.provider = provider;
+    session.providerName = "openai";
+    session.model = "model";
+    vi.spyOn(session, "classifyAction").mockResolvedValue("textGeneration");
+    return session;
+  };
+
+  it("reports a completed turn with nothing pending", async () => {
+    const session = makeSession();
+
+    provider.chat = vi.fn().mockResolvedValueOnce(stopTurn("all good"));
+
+    const response = await session.ask("go");
+
+    expect(response.outcome).toEqual({ status: "completed", pending: [] });
+  });
+
+  it("reports the failing tools when a tool errors", async () => {
+    const session = makeSession();
+    session.tools.register({
+      name: "broken",
+      description: "Always fails",
+      parameters: { type: "object" },
+      execute: async () => ({ output: "boom", isError: true }),
+    });
+
+    provider.chat = vi
+      .fn()
+      .mockResolvedValueOnce({
+        turn: {
+          text: "",
+          toolCalls: [{ id: "call_1", name: "broken", args: {} }],
+          finishReason: "toolCalls",
+        },
+      })
+      .mockResolvedValueOnce(
+        stopTurn("recovered", { promptTokens: 1, completionTokens: 1, totalTokens: 2 }),
+      );
+
+    const response = await session.ask("go");
+
+    expect(response.outcome).toEqual({
+      status: "toolError",
+      pending: ["broken"],
+      next: "Review the failing tool output and retry.",
+    });
+  });
+
+  it("reports an incomplete turn when the iteration cap is reached", async () => {
+    const session = makeSession();
+
+    // The model keeps asking for a tool the registry does not know, so the loop
+    // never reaches an answer and hits maxIterations.
+    provider.chat = vi.fn().mockResolvedValue({
+      turn: {
+        text: "",
+        toolCalls: [{ id: "call_1", name: "missing", args: {} }],
+        finishReason: "toolCalls",
+      },
+    });
+
+    const response = await session.ask("go");
+
+    expect(response.outcome?.status).toBe("incomplete");
+    expect(response.outcome?.pending).toContain("finish the turn within tools.maxIterations");
+    expect(response.outcome?.next).toContain("maxIterations");
+  });
 });
-
-const makeSession = () => {
-const session = new SessionManager(makeConfig({ autoCompact: false }), store);
-session.provider = provider;
-session.providerName = "openai";
-session.model = "model";
-vi.spyOn(session, "classifyAction").mockResolvedValue("textGeneration");
-return session;
-};
-
-it("reports a completed turn with nothing pending", async () => {
-const session = makeSession();
-
-provider.chat = vi.fn().mockResolvedValueOnce(stopTurn("all good"));
-
-const response = await session.ask("go");
-
-expect(response.outcome).toEqual({ status: "completed", pending: [] });
-});
-
-it("reports the failing tools when a tool errors", async () => {
-const session = makeSession();
-session.tools.register({
-name: "broken",
-description: "Always fails",
-parameters: { type: "object" },
-execute: async () => ({ output: "boom", isError: true }),
-});
-
-provider.chat = vi
-.fn()
-.mockResolvedValueOnce({
-turn: {
-text: "",
-toolCalls: [{ id: "call_1", name: "broken", args: {} }],
-finishReason: "toolCalls",
-},
-})
-.mockResolvedValueOnce(
-stopTurn("recovered", { promptTokens: 1, completionTokens: 1, totalTokens: 2 }),
-);
-
-const response = await session.ask("go");
-
-expect(response.outcome).toEqual({
-status: "toolError",
-pending: ["broken"],
-next: "Review the failing tool output and retry.",
-});
-});
-
-it("reports an incomplete turn when the iteration cap is reached", async () => {
-const session = makeSession();
-
-// The model keeps asking for a tool the registry does not know, so the loop
-// never reaches an answer and hits maxIterations.
-provider.chat = vi.fn().mockResolvedValue({
-turn: {
-text: "",
-toolCalls: [{ id: "call_1", name: "missing", args: {} }],
-finishReason: "toolCalls",
-},
-});
-
-const response = await session.ask("go");
-
-expect(response.outcome?.status).toBe("incomplete");
-expect(response.outcome?.pending).toContain(
-"finish the turn within tools.maxIterations",
-);
-expect(response.outcome?.next).toContain("maxIterations");
-});
-});
-
 
 describe("SessionManager turn events", () => {
-let provider: OpenAiProvider;
-let store: SessionStore;
+  let provider: OpenAiProvider;
+  let store: SessionStore;
 
-beforeEach(() => {
-provider = new OpenAiProvider("https://api.example.com", "key", "model");
-store = makeStore();
-});
+  beforeEach(() => {
+    provider = new OpenAiProvider("https://api.example.com", "key", "model");
+    store = makeStore();
+  });
 
-const makeSession = () => {
-const session = new SessionManager(makeConfig({ autoCompact: false }), store);
-session.provider = provider;
-session.providerName = "openai";
-session.model = "model";
-vi.spyOn(session, "classifyAction").mockResolvedValue("textGeneration");
-return session;
-};
+  const makeSession = () => {
+    const session = new SessionManager(makeConfig({ autoCompact: false }), store);
+    session.provider = provider;
+    session.providerName = "openai";
+    session.model = "model";
+    vi.spyOn(session, "classifyAction").mockResolvedValue("textGeneration");
+    return session;
+  };
 
-it("forwards tool output tagged with the originating call", async () => {
-const session = makeSession();
-session.tools.register({
-name: "stream",
-description: "Stream output",
-parameters: { type: "object" },
-execute: async (ctx) => {
-ctx.onOutput?.("live chunk");
-return { output: "final output" };
-},
-});
+  it("forwards tool output tagged with the originating call", async () => {
+    const session = makeSession();
+    session.tools.register({
+      name: "stream",
+      description: "Stream output",
+      parameters: { type: "object" },
+      execute: async (ctx) => {
+        ctx.onOutput?.("live chunk");
+        return { output: "final output" };
+      },
+    });
 
-provider.chat = vi
-.fn()
-.mockResolvedValueOnce({
-turn: {
-text: "",
-toolCalls: [{ id: "call_9", name: "stream", args: {} }],
-finishReason: "toolCalls",
-},
-})
-.mockResolvedValueOnce(stopTurn("done"));
+    provider.chat = vi
+      .fn()
+      .mockResolvedValueOnce({
+        turn: {
+          text: "",
+          toolCalls: [{ id: "call_9", name: "stream", args: {} }],
+          finishReason: "toolCalls",
+        },
+      })
+      .mockResolvedValueOnce(stopTurn("done"));
 
-const events: ChatEvent[] = [];
-await session.ask("go", (event) => {
-events.push(event);
-});
+    const events: ChatEvent[] = [];
+    await session.ask("go", (event) => {
+      events.push(event);
+    });
 
-const outputs = events.filter((event) => event.type === "toolOutput");
-expect(outputs).toEqual([
-{ type: "toolOutput", id: "call_9", name: "stream", chunk: "live chunk" },
-]);
-});
+    const outputs = events.filter((event) => event.type === "toolOutput");
+    expect(outputs).toEqual([
+      { type: "toolOutput", id: "call_9", name: "stream", chunk: "live chunk" },
+    ]);
+  });
 
-it("runs the turn unchanged when no listener is passed", async () => {
-const session = makeSession();
-session.tools.register({
-name: "stream",
-description: "Stream output",
-parameters: { type: "object" },
-execute: async (ctx) => {
-ctx.onOutput?.("ignored");
-return { output: "final output" };
-},
-});
+  it("runs the turn unchanged when no listener is passed", async () => {
+    const session = makeSession();
+    session.tools.register({
+      name: "stream",
+      description: "Stream output",
+      parameters: { type: "object" },
+      execute: async (ctx) => {
+        ctx.onOutput?.("ignored");
+        return { output: "final output" };
+      },
+    });
 
-provider.chat = vi
-.fn()
-.mockResolvedValueOnce({
-turn: {
-text: "",
-toolCalls: [{ id: "call_9", name: "stream", args: {} }],
-finishReason: "toolCalls",
-},
-})
-.mockResolvedValueOnce(stopTurn("done"));
+    provider.chat = vi
+      .fn()
+      .mockResolvedValueOnce({
+        turn: {
+          text: "",
+          toolCalls: [{ id: "call_9", name: "stream", args: {} }],
+          finishReason: "toolCalls",
+        },
+      })
+      .mockResolvedValueOnce(stopTurn("done"));
 
-const response = await session.ask("go");
+    const response = await session.ask("go");
 
-expect(response.text).toBe("done");
-});
+    expect(response.text).toBe("done");
+  });
 });
 
 describe("SessionManager spawn history", () => {
-let provider: OpenAiProvider;
-let store: SessionStore;
-let saved: Record<string, unknown>[];
+  let provider: OpenAiProvider;
+  let store: SessionStore;
+  let saved: Record<string, unknown>[];
 
-beforeEach(() => {
-provider = new OpenAiProvider("https://api.example.com", "key", "model");
-saved = [];
-store = {
-save: vi.fn((record: Record<string, unknown>) => saved.push(record)),
-load: vi.fn(() => null),
-list: vi.fn(() => []),
-} as unknown as SessionStore;
-});
+  beforeEach(() => {
+    provider = new OpenAiProvider("https://api.example.com", "key", "model");
+    saved = [];
+    store = {
+      save: vi.fn((record: Record<string, unknown>) => saved.push(record)),
+      load: vi.fn(() => null),
+      list: vi.fn(() => []),
+    } as unknown as SessionStore;
+  });
 
-afterEach(() => {
-vi.restoreAllMocks();
-});
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
 
-const makeSession = () => {
-const session = new SessionManager(
-makeConfig({
-autoCompact: false,
-defaultProvider: "openai",
-model: "model",
-providers: { openai: { url: "https://api.example.com", apikey: "key" } },
-}),
-store,
-);
-session.provider = provider;
-session.providerName = "openai";
-session.model = "model";
-return session;
-};
+  const makeSession = () => {
+    const session = new SessionManager(
+      makeConfig({
+        autoCompact: false,
+        defaultProvider: "openai",
+        model: "model",
+        providers: { openai: { url: "https://api.example.com", apikey: "key" } },
+      }),
+      store,
+    );
+    session.provider = provider;
+    session.providerName = "openai";
+    session.model = "model";
+    return session;
+  };
 
-const stubProvider = (text = "child answer") => {
-vi.spyOn(OpenAiProvider.prototype, "initialize").mockResolvedValue();
-vi.spyOn(OpenAiProvider.prototype, "setModel").mockReturnValue(true);
-vi.spyOn(OpenAiProvider.prototype, "getModel").mockImplementation(
-function (this: OpenAiProvider) {
-return (this as unknown as { model?: string }).model ?? "model";
-},
-);
-vi.spyOn(OpenAiProvider.prototype, "getContextWindow").mockReturnValue(1000);
-vi.spyOn(OpenAiProvider.prototype, "chat").mockResolvedValue(stopTurn(text));
-};
+  const stubProvider = (text = "child answer") => {
+    vi.spyOn(OpenAiProvider.prototype, "initialize").mockResolvedValue();
+    vi.spyOn(OpenAiProvider.prototype, "setModel").mockReturnValue(true);
+    vi.spyOn(OpenAiProvider.prototype, "getModel").mockImplementation(function (
+      this: OpenAiProvider,
+    ) {
+      return (this as unknown as { model?: string }).model ?? "model";
+    });
+    vi.spyOn(OpenAiProvider.prototype, "getContextWindow").mockReturnValue(1000);
+    vi.spyOn(OpenAiProvider.prototype, "chat").mockResolvedValue(stopTurn(text));
+  };
 
-it("persists the launched child with its final status", async () => {
-stubProvider("child answer");
-const session = makeSession();
+  it("persists the launched child with its final status", async () => {
+    stubProvider("child answer");
+    const session = makeSession();
 
-const handle = session.spawn("coder", "do the thing");
-await session.waitSpawn(handle.spawnId);
+    const handle = session.spawn("coder", "do the thing");
+    await session.waitSpawn(handle.spawnId);
 
-const last = saved.at(-1);
-const spawns = last?.spawns as Array<Record<string, unknown>>;
-const stored = spawns.find((entry) => entry.spawnId === handle.spawnId);
+    const last = saved.at(-1);
+    const spawns = last?.spawns as Array<Record<string, unknown>>;
+    const stored = spawns.find((entry) => entry.spawnId === handle.spawnId);
 
-expect(stored).toMatchObject({ agentId: "coder", status: "done" });
-expect(stored?.finishedAt).toBeDefined();
-});
+    expect(stored).toMatchObject({ agentId: "coder", status: "done" });
+    expect(stored?.finishedAt).toBeDefined();
+  });
 
-it("stores a failed child with its error", async () => {
-vi.spyOn(OpenAiProvider.prototype, "initialize").mockRejectedValue(
-new Error("provider down"),
-);
-const session = makeSession();
+  it("stores a failed child with its error", async () => {
+    vi.spyOn(OpenAiProvider.prototype, "initialize").mockRejectedValue(new Error("provider down"));
+    const session = makeSession();
 
-const handle = session.spawn("coder", "boom");
-await session.waitSpawn(handle.spawnId);
+    const handle = session.spawn("coder", "boom");
+    await session.waitSpawn(handle.spawnId);
 
-const spawns = saved.at(-1)?.spawns as Array<Record<string, unknown>>;
-const stored = spawns.find((entry) => entry.spawnId === handle.spawnId);
+    const spawns = saved.at(-1)?.spawns as Array<Record<string, unknown>>;
+    const stored = spawns.find((entry) => entry.spawnId === handle.spawnId);
 
-expect(stored).toMatchObject({ status: "error" });
-expect(String(stored?.error)).toContain("provider down");
-});
+    expect(stored).toMatchObject({ status: "error" });
+    expect(String(stored?.error)).toContain("provider down");
+  });
 
-it("omits the field entirely when nothing was spawned", () => {
-const session = makeSession();
-session.save();
+  it("omits the field entirely when nothing was spawned", () => {
+    const session = makeSession();
+    session.save();
 
-expect(saved.at(-1)?.spawns).toBeUndefined();
-});
+    expect(saved.at(-1)?.spawns).toBeUndefined();
+  });
 });
 
 describe("SessionManager spawn", () => {
@@ -911,23 +886,18 @@ describe("SessionManager spawn", () => {
   const stubProvider = (text = "child answer") => {
     vi.spyOn(OpenAiProvider.prototype, "initialize").mockResolvedValue();
     vi.spyOn(OpenAiProvider.prototype, "setModel").mockReturnValue(true);
-    vi.spyOn(OpenAiProvider.prototype, "getModel").mockImplementation(
-      function (this: OpenAiProvider) {
-        return (this as unknown as { model?: string }).model ?? "model";
-      },
-    );
+    vi.spyOn(OpenAiProvider.prototype, "getModel").mockImplementation(function (
+      this: OpenAiProvider,
+    ) {
+      return (this as unknown as { model?: string }).model ?? "model";
+    });
     vi.spyOn(OpenAiProvider.prototype, "getContextWindow").mockReturnValue(1000);
-    const chat = vi
-      .spyOn(OpenAiProvider.prototype, "chat")
-      .mockResolvedValue(stopTurn(text));
+    const chat = vi.spyOn(OpenAiProvider.prototype, "chat").mockResolvedValue(stopTurn(text));
     return chat;
   };
 
   const makeSession = (overrides: Record<string, unknown> = {}) => {
-    const session = new SessionManager(
-      makeConfig({ ...spawnConfig, ...overrides }),
-      makeStore(),
-    );
+    const session = new SessionManager(makeConfig({ ...spawnConfig, ...overrides }), makeStore());
     session.provider = new OpenAiProvider("https://api.example.com", "key", "model");
     session.providerName = "openai";
     session.model = "model";
@@ -978,17 +948,14 @@ describe("SessionManager spawn", () => {
 
     const injected = session.history.find(
       (message) =>
-        message.role === "system" &&
-        message.content.includes(`[spawn ${handle.spawnId}`),
+        message.role === "system" && message.content.includes(`[spawn ${handle.spawnId}`),
     );
     expect(injected?.content).toContain("child");
     expect(injected?.content).toContain("…");
   });
 
   it("injects a system message with error status when the child fails", async () => {
-    vi.spyOn(OpenAiProvider.prototype, "initialize").mockRejectedValue(
-      new Error("provider down"),
-    );
+    vi.spyOn(OpenAiProvider.prototype, "initialize").mockRejectedValue(new Error("provider down"));
     const session = makeSession();
 
     const handle = session.spawn("coder", "do the thing");
@@ -1054,11 +1021,9 @@ describe("SessionManager spawn", () => {
   it("marks a failed child with its error and no answer section", () => {
     const session = makeSession();
 
-    expect(
-      formatter(session)(
-        handleWith({ status: "error", error: "provider down" }),
-      ),
-    ).toBe("[spawn spawn-1 · coder · error] provider down");
+    expect(formatter(session)(handleWith({ status: "error", error: "provider down" }))).toBe(
+      "[spawn spawn-1 · coder · error] provider down",
+    );
   });
 
   it("falls back to unknown error when a failed child carries no message", () => {
@@ -1078,71 +1043,70 @@ describe("SessionManager spawn", () => {
   });
 
   it("delivers spawn events to an external listener", async () => {
-stubProvider("child answer");
-const session = makeSession();
-const events: string[] = [];
+    stubProvider("child answer");
+    const session = makeSession();
+    const events: string[] = [];
 
-const unsubscribe = session.onSpawnEvent((event) => {
-events.push(`${event.type}:${event.handle.status}`);
-});
+    const unsubscribe = session.onSpawnEvent((event) => {
+      events.push(`${event.type}:${event.handle.status}`);
+    });
 
-const handle = session.spawn("coder", "do the thing");
-await session.waitSpawn(handle.spawnId);
+    const handle = session.spawn("coder", "do the thing");
+    await session.waitSpawn(handle.spawnId);
 
-expect(events).toEqual(["started:running", "settled:done"]);
-unsubscribe();
-});
+    expect(events).toEqual(["started:running", "settled:done"]);
+    unsubscribe();
+  });
 
-it("stops delivering events after unsubscribe", async () => {
-stubProvider("child answer");
-const session = makeSession();
-const seen: string[] = [];
+  it("stops delivering events after unsubscribe", async () => {
+    stubProvider("child answer");
+    const session = makeSession();
+    const seen: string[] = [];
 
-const unsubscribe = session.onSpawnEvent((event) => {
-seen.push(event.type);
-});
-unsubscribe();
+    const unsubscribe = session.onSpawnEvent((event) => {
+      seen.push(event.type);
+    });
+    unsubscribe();
 
-const handle = session.spawn("coder", "do the thing");
-await session.waitSpawn(handle.spawnId);
+    const handle = session.spawn("coder", "do the thing");
+    await session.waitSpawn(handle.spawnId);
 
-expect(seen).toEqual([]);
-});
+    expect(seen).toEqual([]);
+  });
 
-it("keeps the parent system message when an external listener is present", async () => {
-stubProvider("child answer");
-const session = makeSession();
+  it("keeps the parent system message when an external listener is present", async () => {
+    stubProvider("child answer");
+    const session = makeSession();
 
-// The external listener must be additive: it cannot replace the internal
-// subscription that injects the child result into the parent history.
-session.onSpawnEvent(() => {});
+    // The external listener must be additive: it cannot replace the internal
+    // subscription that injects the child result into the parent history.
+    session.onSpawnEvent(() => {});
 
-const handle = session.spawn("coder", "do the thing");
-await session.waitSpawn(handle.spawnId);
+    const handle = session.spawn("coder", "do the thing");
+    await session.waitSpawn(handle.spawnId);
 
-const injected = session.history.find(
-(message) =>
-message.role === "system" &&
-message.content.includes(`[spawn ${handle.spawnId}`),
-);
-expect(injected?.content).toContain("child answer");
-});
+    const injected = session.history.find(
+      (message) =>
+        message.role === "system" && message.content.includes(`[spawn ${handle.spawnId}`),
+    );
+    expect(injected?.content).toContain("child answer");
+  });
 
-it("survives a throwing listener without breaking the child", async () => {
-stubProvider("child answer");
-const session = makeSession();
+  it("survives a throwing listener without breaking the child", async () => {
+    stubProvider("child answer");
+    const session = makeSession();
 
-session.onSpawnEvent(() => {
-throw new Error("bad consumer");
-});
+    session.onSpawnEvent(() => {
+      throw new Error("bad consumer");
+    });
 
-const handle = session.spawn("coder", "do the thing");
-const settled = await session.waitSpawn(handle.spawnId);
+    const handle = session.spawn("coder", "do the thing");
+    const settled = await session.waitSpawn(handle.spawnId);
 
-expect(settled).toMatchObject({ status: "done" });
-});
+    expect(settled).toMatchObject({ status: "done" });
+  });
 
-it("rejects spawning when disabled by config", () => {
+  it("rejects spawning when disabled by config", () => {
     const session = makeSession({ sessions: { spawnEnabled: false } });
 
     expect(() => session.spawn("coder", "x")).toThrow(/disabled/);

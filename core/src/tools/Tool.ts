@@ -27,13 +27,13 @@ export interface ToolContext {
   // Launches a background child agent from the spawning session. Injected by
   // the session manager; tools that cannot spawn leave it undefined.
   spawn?: (agentId: string, prompt: string) => SpawnRequestResult;
-	// Returns the body of a loaded skill, undefined when unknown.
-	getSkillBody?: (id: string) => string | undefined;
-	// Lists the ids of the loaded skills, for error messages.
-	listSkillIds?: () => string[];
-	// Live output of a long-running tool. Chunks are already throttled by the
-	// tool. Optional: every tool must work without it.
-	onOutput?: (chunk: string) => void;
+  // Returns the body of a loaded skill, undefined when unknown.
+  getSkillBody?: (id: string) => string | undefined;
+  // Lists the ids of the loaded skills, for error messages.
+  listSkillIds?: () => string[];
+  // Live output of a long-running tool. Chunks are already throttled by the
+  // tool. Optional: every tool must work without it.
+  onOutput?: (chunk: string) => void;
 }
 
 // Outcome of a spawn request made through the tool context.

@@ -34,9 +34,7 @@ const parseValue = (value: string): FrontmatterValue => {
 
 // Minimal frontmatter parser: key: value, inline lists and "- item" lists.
 // Kept dependency-free on purpose; enough for agent definitions.
-const parseFrontmatter = (
-  raw: string,
-): { data: Frontmatter; body: string; errors: string[] } => {
+const parseFrontmatter = (raw: string): { data: Frontmatter; body: string; errors: string[] } => {
   const text = raw.replace(/^\uFEFF/, "");
   const lines = text.split(/\r?\n/);
 
@@ -44,9 +42,7 @@ const parseFrontmatter = (
     return { data: {}, body: text, errors: [] };
   }
 
-  const closing = lines.findIndex(
-    (line, index) => index > 0 && line.trim() === DELIMITER,
-  );
+  const closing = lines.findIndex((line, index) => index > 0 && line.trim() === DELIMITER);
   if (closing === -1) {
     return {
       data: {},
@@ -123,10 +119,7 @@ const parseAgentFile = (raw: string, fallbackId: string): ParsedAgentFile => {
 
   let approval: AgentApproval | undefined;
   if (data.approval !== undefined) {
-    if (
-      typeof data.approval !== "string" ||
-      !APPROVALS.includes(data.approval as AgentApproval)
-    ) {
+    if (typeof data.approval !== "string" || !APPROVALS.includes(data.approval as AgentApproval)) {
       errors.push(`approval must be one of: ${APPROVALS.join(", ")}`);
     } else {
       approval = data.approval as AgentApproval;
@@ -145,10 +138,7 @@ const parseAgentFile = (raw: string, fallbackId: string): ParsedAgentFile => {
 
   if (errors.length) return { errors };
 
-  const name =
-    typeof data.name === "string" && data.name.trim()
-      ? data.name.trim()
-      : id;
+  const name = typeof data.name === "string" && data.name.trim() ? data.name.trim() : id;
 
   return {
     definition: {

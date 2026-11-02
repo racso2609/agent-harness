@@ -40,9 +40,7 @@ class AgentLoader {
         const { definition, errors } = parseAgentFile(raw, id);
 
         if (!definition) {
-          logger.warn(
-            `Skipping agent ${file}: ${errors.join("; ") || "invalid definition"}`,
-          );
+          logger.warn(`Skipping agent ${file}: ${errors.join("; ") || "invalid definition"}`);
           continue;
         }
 

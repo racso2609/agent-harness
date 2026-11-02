@@ -5,8 +5,8 @@ import type { Tool, ToolContext, ToolResult } from "./Tool";
 interface ShellOptions {
   timeoutMs?: number;
   maxOutputBytes?: number;
-// Minimum gap between live output chunks. 0 disables throttling.
-outputThrottleMs?: number;
+  // Minimum gap between live output chunks. 0 disables throttling.
+  outputThrottleMs?: number;
 }
 
 // Picks the shell to spawn: the user's login shell when it looks usable,
@@ -44,8 +44,7 @@ const safeEnv = (): NodeJS.ProcessEnv => {
 
 class ShellTool implements Tool {
   name = "shell";
-  description =
-    "Run a shell command in the workspace and return its stdout, stderr and exit code.";
+  description = "Run a shell command in the workspace and return its stdout, stderr and exit code.";
   parameters = {
     type: "object" as const,
     properties: {
@@ -60,12 +59,12 @@ class ShellTool implements Tool {
 
   protected timeoutMs: number;
   protected maxOutputBytes: number;
-protected outputThrottleMs: number;
+  protected outputThrottleMs: number;
 
   constructor(options: ShellOptions = {}) {
     this.timeoutMs = options.timeoutMs ?? 30_000;
     this.maxOutputBytes = options.maxOutputBytes ?? 32_768;
-this.outputThrottleMs = options.outputThrottleMs ?? 100;
+    this.outputThrottleMs = options.outputThrottleMs ?? 100;
   }
 
   async execute(ctx: ToolContext, args: unknown): Promise<ToolResult> {
@@ -111,34 +110,33 @@ this.outputThrottleMs = options.outputThrottleMs ?? 100;
       let timedOut = false;
       let settled = false;
 
-// Live stream to the UI. Chunks are coalesced per window so a chatty
-// command does not flood the renderer; the final result still carries the
-// (possibly truncated) full output.
-let pending = "";
-let lastEmit = 0;
-const emitOutput = (chunk: string) => {
-if (!ctx.onOutput || !chunk) return;
+      // Live stream to the UI. Chunks are coalesced per window so a chatty
+      // command does not flood the renderer; the final result still carries the
+      // (possibly truncated) full output.
+      let pending = "";
+      let lastEmit = 0;
+      const emitOutput = (chunk: string) => {
+        if (!ctx.onOutput || !chunk) return;
 
-pending += chunk;
+        pending += chunk;
 
-const now = Date.now();
-if (now - lastEmit < this.outputThrottleMs) return;
+        const now = Date.now();
+        if (now - lastEmit < this.outputThrottleMs) return;
 
-lastEmit = now;
-const payload = pending;
-pending = "";
-ctx.onOutput(payload);
-};
+        lastEmit = now;
+        const payload = pending;
+        pending = "";
+        ctx.onOutput(payload);
+      };
 
-// Flushes whatever is still buffered when the command ends.
-const flushOutput = () => {
-if (!ctx.onOutput || !pending) return;
+      // Flushes whatever is still buffered when the command ends.
+      const flushOutput = () => {
+        if (!ctx.onOutput || !pending) return;
 
-const payload = pending;
-pending = "";
-ctx.onOutput(payload);
-};
-
+        const payload = pending;
+        pending = "";
+        ctx.onOutput(payload);
+      };
 
       const append = (current: string, chunk: string) => {
         if (current.length >= this.maxOutputBytes) {
@@ -178,7 +176,7 @@ ctx.onOutput(payload);
       ctx.signal?.addEventListener("abort", onAbort);
 
       const finish = (result: ToolResult) => {
- flushOutput();
+        flushOutput();
         if (settled) return;
         settled = true;
         clearTimeout(timer);
@@ -188,12 +186,12 @@ ctx.onOutput(payload);
 
       child.stdout?.on("data", (chunk: Buffer) => {
         stdout = append(stdout, chunk.toString("utf8"));
- emitOutput(chunk.toString("utf8"));
+        emitOutput(chunk.toString("utf8"));
       });
 
       child.stderr?.on("data", (chunk: Buffer) => {
         stderr = append(stderr, chunk.toString("utf8"));
- emitOutput(chunk.toString("utf8"));
+        emitOutput(chunk.toString("utf8"));
       });
 
       child.on("error", (err) => {
@@ -207,9 +205,7 @@ ctx.onOutput(payload);
           parts.push(`Command timed out after ${this.timeoutMs}ms`);
         }
 
-        parts.push(
-          `exitCode: ${code ?? "null"}${signal ? ` (signal ${signal})` : ""}`,
-        );
+        parts.push(`exitCode: ${code ?? "null"}${signal ? ` (signal ${signal})` : ""}`);
         if (stdout) parts.push(`stdout:\n${stdout}`);
         if (stderr) parts.push(`stderr:\n${stderr}`);
         if (truncated) parts.push("[output truncated]");

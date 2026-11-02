@@ -1,19 +1,10 @@
 import type { AgentSummary } from "@/agents";
 import type { SkillSummary } from "@/skills";
 import type { Config, ProviderConfig, ProviderDetail } from "@/configuration";
-import type {
-SpawnEvent,
-SpawnEventListener,
-SpawnHandle,
-SpawnStatus,
-} from "@/session/spawn";
+import type { SpawnEvent, SpawnEventListener, SpawnHandle, SpawnStatus } from "@/session/spawn";
 import type { SessionStore } from "@/session/SessionStore";
 import type { ApprovalDecision, ApprovalRequest } from "@/tools";
-import type {
-ChatEventListener,
-AgentResponse,
-Model,
-} from "@/types/providers";
+import type { ChatEventListener, AgentResponse, Model } from "@/types/providers";
 import type { SessionStatus, SessionSummary } from "@/types/session";
 
 // Structured logger handed to the harness. Compatible with pino call shapes:
@@ -33,9 +24,7 @@ export type LoggerSink = (line: string) => void;
 
 // Resolves a side-effect permission request. Core remembers the "always"
 // answer, so the handler only has to report the raw decision.
-export type ApprovalHandler = (
-  request: ApprovalRequest,
-) => Promise<ApprovalDecision>;
+export type ApprovalHandler = (request: ApprovalRequest) => Promise<ApprovalDecision>;
 
 export interface HarnessDeps {
   // Logger for the whole harness. Defaults to a stderr sink.
@@ -56,9 +45,9 @@ export interface HarnessOptions {
 }
 
 export interface AskOptions {
- // Receives progress as the turn is produced (text, reasoning, tool calls).
- // Optional: omitting it keeps the existing blocking behaviour.
- onEvent?: ChatEventListener;
+  // Receives progress as the turn is produced (text, reasoning, tool calls).
+  // Optional: omitting it keeps the existing blocking behaviour.
+  onEvent?: ChatEventListener;
 }
 
 export interface SpawnOptions {
@@ -103,11 +92,11 @@ export interface IHarness {
   // --- agents ---
   listAgents(): AgentSummary[];
 
-	// --- skills ---
-	// Skills available to the active session, index only (no bodies).
-	listSkills(): SkillSummary[];
-	// Re-scans the skills directories and refreshes the system prompt.
-	reloadSkills(): SkillSummary[];
+  // --- skills ---
+  // Skills available to the active session, index only (no bodies).
+  listSkills(): SkillSummary[];
+  // Re-scans the skills directories and refreshes the system prompt.
+  reloadSkills(): SkillSummary[];
   setAgent(agentId: string): Promise<boolean>;
 
   // --- approvals ---
@@ -121,8 +110,8 @@ export interface IHarness {
   // Every child this session ever launched, including the ones restored from a
   // previous run. Read-only: a restored child is never reattached.
   childHistory(): SpawnHandle[];
-// Live-only subscription to children starting/finishing. Returns unsubscribe.
-onSpawnEvent(listener: SpawnEventListener): () => void;
+  // Live-only subscription to children starting/finishing. Returns unsubscribe.
+  onSpawnEvent(listener: SpawnEventListener): () => void;
   waitSpawn(spawnId: string): Promise<SpawnHandle | undefined>;
   collectSpawns(spawnIds?: string[]): Promise<SpawnHandle[]>;
 
@@ -137,8 +126,8 @@ export type {
   ApprovalRequest,
   ProviderConfig,
   ProviderDetail,
-SpawnEvent,
-SpawnEventListener,
-SpawnHandle,
-SpawnStatus,
+  SpawnEvent,
+  SpawnEventListener,
+  SpawnHandle,
+  SpawnStatus,
 };

@@ -14,23 +14,19 @@ export const removeProvider = async (
     `${provider.id} (${provider.type})${provider.isDefault ? " *default" : ""}`;
 
   const labels = details.map(label);
-  const target =
-    id?.trim() || (await select("Select the provider to remove:", labels));
+  const target = id?.trim() || (await select("Select the provider to remove:", labels));
   if (!target) return undefined;
 
   // Accept either the raw id or the labelled menu entry.
   const selected =
-    details.find((provider) => provider.id === target) ??
-    details[labels.indexOf(target)];
+    details.find((provider) => provider.id === target) ?? details[labels.indexOf(target)];
   if (!selected) return undefined;
 
   if (details.length === 1) {
     throw new Error("Cannot remove the last configured provider");
   }
 
-  const answer = (
-    await input(`Remove provider "${selected.id}"? This cannot be undone [y/N]: `)
-  )
+  const answer = (await input(`Remove provider "${selected.id}"? This cannot be undone [y/N]: `))
     .trim()
     .toLowerCase();
   if (answer !== "y" && answer !== "yes") return undefined;

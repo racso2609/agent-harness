@@ -81,12 +81,7 @@ export type ToolResult = {
   isError?: boolean;
 };
 
-export type FinishReason =
-  | "stop"
-  | "toolCalls"
-  | "length"
-  | "contentFilter"
-  | "other";
+export type FinishReason = "stop" | "toolCalls" | "length" | "contentFilter" | "other";
 
 export type AssistantTurn = {
   text: string;
@@ -104,7 +99,7 @@ export type ChatEvent =
   | { type: "reasoning"; delta: string }
   | { type: "toolCallStart"; id: string; name: string }
   | { type: "toolCallEnd"; id: string; name: string }
- | { type: "toolOutput"; id: string; name: string; chunk: string };
+  | { type: "toolOutput"; id: string; name: string; chunk: string };
 
 export type ChatEventListener = (event: ChatEvent) => void;
 
@@ -134,11 +129,7 @@ export type ToolMessage = {
   toolCallId: string;
 };
 
-export type History =
-  | SystemMessage
-  | UserMessage
-  | AssistantMessage
-  | ToolMessage;
+export type History = SystemMessage | UserMessage | AssistantMessage | ToolMessage;
 
 export type Provider = {
   url: string;

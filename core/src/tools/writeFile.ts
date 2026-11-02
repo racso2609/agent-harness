@@ -13,9 +13,7 @@ interface WriteFileOptions {
 const DEFAULT_DENY = [".git/", ".git"];
 
 const toRegExp = (pattern: string) => {
-  const escaped = pattern
-    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
-    .replace(/\*/g, ".*");
+  const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
   return new RegExp(`^${escaped}$`);
 };
 
@@ -45,10 +43,7 @@ class WriteFileTool implements Tool {
   }
 
   async execute(ctx: ToolContext, args: unknown): Promise<ToolResult> {
-    const input = args as
-      | { path?: unknown; content?: unknown }
-      | null
-      | undefined;
+    const input = args as { path?: unknown; content?: unknown } | null | undefined;
 
     if (typeof input?.path !== "string" || !input.path.trim()) {
       throw new Error("writeFile expects a non-empty 'path' string");
@@ -83,16 +78,11 @@ class WriteFileTool implements Tool {
   // the file itself and as every directory prefix (so ".git/" also blocks
   // ".git/config").
   protected isDenied(workspace: string, filePath: string) {
-    const relative = path
-      .relative(path.resolve(workspace), filePath)
-      .split(path.sep)
-      .join("/");
+    const relative = path.relative(path.resolve(workspace), filePath).split(path.sep).join("/");
 
     const parts = relative.split("/");
     const candidates = parts.map((_, index) =>
-      index === parts.length - 1
-        ? relative
-        : `${parts.slice(0, index + 1).join("/")}/`,
+      index === parts.length - 1 ? relative : `${parts.slice(0, index + 1).join("/")}/`,
     );
     candidates.push(relative);
 

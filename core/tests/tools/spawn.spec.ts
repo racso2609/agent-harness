@@ -48,9 +48,7 @@ describe("SpawnTool", () => {
       { agent: "coder", prompt: "task" },
     );
 
-    expect(approve).toHaveBeenCalledWith(
-      expect.objectContaining({ tool: "spawn", kind: "exec" }),
-    );
+    expect(approve).toHaveBeenCalledWith(expect.objectContaining({ tool: "spawn", kind: "exec" }));
     expect(spawn).not.toHaveBeenCalled();
     expect(result.isError).toBe(true);
     expect(result.output).toMatch(/rejected/);
@@ -61,12 +59,10 @@ describe("SpawnTool", () => {
     const ctx = makeContext(vi.fn());
 
     await expect(tool.execute(ctx, { prompt: "x" })).rejects.toThrow(/agent/);
-    await expect(tool.execute(ctx, { agent: "coder" })).rejects.toThrow(
-      /prompt/,
+    await expect(tool.execute(ctx, { agent: "coder" })).rejects.toThrow(/prompt/);
+    await expect(tool.execute(ctx, { agent: "coder", prompt: "x", context: 42 })).rejects.toThrow(
+      /context/,
     );
-    await expect(
-      tool.execute(ctx, { agent: "coder", prompt: "x", context: 42 }),
-    ).rejects.toThrow(/context/);
   });
 
   it("reports an error when spawning is unavailable", async () => {
