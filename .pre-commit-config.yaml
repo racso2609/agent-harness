@@ -3,7 +3,9 @@ repos:
     rev: v4.5.0
     hooks:
       - id: trailing-whitespace
+        exclude: ^cli/racso-logo\.txt$
       - id: end-of-file-fixer
+        exclude: ^cli/racso-logo\.txt$
 
   # TypeScript type check (core + cli)
   - repo: local

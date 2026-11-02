@@ -6,9 +6,7 @@
   "scripts": {
     "build": "tsc && tsc-alias -f",
     "lint": "eslint .",
-    "test": "vitest",
-    "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "test": "vitest"
   },
   "keywords": [],
   "author": "",
