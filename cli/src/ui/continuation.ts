@@ -14,6 +14,12 @@ export const CONTINUATION_PROMPT =
 export const DRAFT_WAITING_NOTICE =
   "A child left work behind; I will continue as soon as you send your prompt.";
 
+// Shown instead of starting another turn once the budget for automatic
+// continuations is spent. The cap comes from the config: interpolating it keeps
+// the message honest when a user changes it.
+export const autoContinuationLimitNotice = (max: number) =>
+	`Stopping automatic continuation: reached maxAutoContinuations (${max}). Send a prompt to continue.`;
+
 // Shown when a queued continuation is dropped because the user sent a prompt.
 export const CONTINUATION_DROPPED_NOTICE =
   "Discarded the automatic continuation: your prompt comes first.";
@@ -46,15 +52,28 @@ export const hasPendingWork = (pending: SpawnHandle[]) => pending.some(leftWork)
 // Decides whether a turn starts on its own. `waitingForPrompt` is false while
 // the loop is inside a turn (the approval dialog included): that settle is
 // judged when the turn ends, never from the middle of it.
+//
+// `budget` is what the loop already spent on automatic turns (`used`) and the
+// cap from the config (`max`); `false` disables the feature, as does `0`. The
+// cap is judged last on purpose: a user who is typing still owes the waiting
+// notice, and a spent budget says nothing when there is no work to continue.
 export const continuationDecision = (state: {
-  waitingForPrompt: boolean;
-  hasUserDraft: boolean;
-  pending: SpawnHandle[];
+waitingForPrompt: boolean;
+hasUserDraft: boolean;
+pending: SpawnHandle[];
+budget: { used: number; max: number | false };
 }): ContinuationDecision => {
-  const work = state.waitingForPrompt && hasPendingWork(state.pending);
-  if (!work) return { continue: false, notice: null };
-  if (state.hasUserDraft) return { continue: false, notice: DRAFT_WAITING_NOTICE };
-  return { continue: true, notice: null };
+const work = state.waitingForPrompt && hasPendingWork(state.pending);
+if (!work) return { continue: false, notice: null };
+if (state.hasUserDraft) return { continue: false, notice: DRAFT_WAITING_NOTICE };
+
+const { used, max } = state.budget;
+// `false` and `0` are the same answer: the first continuation is already
+// over the cap, so the notice reports 0 rather than inventing a number.
+if (max === false || used >= max) {
+return { continue: false, notice: autoContinuationLimitNotice(max === false ? 0 : max) };
+}
+return { continue: true, notice: null };
 };
 
 // Identities of the undelivered children: the batch changes when a child

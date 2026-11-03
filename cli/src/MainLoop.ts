@@ -57,6 +57,12 @@ private pending: ((prompt: string) => void) | null = null;
 // Batch of undelivered children the "I will wait for your prompt" notice was
 // already shown for, so typing does not repeat it on every keystroke.
 private noticedBatch = "";
+// Automatic turns queued since the last prompt the user sent. It lives here
+// because spending a budget is a policy of the loop, not a fact of the
+// session, and it is deliberately not persisted: a restarted session starts
+// with a fresh budget instead of inheriting the spend of a previous run, which
+// would leave the user capped by turns they never saw.
+private autoContinuations = 0;
 
 constructor(options: MainLoopOptions = {}) {
 this.config = options.config ?? new Config();
@@ -137,11 +143,17 @@ resolve(prompt);
 return;
 }
 this.queue.push(entry);
+// Only a queued continuation spends the budget: one handed straight to a
+// parked loop never reaches the queue and starts its turn elsewhere.
+if (entry.continuation) this.autoContinuations += 1;
 }
 
 // A prompt the user typed wins over the continuations still waiting: they
 // would run the very work the user is asking for now.
 protected enqueueFromUser(prompt: string) {
+// Any prompt the user sends opens a new budget, whether it drops a
+// continuation or arrives after the cap stopped the chain.
+this.autoContinuations = 0;
 if (dropContinuations(this.queue) > 0) {
 this.ui.render({ type: "notice", message: CONTINUATION_DROPPED_NOTICE });
 }
@@ -164,6 +176,7 @@ const decision = continuationDecision({
 waitingForPrompt: this.isWaitingForPrompt(),
 hasUserDraft: this.hasUserDraft(),
 pending,
+budget: { used: this.autoContinuations, max: this.maxAutoContinuations() },
 });
 
 if (decision.notice && this.noticedBatch !== key) {
@@ -171,6 +184,13 @@ this.noticedBatch = key;
 this.ui.render({ type: "notice", message: decision.notice });
 }
 if (decision.continue) this.enqueue(CONTINUATION_PROMPT, "continuation");
+}
+
+// The cap from the config, read on every decision so an edited value applies
+// without restarting. Missing (unreachable past Config.applyDefaults) falls
+// back to the same default rather than meaning "no cap".
+protected maxAutoContinuations(): number | false {
+return this.config.config.sessions?.maxAutoContinuations ?? 5;
 }
 
 // True when the loop is parked in nextPrompt() with nobody to hand a prompt

@@ -192,6 +192,36 @@ expect(body).toContain("CONTINUATION_DROPPED_NOTICE");
 expect(mainLoop).toContain("onSubmit: (prompt) => this.enqueueFromUser(prompt)");
 });
 
+it("spends the automatic continuation budget only when one is queued", () => {
+// The counter is the cap's memory: a turn starts on its own only when one is
+// queued, so this is the one place allowed to increment it. Counting anywhere
+// else would spend the budget on turns the user never saw.
+const body = between("protected enqueue(", "protected enqueueFromUser(");
+
+expect(body).toContain("if (entry.continuation) this.autoContinuations += 1;");
+// A user prompt arriving with no parked loop lands on the same queue: it must
+// not be mistaken for a continuation.
+expect(body).toContain('kind: "user" | "continuation" = "user"');
+});
+
+it("opens a new budget whenever the user sends a prompt", () => {
+// Otherwise the cap would latch: once spent, no chain could ever start again.
+const body = between("protected enqueueFromUser(", "// Starts a turn on its own");
+
+expect(body).toContain("this.autoContinuations = 0;");
+});
+
+it("reads the cap from the config instead of hardcoding it in the decision", () => {
+// The number belongs to the configuration; the decision only receives it.
+const body = between("protected maybeContinue()", "protected maxAutoContinuations()");
+
+expect(body).toContain("budget: { used: this.autoContinuations");
+expect(body).toContain("this.maxAutoContinuations()");
+expect(between("protected maxAutoContinuations()", "protected isWaitingForPrompt()")).toContain(
+"this.config.config.sessions?.maxAutoContinuations",
+);
+});
+
 it("never continues in line mode", () => {
 // The line renderer reads stdin itself: no parked resolver, no draft, so a
 // continuation could only steal a turn the user is typing into.
