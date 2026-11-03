@@ -286,13 +286,20 @@ formatSpawnOutcome(handle))`, es decir, comparaba la salida del adaptador contra
       el usuario lee y no que el renderer delegue.
       turnPrinted: los tres sitios donde se pone la bandera en `cli/src/ui/CliUiAdapter.ts` (dentro
       de `notify`, dentro de `writeChunk` y el reset a `false` en `case "turnStart"`) están ahora
-      discriminados uno a uno; borrar `this.turnPrinted = true;` de `notify()` deja **2 failed / 12
-      casos (medido con M = 12)** («puts a blank line before an answer that follows a notice» y el
-      preexistente «puts a blank line before and after an answer that follows output»), borrar la
-      asignación de `writeChunk()` deja **1 failed / 12 casos (medido con M = 12)** («puts a blank
-      line before an answer that follows streamed text») y quitar `this.turnPrinted = false;` de
-      `case "turnStart"` deja **1 failed / 12 casos (medido con M = 12)** («does not inherit the
-      previous turn when a new turn starts»).
+      discriminados uno a uno. Un matiz sobre lo que estaba realmente sin cubrir: el camino de
+      `notify` **ya tenía cobertura indirecta** en el commit anterior (`eae796b`, 9 casos) a través
+      del caso «puts a blank line before and after an answer that follows output», que imprime por
+      la vía de `toolStart` y por tanto pasa por `notify` —borrar la asignación de `notify()` allí
+      dejaba **1 failed / 9**—; lo que estaba sin cubrir era la asignación de `writeChunk()`
+      (borrarla dejaba `9 passed`) y el reset de `turnStart`. Con los 12 casos de hoy, borrar
+      `this.turnPrinted = true;` de `notify()` deja **2 failed / 12 casos (medido con M = 12)**
+      («puts a blank line before an answer that follows a notice» y el preexistente «puts a blank
+      line before and after an answer that follows output»), borrar la asignación de `writeChunk()`
+      deja **1 failed / 12 casos (medido con M = 12)** («puts a blank line before an answer that
+      follows streamed text») y quitar `this.turnPrinted = false;` de `case "turnStart"` deja
+      **1 failed / 12 casos (medido con M = 12)** («does not inherit the previous turn when a new
+      turn starts»). Los tres casos nuevos los fijan de forma explícita, en particular el de
+      `notify`, que antes solo caía de rebote según qué evento usara el caso.
       Done when: `cliAdapter.spec.ts` no importa `formatSpawnOutcome` ni `formatTurnOutcome`,
       sus casos comparan con `toBe` el literal completo y el barrido de revert del separador
       deja el fichero en rojo.
@@ -315,6 +322,18 @@ formatSpawnOutcome(handle))`, es decir, comparaba la salida del adaptador contra
       conserva; y si se conserva, hay un test que fija que una entrada expandida en el
       turno N sigue expandida en el turno N+1, y una poda para que el set no crezca sin
       límite.
+      Depends on: nada.
+- [ ] **Un mensaje de commit afirma el estado del padre, y hay que medirlo en el padre**
+      Los commits `eae796b` y `aa46e50` afirman cosas sobre el commit anterior («five
+      mutations», «only one of them was covered») que resultaron falsas al medirlas: se
+      midieron en el árbol de trabajo y no sobre `git archive <padre>`, así que la frase
+      describía el árbol y no el commit que decía describir. La causa común es escribir
+      la justificación antes de medir; cuando luego se mide, la afirmación ya está en el
+      mensaje.
+      Done when: está escrito en el TODO (o donde corresponda del proceso) que toda
+      afirmación de un mensaje de commit sobre el comportamiento del padre se mide sobre
+      `git archive <sha-padre>` y no sobre el árbol, y la próxima revisión de commit
+      comprueba ese punto explícitamente.
       Depends on: nada.
 
 ## Deuda de proceso

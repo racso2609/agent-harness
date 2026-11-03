@@ -108,11 +108,12 @@ describe("the line renderer", () => {
 
       expect(output).toBe("all tests pass\n");
     });
-    // turnPrinted is raised from three places. The two cases above only prove the
-    // answer reads the flag, not that a notice (which goes through notify) raises
-    // it, so dropping the assignment in notify would keep them green. This pins
-    // the notify path on its own: "hello" is printed by notify, and the answer
-    // that follows must still be set apart by the blank lines.
+    // turnPrinted is raised from three places. The notify path already had indirect
+    // coverage: the case above prints through toolStart, which also goes through
+    // notify. This pins it explicitly and directly, with a plain notice instead of
+    // toolStart, so the path no longer depends on which event is used: "hello" is
+    // printed by notify, and the answer that follows must still be set apart by
+    // the blank lines.
     it("puts a blank line before an answer that follows a notice", () => {
       const output = printed([
         { type: "turnStart", prompt: "run the tests" },
