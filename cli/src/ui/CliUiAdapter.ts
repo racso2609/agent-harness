@@ -21,11 +21,16 @@ export const formatStatusBar = (status: UiStatus): string => {
 // default so existing sessions and tests keep working while the ink TUI is
 // built behind a flag.
 class CliUiAdapter implements UiAdapter {
+  // True once this turn printed something. The answer is set apart with blank
+  // lines only when something came before it, so a bare answer stays flush.
+  protected turnPrinted = false;
+
   // Writes a line above the prompt without clobbering what the user typed.
   notify(message: string) {
     clearPrompt();
     process.stdout.write(`${message}\n`);
     restorePrompt();
+    this.turnPrinted = true;
   }
 
   // Streams a partial piece of output on the same line.
@@ -33,6 +38,7 @@ class CliUiAdapter implements UiAdapter {
     clearPrompt();
     process.stdout.write(text);
     restorePrompt();
+    this.turnPrinted = true;
   }
 
   // Builds a core logger whose lines are routed through the prompt-safe sink.
@@ -68,9 +74,12 @@ class CliUiAdapter implements UiAdapter {
       case "toolEnd":
         break;
       case "answer":
-        this.notify(event.text);
+        // Blank lines before and after the final text, but only when the turn
+        // already printed something: a lone answer starts flush.
+        this.notify(this.turnPrinted ? `\n${event.text}\n` : event.text);
         break;
       case "turnStart":
+        this.turnPrinted = false;
         break;
       case "turnEnd": {
         // A completed turn says nothing: the answer is its summary.

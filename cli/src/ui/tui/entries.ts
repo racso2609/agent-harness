@@ -8,6 +8,8 @@
 // index of the entry each role is writing, so an interleaved entry cannot
 // split it.
 
+import { gapBefore } from "./layout";
+
 // Roles that grow in place while their content arrives.
 export type StreamRole = "answer" | "reasoning" | "tool";
 
@@ -43,6 +45,36 @@ export const trimAnchored = <T>(
   }
 
   return { lines: lines.slice(dropped), anchors: shifted };
+};
+
+// One entry as the render consumes it: the line, its index in the whole
+// transcript and the air above it, both already resolved.
+export interface WindowEntry<T> {
+  line: T;
+  absolute: number;
+  gap: number;
+}
+
+// The tail of the transcript that is painted. `start` is the absolute index of
+// the first visible entry, and every entry arrives with its own absolute index
+// and its gap already resolved, so whoever paints never computes indexes
+// again: spacing and expansion read `absolute`, not the position in the window.
+export interface EntryWindow<T> {
+  start: number;
+  entries: WindowEntry<T>[];
+}
+
+export const windowOf = <T>(lines: T[], size: number): EntryWindow<T> => {
+  const start = Math.max(0, lines.length - size);
+
+  return {
+    start,
+    entries: lines.slice(start).map((line, index) => {
+      const absolute = start + index;
+
+      return { line, absolute, gap: gapBefore(absolute) };
+    }),
+  };
 };
 
 // Writes one entry into the open entry of `role`, or appends a new one when the

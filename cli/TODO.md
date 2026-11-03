@@ -111,6 +111,27 @@ Formato de este archivo: ver la skill `todo-format`.
       incluido el silencio de un turno `completed` y el de un `turnEnd` sin `outcome`.
       Depends on: notificar al usuario el estado final de cada hijo.
 
+- [ ] **El aviso de cierre no muestra el informe del hijo**
+      El canal ya existe (`MainLoop.ts:78-84` traduce `settled` del core a
+      `spawnSettled` y los dos renderers lo pintan), pero el formato degrada el informe
+      de tres formas: `oneLine()` colapsa todo salto de línea a un espacio y
+      `MAX_OUTCOME_CHARS = 200` corta con `…`, así que un informe de 30 líneas se lee
+      como 200 caracteres sin estructura y el lector no distingue qué falta ni qué sigue;
+      no se pinta la duración aunque `startedAt` y `finishedAt` están en el handle; y si
+      el resultado superó `sessions.childResultMaxChars` (2000 por defecto,
+      `SessionManager.ts:603`) el padre recibe un informe ya truncado sin que nadie lo
+      diga.
+      Done when: (1) el cierre respeta hasta N líneas en vez de 200 caracteres, conserva
+      la estructura del informe y marca la elisión con `…`; (2) el cierre pinta la
+      duración (`(+2m 14s)`) desde `startedAt`/`finishedAt`, o desde `durationMs` cuando
+      exista; (3) un resultado que llegó truncado por `childResultMaxChars` se anuncia
+      como tal en vez de aparentar que eso es todo.
+      Depends on: el cierre del hijo en los dos renderers («Notificar al usuario el
+      estado final de cada hijo») y, para la duración desde el contrato, la tarea de
+      `core/TODO.md` «Añadir resumen del hijo y duración a SpawnHandle».
+      Decidir antes: si el tope de N líneas es una constante del layout (como `GAP`) o un
+      valor de config.
+
 ## P3 — Información adicional en el UI
 
 - [x] **Mostrar el razonamiento del modelo en streaming**
@@ -133,16 +154,38 @@ Formato de este archivo: ver la skill `todo-format`.
       hecho: `ui/tui/collapse.ts` (puro: `estimateLines`, `tail`, `collapse`), 11 tests en `tests/ui/collapse.spec.ts`. `App.tsx` aplica la ventana a `reasoning` y `tool`; `TuiUiAdapter` guarda el set `expanded` por índice y lo **resetea al empezar cada turno**, para que el transcript no se llene de entradas abiertas de turnos anteriores.
       pendiente: el corte se calcula con `width: Infinity` (una línea lógica = una visual). Con líneas muy largas la ventana de 6 mostrará menos de lo esperado; pasa a `useStdout().stdout.columns` cuando importe.
 
-- [ ] **Dar aire vertical al texto final (interlineado y separación de bloques)**
+- [x] **Dar aire vertical al texto final (interlineado y separación de bloques)**
       Hoy las entradas y los bloques del markdown se pintan pegados uno detrás de otro
       (`App.tsx` no añade margen entre `<Line>` ni entre bloques, y el modo líneas no
       deja aire antes ni después de la respuesta), así que párrafos, listas y respuestas
       se leen como un muro de texto.
+      decisión: el interlineado es una **constante del layout**, no un valor de
+      `ui.theme`, porque el espaciado no depende del color ni del rol y en modo líneas no
+      hay tema que leer.
+      hecho: `src/ui/tui/layout.ts` gana `GAP = 1` y `gapBefore(absoluteIndex)` puro (0 en
+      el índice 0, `GAP` en cualquier otro); `src/ui/tui/entries.ts` gana `WindowEntry` /
+      `EntryWindow` y `windowOf`, que resuelve el índice absoluto y el aire de cada entrada
+      (`gapBefore(absolute)`); `src/ui/tui/App.tsx` extrae `VISIBLE = 60`, pide la ventana a
+      `windowOf(state.lines, VISIBLE)` y solo consume lo que llega (`{ line, absolute, gap }`),
+      sin recalcular índices — la `key` del map sigue siendo el índice relativo a la ventana;
+      `src/ui/CliUiAdapter.ts` mantiene la bandera `turnPrinted` (se resetea en `turnStart`, se
+      pone a true en `notify` y en `writeChunk`) y el caso `answer` imprime `\n${text}\n` solo
+      si ya hubo salida en el turno.
+      tests: `tests/ui/layout.spec.ts` 12→15 (bloque `describe("gapBefore")`: índice 0 →
+      0, cualquier otro → `GAP`) y `tests/ui/cliAdapter.spec.ts` 7→9 (respuesta no
+      primera → `"\n<texto>\n"`, primera → sin aire inicial), manteniendo los 7 previos
+      con `toBe` de literal completo.
+      bug cazado en render de ink, no en los tests puros: el primer intento pasaba a
+      `gapBefore` el índice de la ventana (`slice(-60)`), así que en un transcript de más de 60
+      entradas la primera visible perdía su aire; el test que lo fija es
+      `tests/ui/tuiWindow.spec.ts`, que afirma sobre las entradas **ya resueltas**
+      (`entries[0]` de un transcript de 62 → `{ line: "L2", absolute: 2, gap: GAP }`), y un test
+      anterior que llamaba `gapBefore(window.start)` a mano era tautológico y se sustituyó. La
+      suite queda en 15 ficheros / 185 tests.
       Done when: existe una regla de espaciado declarada (línea en blanco entre entradas,
       margen antes de heading/lista/código/tabla y aire antes/después de la respuesta
       final en modo líneas) y un test la fija.
       Depends on: nada.
-      Decidir antes: si el interlineado es un valor de `ui.theme` (config) o una constante del layout.
 
 ## P4 — Instalación y distribución
 
@@ -206,26 +249,91 @@ exige clonar y construir. Publicar es requisito para lo de `core/TODO.md` §10.
       render. Es el mismo tipo de error (lo que se calcula no es lo que se pinta).
       Done when: al menos un test renderiza un componente con ink y compara la salida.
 
-- [ ] **Los tests del renderer de líneas fijaban el texto con aserciones tautológicas**
+- [x] **Los tests del renderer de líneas fijaban el texto con aserciones tautológicas**
       `cli/tests/ui/cliAdapter.spec.ts` afirmaba `expect(output).toContain(
 formatSpawnOutcome(handle))`, es decir, comparaba la salida del adaptador contra la
-      **misma** función que el adaptador usa por dentro (`CliUiAdapter.ts:103`,
-      `TuiUiAdapter.tsx:283`). El test fijaba que el renderer delega en el formateador, no lo
+      **misma** función que el adaptador usa por dentro (`CliUiAdapter.ts:96`,
+      `TuiUiAdapter.tsx:259`). El test fijaba que el renderer delega en el formateador, no lo
       que el usuario lee: cambiando el separador de `": "` a `" =>> "` en
-      `cli/src/ui/outcome.ts:34,38`, `cliAdapter.spec.ts` seguía en verde 6/6 y solo lo
-      cazaba `outcome.spec.ts`. Es el patrón "aserción debilitada / tautológica" de la
-      regla 7 de `core/agents/code-reviewer.md`.
-      Hecho (parcial, sin commitear): el árbol de trabajo ya pasó los seis casos a `toBe` con
-      el literal completo —hijo `done` (`cliAdapter.spec.ts:60`), hijo `error`,
-      `(no output)`, turno `toolError` y los dos silencios—, y el test ya falla si el
-      separador vuelve a `" =>> "`.
-      Pendiente: (1) commitear el arreglo; (2) auditarlo con el revert real, volviendo a
-      `": "` → `" =>> "` en `outcome.ts` y comprobando que `cliAdapter.spec.ts` se pone
-      rojo (si no, la aserción sigue débil); (3) el caso hijo `error` tiene que fijar también
-      el `unknown error` del error vacío, no solo el mensaje con texto.
+      `cli/src/ui/outcome.ts:34,38`, `cliAdapter.spec.ts` seguía en verde y solo lo cazaba
+      `outcome.spec.ts`. Es el patrón "aserción debilitada / tautológica" de la regla 7 de
+      `core/agents/code-reviewer.md`.
+      hecho: el test ya no importa `formatSpawnOutcome` ni `formatTurnOutcome`: los siete casos
+      comparan la salida completa contra el literal exacto con `toBe`, incluido el `\n` final —
+      hijo `done` (`spawn spawn-1 done (coder): all tests pass\n`), hijo `error`,
+      `(no output)`, turno `failed` y los dos silencios. Se añadió el caso «says unknown error
+      instead of a header with an empty body», que fija
+      `spawn spawn-1 error (coder): unknown error\n` y cierra el hueco del error sin mensaje.
+      revert: el barrido de revert se hizo y está en verde como prueba, con las cifras medidas una a
+      una sobre los **M = 12 casos** del fichero en el momento de medir. Cambiar el separador `": "`
+      por `" =>> "` en `outcome.ts:34,38` —las dos líneas que componen la cabecera— deja el fichero
+      en **4 failed / 12 casos (medido con M = 12)** (los cuatro casos de `settling a child`);
+      `"unknown error"` → `"unknown"` deja **1 failed / 12 casos (medido con M = 12)** (el caso del
+      error vacío); `"(no output)"` → `"(empty)"` deja **1 failed / 12 casos (medido con M = 12)**;
+      `"turn failed"` → `"turn error"` deja **1 failed / 12 casos (medido con M = 12)**; y `notify`
+      emitiendo `\n\n` en `CliUiAdapter.ts` deja **10 failed / 12 casos (medido con M = 12)**. Todos
+      los reverts se restauraron. Regla: M es solo el tamaño del fichero en el momento de medir, así
+      que cada vez que se añada o se quite un caso hay que volver a medir y actualizar M; lo que **no
+      caduca** es cuál es el caso con nombre que caza cada mutación, y eso es lo que hay que mantener
+      correcto. La aserción ya no es tautológica: cada mutación tiene un caso con nombre que la caza
+      porque cada caso compara la salida completa contra su literal, así que cualquier carácter
+      distinto rompe el `toBe` del caso que imprime esa cadena —el separador lo cazan los cuatro de
+      `settling a child`, que son los únicos que fijan una cabecera con cuerpo; el `"unknown error"`
+      lo caza el caso del error vacío, y `"(no output)"` y `"turn failed"` tienen un caso cada uno
+      porque son los únicos que los imprimen; y el `\n\n` de más lo cazan diez—. Un matiz que
+      conviene dejar escrito: los dos casos de silencio («says nothing when…») siguen verdes con el
+      `\n\n` porque imprimen cadena vacía y no hay salto de más que ver. Con eso el test fija lo que
+      el usuario lee y no que el renderer delegue.
+      turnPrinted: los tres sitios donde se pone la bandera en `cli/src/ui/CliUiAdapter.ts` (dentro
+      de `notify`, dentro de `writeChunk` y el reset a `false` en `case "turnStart"`) están ahora
+      discriminados uno a uno. Un matiz sobre lo que estaba realmente sin cubrir: el camino de
+      `notify` **ya tenía cobertura indirecta** en el commit anterior (`eae796b`, 9 casos) a través
+      del caso «puts a blank line before and after an answer that follows output», que imprime por
+      la vía de `toolStart` y por tanto pasa por `notify` —borrar la asignación de `notify()` allí
+      dejaba **1 failed / 9**—; lo que estaba sin cubrir era la asignación de `writeChunk()`
+      (borrarla dejaba `9 passed`) y el reset de `turnStart`. Con los 12 casos de hoy, borrar
+      `this.turnPrinted = true;` de `notify()` deja **2 failed / 12 casos (medido con M = 12)**
+      («puts a blank line before an answer that follows a notice» y el preexistente «puts a blank
+      line before and after an answer that follows output»), borrar la asignación de `writeChunk()`
+      deja **1 failed / 12 casos (medido con M = 12)** («puts a blank line before an answer that
+      follows streamed text») y quitar `this.turnPrinted = false;` de `case "turnStart"` deja
+      **1 failed / 12 casos (medido con M = 12)** («does not inherit the previous turn when a new
+      turn starts»). Los tres casos nuevos los fijan de forma explícita, en particular el de
+      `notify`, que antes solo caía de rebote según qué evento usara el caso.
       Done when: `cliAdapter.spec.ts` no importa `formatSpawnOutcome` ni `formatTurnOutcome`,
-      sus seis casos comparan con `toBe` el literal completo y el barrido de revert del
-      separador deja el fichero en rojo.
+      sus casos comparan con `toBe` el literal completo y el barrido de revert del separador
+      deja el fichero en rojo.
+      Depends on: nada.
+
+- [ ] **Decidir si la expansión sobrevive al turno**
+      El caso `turnStart` de `cli/src/ui/TuiUiAdapter.tsx:225` hace
+      `expanded: new Set<number>()`, es decir **vacía el set de entradas expandidas al
+      empezar cada turno**. La intención original era que el transcript no se quedara
+      lleno de entradas abiertas de turnos anteriores. Ahora que el set guarda índices
+      **absolutos** del transcript ya no hay desalineación al desplazarse la ventana de
+      60 entradas —`toggleEntry` (`TuiUiAdapter.tsx:88`) recibe el índice absoluto que
+      manda el `onToggle` de `App` (`ui/tui/App.tsx:149`, `state.lines.length - 1`) y
+      `toggleAll` (`TuiUiAdapter.tsx:103`) lo construye con
+      `this.state.lines.map((line, index) => ...)` sobre la lista completa—, así que la
+      decisión de vaciarlo merece revisarse: hoy una entrada que el usuario expandió
+      explícitamente se colapsa sola cuando empieza el siguiente turno, aunque el
+      usuario no haya tocado nada.
+      Done when: está escrito, con su motivo, si el set se vacía en `turnStart` o si se
+      conserva; y si se conserva, hay un test que fija que una entrada expandida en el
+      turno N sigue expandida en el turno N+1, y una poda para que el set no crezca sin
+      límite.
+      Depends on: nada.
+- [ ] **Un mensaje de commit afirma el estado del padre, y hay que medirlo en el padre**
+      Los commits `eae796b` y `aa46e50` afirman cosas sobre el commit anterior («five
+      mutations», «only one of them was covered») que resultaron falsas al medirlas: se
+      midieron en el árbol de trabajo y no sobre `git archive <padre>`, así que la frase
+      describía el árbol y no el commit que decía describir. La causa común es escribir
+      la justificación antes de medir; cuando luego se mide, la afirmación ya está en el
+      mensaje.
+      Done when: está escrito en el TODO (o donde corresponda del proceso) que toda
+      afirmación de un mensaje de commit sobre el comportamiento del padre se mide sobre
+      `git archive <sha-padre>` y no sobre el árbol, y la próxima revisión de commit
+      comprueba ese punto explícitamente.
       Depends on: nada.
 
 ## P6 — Continuación automática tras un hijo

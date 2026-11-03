@@ -71,10 +71,84 @@ describe("the line renderer", () => {
       expect(output).toBe("spawn spawn-1 error (coder): provider down\n");
     });
 
+    // The other empty case: a failed child with no message. Same failure mode as
+    // the empty result, so it gets its own pinned line instead of relying on the
+    // formatter's tests.
+    it("says unknown error instead of a header with an empty body", () => {
+      const output = printed([
+        { type: "spawnSettled", handle: settled({ status: "error", error: "" }) },
+      ]);
+
+      expect(output).toBe("spawn spawn-1 error (coder): unknown error\n");
+    });
+
     it("says (no output) instead of a header with an empty body", () => {
       const output = printed([{ type: "spawnSettled", handle: settled({ result: "" }) }]);
 
       expect(output).toBe("spawn spawn-1 done (coder): (no output)\n");
+    });
+  });
+
+  describe("the final answer", () => {
+    // The answer is set apart from what the turn already printed: one blank line
+    // before and after it. A turn that printed nothing before the answer gets no
+    // leading blank line, because the line would be the first thing on screen.
+    it("puts a blank line before and after an answer that follows output", () => {
+      const output = printed([
+        { type: "turnStart" },
+        { type: "toolStart", id: "call-1", name: "shell" },
+        { type: "answer", text: "all tests pass" },
+      ]);
+
+      expect(output).toBe("→ shell\n\nall tests pass\n\n");
+    });
+
+    it("does not open with a blank line when the answer is the first output", () => {
+      const output = printed([{ type: "turnStart" }, { type: "answer", text: "all tests pass" }]);
+
+      expect(output).toBe("all tests pass\n");
+    });
+    // turnPrinted is raised from three places. The notify path already had indirect
+    // coverage: the case above prints through toolStart, which also goes through
+    // notify. This pins it explicitly and directly, with a plain notice instead of
+    // toolStart, so the path no longer depends on which event is used: "hello" is
+    // printed by notify, and the answer that follows must still be set apart by
+    // the blank lines.
+    it("puts a blank line before an answer that follows a notice", () => {
+      const output = printed([
+        { type: "turnStart", prompt: "run the tests" },
+        { type: "notice", message: "hello" },
+        { type: "answer", text: "all tests pass" },
+      ]);
+
+      expect(output).toBe("hello\n\nall tests pass\n\n");
+    });
+
+    // Same hole for writeChunk, which serves the streamed model text. The chunk
+    // carries no newline of its own, so the blank line in the literal can only
+    // come from the answer's leading "\n", i.e. from the flag writeChunk raised.
+    it("puts a blank line before an answer that follows streamed text", () => {
+      const output = printed([
+        { type: "turnStart", prompt: "run the tests" },
+        { type: "text", delta: "partial" },
+        { type: "answer", text: "all tests pass" },
+      ]);
+
+      expect(output).toBe("partial\nall tests pass\n\n");
+    });
+
+    // The flag is per turn: turnStart must reset it, otherwise a fresh turn whose
+    // first output is the answer inherits the previous turn's state and picks up a
+    // leading blank line that belongs to nobody.
+    it("does not inherit the previous turn when a new turn starts", () => {
+      const output = printed([
+        { type: "turnStart", prompt: "first" },
+        { type: "answer", text: "all tests pass" },
+        { type: "turnStart", prompt: "second" },
+        { type: "answer", text: "nothing to do" },
+      ]);
+
+      expect(output).toBe("all tests pass\nnothing to do\n");
     });
   });
 
