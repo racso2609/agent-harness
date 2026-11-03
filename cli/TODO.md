@@ -264,13 +264,35 @@ formatSpawnOutcome(handle))`, es decir, comparaba la salida del adaptador contra
       `(no output)`, turno `failed` y los dos silencios. Se añadió el caso «says unknown error
       instead of a header with an empty body», que fija
       `spawn spawn-1 error (coder): unknown error\n` y cierra el hueco del error sin mensaje.
-      revert: el barrido de revert se hizo y está en verde como prueba — cambiar el separador
-      `": "` por `" =>> "` en `outcome.ts` deja el fichero en **4 failed / 7** (los cuatro casos
-      de `settling a child`), `"unknown error"` → `"unknown"` deja 1 failed (el caso del error
-      vacío), `"(no output)"` → `"(empty)"` deja 1 failed, `"turn failed"` → `"turn error"` deja
-      1 failed y `notify` emitiendo `\n\n` en `CliUiAdapter.ts` deja 5 failed. Todos los reverts
-      se restauraron. La aserción ya no es tautológica: cada mutación tiene un caso con nombre
-      que la caza, así que el test fija lo que el usuario lee y no que el renderer delegue.
+      revert: el barrido de revert se hizo y está en verde como prueba, con las cifras medidas una a
+      una sobre los **M = 12 casos** del fichero en el momento de medir. Cambiar el separador `": "`
+      por `" =>> "` en `outcome.ts:34,38` —las dos líneas que componen la cabecera— deja el fichero
+      en **4 failed / 12 casos (medido con M = 12)** (los cuatro casos de `settling a child`);
+      `"unknown error"` → `"unknown"` deja **1 failed / 12 casos (medido con M = 12)** (el caso del
+      error vacío); `"(no output)"` → `"(empty)"` deja **1 failed / 12 casos (medido con M = 12)**;
+      `"turn failed"` → `"turn error"` deja **1 failed / 12 casos (medido con M = 12)**; y `notify`
+      emitiendo `\n\n` en `CliUiAdapter.ts` deja **10 failed / 12 casos (medido con M = 12)**. Todos
+      los reverts se restauraron. Regla: M es solo el tamaño del fichero en el momento de medir, así
+      que cada vez que se añada o se quite un caso hay que volver a medir y actualizar M; lo que **no
+      caduca** es cuál es el caso con nombre que caza cada mutación, y eso es lo que hay que mantener
+      correcto. La aserción ya no es tautológica: cada mutación tiene un caso con nombre que la caza
+      porque cada caso compara la salida completa contra su literal, así que cualquier carácter
+      distinto rompe el `toBe` del caso que imprime esa cadena —el separador lo cazan los cuatro de
+      `settling a child`, que son los únicos que fijan una cabecera con cuerpo; el `"unknown error"`
+      lo caza el caso del error vacío, y `"(no output)"` y `"turn failed"` tienen un caso cada uno
+      porque son los únicos que los imprimen; y el `\n\n` de más lo cazan diez—. Un matiz que
+      conviene dejar escrito: los dos casos de silencio («says nothing when…») siguen verdes con el
+      `\n\n` porque imprimen cadena vacía y no hay salto de más que ver. Con eso el test fija lo que
+      el usuario lee y no que el renderer delegue.
+      turnPrinted: los tres sitios donde se pone la bandera en `cli/src/ui/CliUiAdapter.ts` (dentro
+      de `notify`, dentro de `writeChunk` y el reset a `false` en `case "turnStart"`) están ahora
+      discriminados uno a uno; borrar `this.turnPrinted = true;` de `notify()` deja **2 failed / 12
+      casos (medido con M = 12)** («puts a blank line before an answer that follows a notice» y el
+      preexistente «puts a blank line before and after an answer that follows output»), borrar la
+      asignación de `writeChunk()` deja **1 failed / 12 casos (medido con M = 12)** («puts a blank
+      line before an answer that follows streamed text») y quitar `this.turnPrinted = false;` de
+      `case "turnStart"` deja **1 failed / 12 casos (medido con M = 12)** («does not inherit the
+      previous turn when a new turn starts»).
       Done when: `cliAdapter.spec.ts` no importa `formatSpawnOutcome` ni `formatTurnOutcome`,
       sus casos comparan con `toBe` el literal completo y el barrido de revert del separador
       deja el fichero en rojo.

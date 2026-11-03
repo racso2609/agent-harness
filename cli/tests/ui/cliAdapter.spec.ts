@@ -108,6 +108,47 @@ describe("the line renderer", () => {
 
       expect(output).toBe("all tests pass\n");
     });
+    // turnPrinted is raised from three places. The two cases above only prove the
+    // answer reads the flag, not that a notice (which goes through notify) raises
+    // it, so dropping the assignment in notify would keep them green. This pins
+    // the notify path on its own: "hello" is printed by notify, and the answer
+    // that follows must still be set apart by the blank lines.
+    it("puts a blank line before an answer that follows a notice", () => {
+      const output = printed([
+        { type: "turnStart", prompt: "run the tests" },
+        { type: "notice", message: "hello" },
+        { type: "answer", text: "all tests pass" },
+      ]);
+
+      expect(output).toBe("hello\n\nall tests pass\n\n");
+    });
+
+    // Same hole for writeChunk, which serves the streamed model text. The chunk
+    // carries no newline of its own, so the blank line in the literal can only
+    // come from the answer's leading "\n", i.e. from the flag writeChunk raised.
+    it("puts a blank line before an answer that follows streamed text", () => {
+      const output = printed([
+        { type: "turnStart", prompt: "run the tests" },
+        { type: "text", delta: "partial" },
+        { type: "answer", text: "all tests pass" },
+      ]);
+
+      expect(output).toBe("partial\nall tests pass\n\n");
+    });
+
+    // The flag is per turn: turnStart must reset it, otherwise a fresh turn whose
+    // first output is the answer inherits the previous turn's state and picks up a
+    // leading blank line that belongs to nobody.
+    it("does not inherit the previous turn when a new turn starts", () => {
+      const output = printed([
+        { type: "turnStart", prompt: "first" },
+        { type: "answer", text: "all tests pass" },
+        { type: "turnStart", prompt: "second" },
+        { type: "answer", text: "nothing to do" },
+      ]);
+
+      expect(output).toBe("all tests pass\nnothing to do\n");
+    });
   });
 
   describe("closing a turn", () => {
