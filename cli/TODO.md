@@ -228,6 +228,33 @@ formatSpawnOutcome(handle))`, es decir, comparaba la salida del adaptador contra
       separador deja el fichero en rojo.
       Depends on: nada.
 
+## P6 — Continuación automática tras un hijo
+
+Punto del usuario: «cuando un delegate termine si aun hay trabajo que hacer la session debe seguir el trabajo que queda no esperar por mi». Hoy no lo hace: `SessionManager` inyecta el resultado del hijo asentado como mensaje `system` en el history del padre (`SessionManager.ts:592`), pero el turno del padre ya había terminado, así que `MainLoop` vuelve a `nextPrompt()` y la sesión se queda esperando input humano. El mecanismo para arrancar un turno sin usuario ya existe (`queue`/`pending` en `MainLoop`); falta decidir cuándo usarlo.
+
+- [ ] **Exponer si un hijo asentado dejó trabajo sin entregar**
+El CLI no puede decidir si continuar porque el core no dice si el resultado del hijo llegó antes o después del último turno del padre ni cuántos hijos quedaron sin entregar.
+Done when: una prueba en `core/tests/session/SessionManager.spec.ts` verifica que la API nueva devuelve los `spawnId` asentados cuyo resultado aún no ha entrado en un turno del padre, y vuelve a devolver lista vacía una vez entregados.
+Depends on: nada.
+Nota: el contrato vive como tarea espejo en `core/TODO.md` §9 («Exponer los hijos asentados con resultado sin entregar»).
+
+- [ ] **Arrancar un turno sin prompt cuando un hijo deja trabajo**
+`MainLoop` debe encolar un turno de continuación (mismo camino que `enqueue`) cuando un `spawnSettled` trae trabajo pendiente y el usuario no está escribiendo.
+Done when: existe un test (o, si el bucle no es montable en test, una guarda de fuente documentada igual que las de §P1) que fija que tras un `settled` con trabajo pendiente el CLI llama a `harness.ask` sin input del usuario y sin esperar a `nextPrompt`.
+Depends on: exponer si un hijo asentado dejó trabajo sin entregar.
+Decidir antes: si aplica solo con `--tui` o también en modo líneas, y si el turno automático pisa una línea que el usuario está escribiendo.
+
+- [ ] **Acotar las continuaciones automáticas**
+Sin tope, un hijo que deja trabajo cada vez encadena turnos infinitos y gasta tokens sin control.
+Done when: existe un límite configurable (en `config.sessions`) con default documentado y una prueba fija que al alcanzarlo no se arranca otro turno y se avisa al usuario.
+Depends on: arrancar un turno sin prompt cuando un hijo deja trabajo.
+Decidir antes: valor del default y si el contador se resetea con input del usuario.
+
+- [ ] **Contar el turno automático como continuación en el cierre del turno**
+El aviso de cierre (`formatTurnOutcome`) hoy describe el turno pasado; en una cadena automática debe indicar que la sesión sigue sola, para que el usuario no crea que el proceso quedó parado.
+Done when: un test de `cli/tests/ui/outcome.spec.ts` fija el texto de un turno encadenado y el silencio del turno final.
+Depends on: arrancar un turno sin prompt cuando un hijo deja trabajo.
+
 ## Deuda de proceso
 
 - [ ] **Decidir si se reescribe el asunto del commit `ec23080`**

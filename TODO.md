@@ -17,10 +17,11 @@ dependencias. Formato de cada lista: skill `core/skills/todo-format.md`.
 | TUI de pantalla completa y feedback del turno              | `cli/TODO.md` §P0–P3 | P0–P3 cerrados salvo las tareas nuevas abiertas en §P1 y §P3 |
 | Progreso en vivo de los hijos                              | `core/TODO.md` §11   | nuevo, c3                                                    |
 | Instalación y distribución                                 | `cli/TODO.md` §P4    | nuevo, c3                                                    |
+| Continuación automática tras un hijo delegado | `cli/TODO.md` §P6 + espejo en `core/TODO.md` §9 | nuevo, c3 |
 
 ## Origen de las tareas nuevas
 
-Los tres puntos que había en este archivo se trocearon así:
+Los puntos y las notas sueltas que había en este archivo se cerraron así:
 
 - **easy install** → `cli/TODO.md` §P4 (4 tareas).
 - **core gateway persistente (cronjobs + webhooks)** → `core/TODO.md` §10 (9 tareas).
@@ -36,6 +37,15 @@ Las cuatro notas sueltas que había en este archivo se cerraron así:
 - **animación del cursor para saber dónde está el foco** → `cli/TODO.md` §P3.
 - **limitar el número de caracteres de las secciones colapsadas (`ctrl+t`/`ctrl+r`)**
   → `cli/TODO.md` §P3.
+
+Una nota suelta más, añadida después, se cerró así:
+
+- **cuando un delegate termine si aun hay trabajo que hacer la session debe seguir el
+trabajo que queda no esperar por mi** → c3: se troceó en las 4 tareas de `cli/TODO.md`
+§P6 (exponer si un hijo asentado dejó trabajo sin entregar, arrancar el turno sin
+prompt, acotar las continuaciones y contarlas en el cierre del turno) más la tarea de
+contrato de `core/TODO.md` §9, porque hoy el CLI cierra el turno y vuelve a
+`nextPrompt()` y no existe API para saber si un hijo dejó trabajo sin entregar.
 
 ## Descartados
 
