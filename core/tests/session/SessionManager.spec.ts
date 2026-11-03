@@ -896,8 +896,25 @@ describe("SessionManager spawn", () => {
     return chat;
   };
 
-  const makeSession = (overrides: Record<string, unknown> = {}) => {
-    const session = new SessionManager(makeConfig({ ...spawnConfig, ...overrides }), makeStore());
+// The store keeps no copy of what it is handed: the mock receives the very
+// record the manager keeps mutating (history is the same array), so a
+// snapshot taken after the fact reads a newer state. Cloning on every call is
+// what "exactly as SessionStore would write it" means here: a JSON round trip
+// plus the version the store stamps, because a record without it would be
+// migrated as v1 on the next load.
+const recordingStore = (saved: unknown[]) => {
+const store = makeStore();
+store.save = vi.fn((record: unknown) => {
+saved.push(JSON.parse(JSON.stringify({ ...(record as object), version: 4 })));
+}) as unknown as SessionStore["save"];
+return store;
+};
+
+const makeSession = (overrides: Record<string, unknown> = {}, saved: unknown[] = []) => {
+const session = new SessionManager(
+makeConfig({ ...spawnConfig, ...overrides }),
+recordingStore(saved),
+);
     session.provider = new OpenAiProvider("https://api.example.com", "key", "model");
     session.providerName = "openai";
     session.model = "model";
@@ -1429,6 +1446,120 @@ describe("SessionManager spawn", () => {
     session.pendingSpawns().length = 0;
 
     expect(session.pendingSpawns().map((entry) => entry.spawnId)).toEqual([handle.spawnId]);
+  });
+
+  // A settle without a parent turn leaves the result queued and the session
+  // persisted. /resume used to drop that queue, losing the child in silence
+  // while childHistory still listed it.
+  it("queues a settled child that was never delivered when the session is resumed", async () => {
+    stubProvider("child answer");
+ const saved: unknown[] = [];
+ const session = makeSession({}, saved);
+
+    const handle = session.spawn("coder", "do the thing");
+    await session.waitSpawn(handle.spawnId);
+ const persisted = saved.at(-1) as Record<string, unknown>;
+
+ const resumed = makeSession({}, saved);
+    resumed.store.load = vi.fn(() => persisted) as unknown as typeof resumed.store.load;
+    await expect(resumed.load("session-1")).resolves.toBe(true);
+
+    expect(resumed.pendingSpawns().map((entry) => entry.spawnId)).toEqual([handle.spawnId]);
+
+    await parentTurn(resumed, "what did the child say?");
+
+    expect(deliveredFor(resumed, handle.spawnId)).toEqual([
+      `[spawn ${handle.spawnId} · coder · done]\nchild answer`,
+    ]);
+    expect(resumed.pendingSpawns()).toEqual([]);
+
+    // Persist and resume once more: the result delivered above must not be
+    // handed to the parent a second time.
+ const resaved = saved.at(-1) as Record<string, unknown>;
+    const third = makeSession();
+    third.store.load = vi.fn(() => resaved) as unknown as typeof third.store.load;
+    await expect(third.load("session-1")).resolves.toBe(true);
+
+    expect(third.pendingSpawns()).toEqual([]);
+    expect(deliveredFor(third, handle.spawnId)).toEqual([
+      `[spawn ${handle.spawnId} · coder · done]\nchild answer`,
+    ]);
+  });
+
+  it("does not queue a child already delivered before the resume", async () => {
+    // A transport that answers both the child and the parent: the parent turn
+    // is the one asking for "next turn".
+    vi.spyOn(OpenAiProvider.prototype, "initialize").mockResolvedValue();
+    vi.spyOn(OpenAiProvider.prototype, "setModel").mockReturnValue(true);
+    vi.spyOn(OpenAiProvider.prototype, "getContextWindow").mockReturnValue(1000);
+    vi.spyOn(OpenAiProvider.prototype, "chat").mockImplementation(async (history) =>
+      history.some((message) => message.content === "next turn")
+        ? stopTurn("parent ok")
+        : stopTurn("child answer"),
+    );
+ const saved: unknown[] = [];
+ const session = makeSession({}, saved);
+ // A real session starts with its persona at history[0], and load() rewrites
+ // that slot when the record carries an agentId: without it the child result,
+ // which would be the first message, is the one overwritten instead.
+ session["applySystemPrompt"]();
+    vi.spyOn(session, "classifyAction").mockResolvedValue("textGeneration");
+
+    const handle = session.spawn("coder", "do the thing");
+    await session.waitSpawn(handle.spawnId);
+    await session.ask("next turn");
+
+ // The snapshot is taken when store.save is called (see recordingStore), so
+ // it holds this record and not a later mutation of it.
+ const persisted = saved.at(-1) as Record<string, unknown>;
+
+    const resumed = makeSession();
+    resumed.store.load = vi.fn(() => persisted) as unknown as typeof resumed.store.load;
+    await expect(resumed.load("session-1")).resolves.toBe(true);
+
+    expect(resumed.pendingSpawns()).toEqual([]);
+    expect(deliveredFor(resumed, handle.spawnId)).toEqual([
+      `[spawn ${handle.spawnId} · coder · done]\nchild answer`,
+    ]);
+
+    const restored = resumed.history.length;
+    await parentTurn(resumed);
+
+    expect(resumed.history.length).toBe(restored + 2);
+    expect(deliveredFor(resumed, handle.spawnId)).toEqual([
+      `[spawn ${handle.spawnId} · coder · done]\nchild answer`,
+    ]);
+  });
+
+  it("does not queue a child that was still running when the process died", async () => {
+    stubProvider();
+    const session = makeSession();
+    const running = handleWith({
+      spawnId: "spawn-running",
+      status: "running",
+      startedAt: new Date(0).toISOString(),
+    });
+
+    session.store.load = vi.fn(() => ({
+      id: "session-1",
+      createdAt: new Date(0).toISOString(),
+      updatedAt: new Date(0).toISOString(),
+      provider: "openai",
+      model: "model",
+      agentId: "default",
+      history: [],
+      spawns: [running],
+    })) as unknown as typeof session.store.load;
+
+    await expect(session.load("session-1")).resolves.toBe(true);
+
+    expect(session.pendingSpawns()).toEqual([]);
+
+    vi.spyOn(session, "classifyAction").mockResolvedValue("textGeneration");
+    session.provider!.chat = vi.fn(async () => stopTurn("parent ok"));
+    await session.ask("next turn");
+
+    expect(deliveredFor(session, "spawn-running")).toEqual([]);
   });
 
   it("returns undefined/empty results when nothing was spawned", async () => {

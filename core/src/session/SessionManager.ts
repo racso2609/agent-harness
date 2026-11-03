@@ -196,8 +196,14 @@ class SessionManagerImpl implements SessionManager {
   protected spawnHistory: SpawnHandle[] = [];
   // Children that already settled but whose result has not been handed to a
   // parent turn yet, in settlement order. The push into history is what marks
-  // a child as delivered, so there is no per-child flag.
+// a child as delivered, so the queue never holds the same one twice.
   protected undelivered: SpawnHandle[] = [];
+
+// Ids of the children whose result already entered the history. Persisted so
+// a resume does not hand the parent the same result twice: the injected
+// message itself is not a reliable marker, since history compaction may
+// drop it while the child stays settled.
+protected delivered = new Set<string>();
 
   constructor(config = new Config(), store = new SessionStore()) {
     this.config = config;
@@ -276,6 +282,21 @@ class SessionManagerImpl implements SessionManager {
     // Children from a previous run are history only: they cannot be
     // reattached, and their status is whatever it was when persisted.
     this.spawnHistory = record.spawns ?? [];
+
+// A settled child whose result never entered a parent turn is still owed
+// to the parent: queue it so the next turn delivers it. Children already
+// delivered are skipped, or /resume would inject their result twice. A
+// child still "running" died with the previous process and has no result
+// to hand over (the CLI already renders it as interrupted), so it is not
+// queued. Records written before deliveredSpawns existed read as "nothing
+// delivered", which is why SESSION_VERSION does not need to change: no
+// stored field changes meaning, and the worst case is an older result
+// delivered once more.
+const deliveredIds = new Set(record.deliveredSpawns ?? []);
+this.delivered = deliveredIds;
+this.undelivered = this.spawnHistory.filter(
+(handle) => handle.status !== "running" && !deliveredIds.has(handle.spawnId),
+);
     // Sessions persisted with an agent already start with its persona. Older
     // sessions keep their system messages (e.g. compacted memory) untouched.
     this.applySystemPrompt(Boolean(record.agentId));
@@ -344,6 +365,13 @@ class SessionManagerImpl implements SessionManager {
   save() {
     if (!this.provider || !this.providerName || !this.model) return;
 
+// Only the children still in the transcript, so the list can never point at
+// a spawnId the record no longer carries. Empty means "nothing delivered",
+// which the next load reads the same as a missing field.
+const deliveredSpawns = this.spawnHistory
+.filter((handle) => this.delivered.has(handle.spawnId))
+.map((handle) => handle.spawnId);
+
     const record: SessionRecord = {
       id: this.sessionId,
       createdAt: this.createdAt,
@@ -355,7 +383,8 @@ class SessionManagerImpl implements SessionManager {
       history: this.history,
       usage: this.usage,
       costUsd: this.costUsd,
-      spawns: this.spawnHistory.length ? this.spawnHistory : undefined,
+spawns: this.spawnHistory.length ? this.spawnHistory : undefined,
+deliveredSpawns: deliveredSpawns.length ? deliveredSpawns : undefined,
     };
 
     this.store.save(record);
@@ -625,6 +654,7 @@ class SessionManagerImpl implements SessionManager {
         role: "system",
         content: this.formatSpawnResult(handle),
       });
+	this.delivered.add(handle.spawnId);
     }
     // Persist as soon as the results are delivered, not only at the end of the
     // turn: the queue is drained here, so a turn that throws after the flush
