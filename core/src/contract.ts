@@ -110,6 +110,10 @@ export interface IHarness {
   // Every child this session ever launched, including the ones restored from a
   // previous run. Read-only: a restored child is never reattached.
   childHistory(): SpawnHandle[];
+  // Settled children whose result has not entered a parent turn yet, in
+  // settlement order. Empty when nothing is left to deliver. A read-only
+  // view: reading it never drains it, delivery happens on the next parent turn.
+  pendingSpawns(): SpawnHandle[];
   // Live-only subscription to children starting/finishing. Returns unsubscribe.
   onSpawnEvent(listener: SpawnEventListener): () => void;
   waitSpawn(spawnId: string): Promise<SpawnHandle | undefined>;

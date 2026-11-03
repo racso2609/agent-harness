@@ -131,6 +131,8 @@ interface SessionManager {
   listSpawns: () => SpawnHandle[];
   // Children of this session, persisted across runs. Read-only after /resume.
   childHistory: () => SpawnHandle[];
+  // Settled children whose result has not entered a parent turn yet.
+  pendingSpawns: () => SpawnHandle[];
   // Waits for a background child to settle.
   waitSpawn: (spawnId: string) => Promise<SpawnHandle | undefined>;
   // Waits for every child (or the given ids) and returns their handles.
@@ -192,6 +194,10 @@ class SessionManagerImpl implements SessionManager {
   // Children this session launched, kept in launch order so the transcript
   // survives /resume. Restored read-only: children are never reattached.
   protected spawnHistory: SpawnHandle[] = [];
+  // Children that already settled but whose result has not been handed to a
+  // parent turn yet, in settlement order. The push into history is what marks
+  // a child as delivered, so there is no per-child flag.
+  protected undelivered: SpawnHandle[] = [];
 
   constructor(config = new Config(), store = new SessionStore()) {
     this.config = config;
@@ -534,6 +540,13 @@ class SessionManagerImpl implements SessionManager {
     return [...this.spawnHistory];
   }
 
+  // Children already settled (done or error) whose result has not entered a
+  // parent turn yet, in settlement order. Reading it does not drain the list:
+  // it is a copy, and only flushPendingSpawns() delivers the results.
+  pendingSpawns(): SpawnHandle[] {
+    return [...this.undelivered];
+  }
+
   waitSpawn(spawnId: string) {
     if (!this.spawns) return Promise.resolve(undefined);
     return this.spawns.wait(spawnId);
@@ -574,27 +587,45 @@ class SessionManagerImpl implements SessionManager {
       },
     });
 
-    // When a child settles, surface only its final answer to the parent as a
+    // When a child settles, queue only its final answer for the parent as a
     // system message so the next turn can take it into account. The full child
     // history is never shared; the text is capped to avoid inflating context.
+    // Delivery waits for the next parent turn, so pendingSpawns() can report
+    // what is still unread.
     this.spawns.on((event) => {
-      if (event.type === "settled") {
-        // Keep the persisted history in sync with the real outcome.
-        this.spawnHistory = this.spawnHistory.map((entry) =>
-          entry.spawnId === event.handle.spawnId ? event.handle : entry,
-        );
-        // A child can finish without another turn, so persist here too.
-        this.save();
-      }
-
       if (event.type !== "settled") return;
-      this.history.push({
-        role: "system",
-        content: this.formatSpawnResult(event.handle),
-      });
+
+      // Keep the persisted history in sync with the real outcome.
+      this.spawnHistory = this.spawnHistory.map((entry) =>
+        entry.spawnId === event.handle.spawnId ? event.handle : entry,
+      );
+      // Queue the result for the next parent turn, replacing any previous entry
+      // for the same child so a re-settle cannot enqueue it twice.
+      this.undelivered = [
+        ...this.undelivered.filter((entry) => entry.spawnId !== event.handle.spawnId),
+        event.handle,
+      ];
+      // A child can finish without another turn, so persist here too.
+      this.save();
     });
 
     return this.spawns;
+  }
+
+  // Hands every queued child result to the parent as a system message, in
+  // settlement order. The push into history is the delivery marker, so the
+  // queue is drained in one go.
+  protected flushPendingSpawns() {
+    if (!this.undelivered.length) return;
+
+    const pending = this.undelivered;
+    this.undelivered = [];
+    for (const handle of pending) {
+      this.history.push({
+        role: "system",
+        content: this.formatSpawnResult(handle),
+      });
+    }
   }
 
   // Builds the compact system message injected into the parent's history once
@@ -631,6 +662,10 @@ class SessionManagerImpl implements SessionManager {
   // Classifies the prompt and dispatches it to text or image generation.
   async ask(prompt: string, onEvent?: ChatEventListener) {
     if (!this.provider) throw new Error("Session not initialized");
+
+    // Deliver before the turn reads history, so the parent starts the turn
+    // with the child results already in context instead of mid-conversation.
+    this.flushPendingSpawns();
 
     const action = await this.classifyAction(prompt);
 

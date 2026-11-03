@@ -68,6 +68,9 @@ class SessionStore {
 
       // v4 added the spawn history. Older records simply have none; normalising
       // here keeps callers from branching on the version.
+      // The spawn summary and durationMs are optional additions over v4: a record
+      // written before them simply lacks the keys, which is the same shape as a
+      // child that has not settled, so no version bump or migration is needed.
       record.spawns ??= [];
 
       return record;

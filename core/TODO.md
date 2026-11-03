@@ -188,7 +188,7 @@
 - [x] **Incluir un resumen de cierre en `AgentResponse`**
       hecho: `TurnOutcome { status: "completed" | "toolError" | "incomplete", pending: string[], next? }` y `AgentResponse.outcome?`. `runAgentLoop` acumula las tools que fallaron (`pending`) y distingue el corte por `tools.maxIterations` (`incomplete` + qué hacer). El campo es opcional, así ningún `toEqual` existente cambió. 3 tests (completed, toolError con la tool nombrada, incomplete por tope de iteraciones).
       Nota: hoy lo rellena `runAgentLoop`; el camino de `generateImage` no lo emite (no hay turno ReAct que resumir).
-- [ ] **Añadir resumen del hijo y duración a `SpawnHandle`**
+- [x] **Añadir resumen del hijo y duración a `SpawnHandle`**
       `SpawnHandle` no lleva ni un resumen de lo que hizo el hijo ni una duración
       explícita (`startedAt`/`finishedAt` como ISO obligan a recalcular), así que la
       franja del CLI mide el tiempo por su cuenta y, al reanudar una sesión, el resumen
@@ -198,6 +198,7 @@
       al asentar, `durationMs` derivado de `startedAt`/`finishedAt`) y `childHistory()`
       los devuelve al reanudar, con un test en `tests/session/SessionManager.spec.ts`
       que lo comprueba; el CLI pinta la duración desde `durationMs` sin recalcular.
+hecho: `SpawnHandle.summary?: string` y `durationMs?: number`. Ambos los fija `SpawnManager.settle()` (spawn.ts), el punto único al que desemboca el `finally` de `run()`, así que éxito, error, timeout y cancel pasan por ahí; `finishedAt` se fija en el mismo sitio. `durationMs` = `Date.parse(finishedAt) - Date.parse(startedAt)` (clamp a 0 si el reloj va hacia atrás) y `summary` se deriva del propio hijo — su `result` o su `error`, aplanado a una línea y capado a 120 chars — para no inventar una llamada extra al modelo; un hijo sin texto deja `summary` en `undefined`. `snapshot()` los copia, así que `poll`/`list`/`wait`/`collect` y el evento `settled` los llevan, y `save()` persiste `spawnHistory` (que el listener de `settled` actualiza) por lo que `childHistory()` los devuelve al reanudar. Sin subir `SESSION_VERSION` (sigue en 4): son campos opcionales y un record viejo simplemente no los trae (`undefined`, nunca `NaN` ni `""`), igual que un hijo sin asentar. 4 tests nuevos en `tests/session/SessionManager.spec.ts` (duración + resumen en éxito, duración en error, supervivencia al guardado/recarga, y record antiguo sin los campos); el test que fija la forma del hijo en `running` ahora comprueba que los dos campos aún no están. `formatSpawnResult` y el texto inyectado en el padre no cambian. 233 tests (core) + 188 (cli) + lint + prettier + tsc verdes.
       Depends on: devolver estado consultable de los hijos.
 
 - [ ] **Exponer los hijos asentados con resultado sin entregar**

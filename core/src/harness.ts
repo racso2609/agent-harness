@@ -125,6 +125,10 @@ class Harness implements IHarness {
     return this.session.childHistory();
   }
 
+  pendingSpawns(): SpawnHandle[] {
+    return this.session.pendingSpawns();
+  }
+
   waitSpawn(spawnId: string) {
     return this.session.waitSpawn(spawnId);
   }
