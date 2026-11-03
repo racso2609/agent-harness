@@ -83,7 +83,7 @@ class CliUiAdapter implements UiAdapter {
         this.turnPrinted = false;
         break;
       case "turnEnd": {
-        const closing = formatTurnOutcome(event.outcome);
+        const closing = formatTurnOutcome(event.outcome, event.continuation);
         if (closing) this.notify(closing);
         break;
       }

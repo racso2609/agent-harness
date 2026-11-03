@@ -142,7 +142,7 @@ it("evaluates it again when a turn ends", () => {
 // This is the only path that continues a child that settled mid-turn or
 // behind an approval dialog: ask() held the loop, so the settle itself
 // could not start anything.
-const turn = between('this.ui.render({ type: "turnEnd"', "} catch (err) {");
+const turn = between('this.ui.render({ type: "turnStart"', "} catch (err) {");
 
 expect(turn).toContain("this.maybeContinue();");
 });
@@ -195,7 +195,7 @@ expect(mainLoop).toContain("onSubmit: (prompt) => this.enqueueFromUser(prompt)")
 it("never continues in line mode", () => {
 // The line renderer reads stdin itself: no parked resolver, no draft, so a
 // continuation could only steal a turn the user is typing into.
-const body = between("protected nextPrompt()", "protected async loop()");
+const body = between("protected async nextPrompt()", "protected async loop()");
 
 expect(body).toContain("if (!this.isTui())");
 expect(body.indexOf("maybeContinue")).toBe(-1);

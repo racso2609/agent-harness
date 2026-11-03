@@ -187,27 +187,33 @@ const ui = this.ui as Partial<TuiUiAdapter>;
 return this.isTui() && typeof ui.hasDraft === "function" && ui.hasDraft();
 }
 
-// Next prompt: from the TUI queue, or from stdin in line mode.
-protected nextPrompt(): Promise<string> {
+// Next prompt: from the TUI queue, or from stdin in line mode. A queued
+// continuation is marked, so the turn it starts knows nobody asked for it.
+protected async nextPrompt(): Promise<QueuedPrompt> {
 // The line renderer reads stdin directly, so it has no queue to park a
 // resolver in and no draft to respect: a continuation would have to steal a
 // turn the user is about to type into. Continuations are TUI-only.
 if (!this.isTui()) {
-return input("Type your prompt: ", { commands: this.commands.list() });
+const text = await input("Type your prompt: ", { commands: this.commands.list() });
+
+return { text, continuation: false };
 }
 
 const queued = this.queue.shift();
-if (queued !== undefined) return Promise.resolve(queued.text);
+if (queued !== undefined) return queued;
 
-return new Promise<string>((resolve) => {
+const text = await new Promise<string>((resolve) => {
 this.pending = resolve;
 });
+
+return { text, continuation: false };
 }
 
 // Main prompt loop: reads, dispatches to the harness and renders output.
 protected async loop() {
 while (true) {
-const prompt = (await this.nextPrompt()).trim();
+const turn = await this.nextPrompt();
+const prompt = turn.text.trim();
 if (!prompt) continue;
 
 if (prompt.startsWith("/")) {
@@ -245,11 +251,19 @@ this.ui.render({ type: "answer", text });
 for (const image of images ?? []) {
 await this.ui.renderImage(image.url);
 }
-this.ui.render({ type: "turnEnd", text, outcome });
-this.printStatus();
 // The children that settled while this turn ran are judged now, with the
 // loop free to take a prompt again and the turn no longer holding ask().
 this.maybeContinue();
+// A turn nobody asked for that queues another one goes on alone: its close
+// says so instead of looking like a stopped process. The last turn of the
+// chain (a completed one queues nothing) closes like any other turn.
+this.ui.render({
+type: "turnEnd",
+text,
+outcome,
+continuation: turn.continuation && this.queue.some((entry) => entry.continuation),
+});
+this.printStatus();
 } catch (err) {
 this.ui.render({
 type: "notice",

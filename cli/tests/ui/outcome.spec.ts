@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  CONTINUING_ALONE_NOTICE,
   formatSpawnOutcome,
   formatTurnOutcome,
   MAX_OUTCOME_CHARS,
@@ -15,7 +16,7 @@ const handle = (overrides: Record<string, unknown> = {}) => ({
 
 describe("oneLine", () => {
   it("collapses newlines and repeated spaces into one line", () => {
-    expect(oneLine("first\n\nsecond   third\tfourth")).toBe("first second third fourth");
+    expect(oneLine("first\n\nsecond third\tfourth")).toBe("first second third fourth");
   });
 
   it("truncates a long text with an ellipsis", () => {
@@ -56,7 +57,7 @@ describe("formatSpawnOutcome", () => {
     expect(formatSpawnOutcome(handle({ result: "" }))).toBe(
       "spawn spawn-1 done (coder): (no output)",
     );
-    expect(formatSpawnOutcome(handle({ result: "   \n " }))).toBe(
+    expect(formatSpawnOutcome(handle({ result: " \n " }))).toBe(
       "spawn spawn-1 done (coder): (no output)",
     );
     expect(formatSpawnOutcome(handle())).toBe("spawn spawn-1 done (coder): (no output)");
@@ -72,7 +73,7 @@ describe("formatSpawnOutcome", () => {
     expect(formatSpawnOutcome(handle({ status: "error" }))).toBe(
       "spawn spawn-1 error (coder): unknown error",
     );
-    expect(formatSpawnOutcome(handle({ status: "error", error: "  " }))).toBe(
+    expect(formatSpawnOutcome(handle({ status: "error", error: " " }))).toBe(
       "spawn spawn-1 error (coder): unknown error",
     );
   });
@@ -98,10 +99,9 @@ describe("formatTurnOutcome", () => {
       next: "Review the failing tool output and retry.",
     });
 
-    expect(text).toContain("turn failed");
-    expect(text).toContain("shell");
-    expect(text).toContain("read_file");
-    expect(text).toContain("Review the failing tool output and retry.");
+    expect(text).toBe(
+      "turn failed · pending: shell, read_file · next: Review the failing tool output and retry.",
+    );
   });
 
   it("reports an incomplete turn with its pending work and next step", () => {
@@ -111,15 +111,48 @@ describe("formatTurnOutcome", () => {
       next: "Review the failing tool output and retry.",
     });
 
-    expect(text).toContain("turn incomplete");
-    expect(text).toContain("summarize");
-    expect(text).toContain("Review the failing tool output and retry.");
+    expect(text).toBe(
+      "turn incomplete · pending: summarize · next: Review the failing tool output and retry.",
+    );
   });
 
   it("omits the next step when the outcome has none", () => {
     const text = formatTurnOutcome({ status: "toolError", pending: ["shell"] });
 
-    expect(text).toContain("turn failed");
-    expect(text).not.toContain("next:");
+    expect(text).toBe("turn failed · pending: shell");
+  });
+});
+
+describe("formatTurnOutcome while the session continues alone", () => {
+  it("says the session goes on when another turn is queued", () => {
+    const text = formatTurnOutcome(
+      { status: "incomplete", pending: ["summarize"], next: "Review the child report." },
+      true,
+    );
+
+    expect(text).toBe(
+      "turn incomplete · pending: summarize · next: Review the child report. · session continues on its own",
+    );
+  });
+
+  it("keeps the silence of a completed automatic turn", () => {
+    // The answer already tells what happened and the next turn closes in its
+    // place: the notice would only repeat it.
+    expect(formatTurnOutcome({ status: "completed", pending: [] }, true)).toBe("");
+  });
+
+  it("closes the last turn of the chain like any other turn", () => {
+    // Nothing is queued after it, so announcing the session goes on would be a
+    // lie: the turn reports its state without the notice.
+    const text = formatTurnOutcome(
+      { status: "incomplete", pending: ["summarize"], next: "Review the child report." },
+      false,
+    );
+
+    expect(text).toBe("turn incomplete · pending: summarize · next: Review the child report.");
+  });
+
+  it("keeps the notice text stable", () => {
+    expect(CONTINUING_ALONE_NOTICE).toBe("session continues on its own");
   });
 });

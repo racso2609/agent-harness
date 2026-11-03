@@ -27,6 +27,10 @@ export type UiEvent =
       type: "turnEnd";
       text?: string;
       outcome?: { status: string; pending: string[]; next?: string };
+      // The turn was started by the loop, not by the user, and the loop
+      // already queued the next one: the session goes on alone. Optional,
+      // so a renderer that never receives it closes the turn as before.
+      continuation?: boolean;
     }
   | { type: "spawn"; handle: SpawnHandle }
   // Children persisted in the session (previous runs). Sent once after loading,

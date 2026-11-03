@@ -2,6 +2,11 @@
 // child agent and how the turn itself ended. Both renderers share them so the
 // line mode and the TUI never drift apart.
 
+// Appended to the closing line of a turn that was started without the user and
+// that will be followed by another turn of the same chain: without it a silent
+// screen reads as a stopped process.
+export const CONTINUING_ALONE_NOTICE = "session continues on its own";
+
 // A settled child can carry a long, multi-line result; the transcript only
 // gets one readable line of it.
 export const MAX_OUTCOME_CHARS = 200;
@@ -44,11 +49,20 @@ export const formatSpawnOutcome = (handle: {
 // Closing line of a turn. A completed turn says nothing: the answer is the
 // summary and the transcript stays clean. Anything else reports the status,
 // what is still pending and the concrete next step.
-export const formatTurnOutcome = (outcome?: {
-  status: string;
-  pending: string[];
-  next?: string;
-}): string => {
+//
+// `more` is true when the session will run another turn on its own (nobody is
+// waiting for the user): the close says so instead of leaving a still screen
+// that reads as a stopped process. A completed turn stays silent either way,
+// because the answer already says what happened and the next turn closes in
+// its place.
+export const formatTurnOutcome = (
+  outcome?: {
+    status: string;
+    pending: string[];
+    next?: string;
+  },
+  more = false,
+): string => {
   if (!outcome || outcome.status === "completed") return "";
 
   const label =
@@ -62,6 +76,7 @@ export const formatTurnOutcome = (outcome?: {
 
   if (outcome.pending.length) parts.push(`pending: ${outcome.pending.join(", ")}`);
   if (outcome.next) parts.push(`next: ${outcome.next}`);
+  if (more) parts.push(CONTINUING_ALONE_NOTICE);
 
   return parts.join(" · ");
 };

@@ -268,8 +268,9 @@ class TuiUiAdapter implements UiAdapter {
         this.finishStream("answer");
         this.finishStream("reasoning");
         this.state = { ...this.state, activity: undefined, running: false };
-        // The closing line is only printed when the turn did not complete.
-        const closing = formatTurnOutcome(event.outcome);
+        // The closing line is only printed when the turn did not complete, or
+        // when the session goes on by itself (the screen would look stopped).
+        const closing = formatTurnOutcome(event.outcome, event.continuation);
         if (closing) {
           this.pushLine({ role: "notice", text: closing });
           return;

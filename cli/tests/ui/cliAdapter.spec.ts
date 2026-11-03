@@ -175,5 +175,31 @@ describe("the line renderer", () => {
 
       expect(output).toBe("");
     });
+
+    it("says the session goes on when another turn is queued", () => {
+      const output = printed([
+        {
+          type: "turnEnd",
+          outcome: {
+            status: "incomplete",
+            pending: ["summarize"],
+            next: "Review the child report.",
+          },
+          continuation: true,
+        },
+      ]);
+
+      expect(output).toBe(
+        "turn incomplete · pending: summarize · next: Review the child report. · session continues on its own\n",
+      );
+    });
+
+    it("says nothing when the last automatic turn completed", () => {
+      const output = printed([
+        { type: "turnEnd", outcome: { status: "completed", pending: [] }, continuation: true },
+      ]);
+
+      expect(output).toBe("");
+    });
   });
 });
