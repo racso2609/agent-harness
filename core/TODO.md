@@ -141,7 +141,7 @@
       nota (2026-11-02): `default` diverge además en algo funcional, no de texto: la copia de runtime dice `approval: auto` y el repo `ask`. Con `ask`, `git`/`pnpm`/`tsc`/`vitest` no piden permiso (`READ_ONLY_COMMANDS` en `tools/shellPolicy.ts`), pero cada `writeFile` sí — y en un hijo headless sin handler la respuesta es **deny**, no una pregunta (`SessionManager.ts:855`). Por eso `approval` no se toca en el ritual de agentes: se decide en una tarea propia.
 
 9. session reporting (lo que necesita la UI)
-   ESTADO: **§9 cerrado** (7/7). La superficie que consume el histórico desde el CLI ya existe (`childHistory()`) y el CLI la pinta al reanudar (`cli/TODO.md` §P1).
+   ESTADO: **§9 en curso** (7/8): cerrada la superficie que consume el histórico desde el CLI (`childHistory()`, pintada al reanudar en `cli/TODO.md` §P1); abierta la entrada 7 del orden sugerido (hijos asentados con resultado sin entregar).
    Formato de esta sección: ver la skill `todo-format`. Las secciones 0–8 se dejan como están (histórico de decisiones).
    Contexto: el CLI va a una TUI de pantalla completa (ver `cli/TODO.md` §P0) que necesita saber _qué está corriendo ahora mismo_ y _qué pasó_. Hoy `SpawnManager` emite `started`/`settled` in-memory y `SessionManager` inyecta el resultado al padre en el turno siguiente, pero no hay forma pública de reconstruir el estado ni de recibir eventos sin acoplarse a `SessionManagerImpl`.
 
@@ -200,6 +200,12 @@
       que lo comprueba; el CLI pinta la duración desde `durationMs` sin recalcular.
       Depends on: devolver estado consultable de los hijos.
 
+- [ ] **Exponer los hijos asentados con resultado sin entregar**
+Hoy el resultado del hijo se inyecta como mensaje `system` en el history del padre (`SessionManager.ts:592`) y desde fuera nadie puede saber si esa entrega ya ocurrió; el CLI necesita saberlo para continuar solo tras un `delegate`.
+Done when: una prueba en `core/tests/session/SessionManager.spec.ts` fija que un hijo asentado con el padre sin turno posterior sigue en la lista y solo desaparece cuando el padre ejecuta un turno que inyecta su resultado como mensaje system (el punto de inyección en SessionManager.ts), y que la lista vuelve vacía cuando ya no queda ningún hijo sin entregar.
+Consumidor: `cli/TODO.md` §P6, tarea «Arrancar un turno sin prompt cuando un hijo deja trabajo».
+Depends on: nada.
+
 ### 9.1 orden sugerido
 
 1. [x] Contrato: `SpawnEvent`/`SpawnStatus` reexportados + `listSpawns()` ya expuesto en `IHarness`.
@@ -208,8 +214,9 @@
 4. [x] Persistencia de handles + migración de `SessionStore`.
 5. [x] `ToolContext.onOutput` (shell vivo).
 6. [x] Resumen de cierre estructurado.
+7. [ ] Hijos asentados con resultado sin entregar (desbloquea `cli/TODO.md` §P6).
 
-Nota: los puntos 1–2 desbloquean `cli/TODO.md` §P1; el 3 desbloquea §P3.
+Nota: los puntos 1–2 desbloquean `cli/TODO.md` §P1; el 3 desbloquea §P3; el 7 desbloquea §P6.
 
 10. gateway persistente (cronjobs + webhooks)
     Formato de esta sección: ver la skill `todo-format`. Las secciones 0–9 se dejan como están.
