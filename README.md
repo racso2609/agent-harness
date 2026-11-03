@@ -302,6 +302,39 @@ queda escrita en el agente y no se mete nada por detrás. `senior-architect`,
 - El índice crece con el número de skills: por eso cada descripción se recorta a
   `maxIndexChars`.
 
+## Renderers, teclas y logs
+
+El CLI trae dos renderers sobre el mismo contrato: modo líneas (por defecto) y la
+TUI de pantalla completa (`--tui`). La lógica del turno es idéntica en ambos.
+
+### Teclas de la TUI
+
+| Tecla                 | Qué hace                                                      |
+| --------------------- | ------------------------------------------------------------- |
+| `pageUp` / `pageDown` | Una página de historial (deja una línea de contexto)          |
+| `ctrl+u` / `ctrl+d`   | Media página                                                  |
+| `↑` / `↓`             | Una línea                                                     |
+| `home` / `end`        | Tope / fondo del historial                                    |
+| `ctrl+r` / `ctrl+t`   | Colapsar o expandir todo el razonamiento / la salida de tools |
+| `ctrl+c`              | Salir                                                         |
+
+El historial se mide en líneas reales a la altura del terminal: si estás desplazado
+hacia arriba, la respuesta que se está generando **no** mueve la vista; al volver al
+fondo el seguimiento se re-engancha solo. La rueda del ratón no scrollea: ink 8 no
+reporta eventos de ratón.
+
+### Logs
+
+Los logs del core (`logger.info`, `logger.warn`) **no** se muestran salvo que se pida
+explícitamente: por defecto solo pasan `error` y `fatal`. En la TUI nunca se pintan
+dentro del transcript, para no mezclarse con la conversación.
+
+| Cómo               | Efecto                                                                            |
+| ------------------ | --------------------------------------------------------------------------------- |
+| `--debug` (o `-v`) | Fija el nivel en `debug` al arrancar                                              |
+| `LOG_LEVEL=debug`  | Igual, por entorno (`fatal`, `error`, `warn`, `info`, `debug`, `trace`, `silent`) |
+| `LOG_LEVEL=silent` | Silencia todo, `error` incluido                                                   |
+
 ## Trampas conocidas (de picoclaw) — a evitar desde el principio
 
 - **Tool calls como texto plano:** algunos modelos (p.ej. DeepSeek) escupen el markup

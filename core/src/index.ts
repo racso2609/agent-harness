@@ -1,5 +1,13 @@
 export { createHarness } from "./harness";
-export { createLogger, logger, setLogger } from "./utils/logger";
+export {
+  createLogger,
+  DEFAULT_LOG_LEVEL,
+  getLoggerLevel,
+  logger,
+  setLogger,
+  setLoggerLevel,
+} from "./utils/logger";
+export type { LoggerOptions, LogLevel } from "./utils/logger";
 export { Config, DEFAULT_PROVIDER_TYPE, SUPPORTED_PROVIDERS } from "./configuration";
 export type { ProviderConfig, ProviderDetail, SkillsConfig } from "./configuration";
 export { SessionStore } from "./session/SessionStore";
