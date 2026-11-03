@@ -626,6 +626,12 @@ class SessionManagerImpl implements SessionManager {
         content: this.formatSpawnResult(handle),
       });
     }
+    // Persist as soon as the results are delivered, not only at the end of the
+    // turn: the queue is drained here, so a turn that throws after the flush
+    // (provider error, abort, tool exception) would leave the message in memory
+    // only, and a restart would lose the child result for good. One save for
+    // the whole batch; the early return above keeps an empty queue from saving.
+    this.save();
   }
 
   // Builds the compact system message injected into the parent's history once

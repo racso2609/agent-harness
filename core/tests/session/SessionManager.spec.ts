@@ -1326,6 +1326,52 @@ describe("SessionManager spawn", () => {
     ]);
   });
 
+  // A turn that throws after the flush (provider error, abort, tool exception)
+  // never reaches the save at the end of ask(), so delivery has to persist by
+  // itself or a restart would drop the child result already marked as read.
+  it("persists the delivered child result even when the turn then fails", async () => {
+    stubProvider("child answer");
+    const records: Array<Record<string, unknown>> = [];
+    const storeWithHistory = {
+      save: vi.fn((record: Record<string, unknown>) =>
+        records.push(JSON.parse(JSON.stringify(record))),
+      ),
+      load: vi.fn(() => null),
+      list: vi.fn(() => []),
+    } as unknown as SessionStore;
+    const session = new SessionManager(
+      makeConfig({ ...spawnConfig, autoCompact: false }),
+      storeWithHistory,
+    );
+    session.provider = new OpenAiProvider("https://api.example.com", "key", "model");
+    session.providerName = "openai";
+    session.model = "model";
+    vi.spyOn(session, "classifyAction").mockResolvedValue("textGeneration");
+
+    const handle = session.spawn("coder", "do the thing");
+    await session.waitSpawn(handle.spawnId);
+    expect(session.pendingSpawns().map((entry) => entry.spawnId)).toEqual([handle.spawnId]);
+
+    session.provider.chat = vi.fn(async () => {
+      throw new Error("provider down");
+    });
+    await expect(session.ask("what did the child say?")).rejects.toThrow("provider down");
+
+    // Read back from the persisted record, not the in-memory history.
+    expect(session.pendingSpawns()).toEqual([]);
+    const persisted = records.at(-1);
+    const stored = (persisted?.history as Array<{ role: string; content: string }>).filter(
+      (message) =>
+        message.role === "system" && message.content.includes(`[spawn ${handle.spawnId} `),
+    );
+    expect(stored).toEqual([
+      {
+        role: "system",
+        content: `[spawn ${handle.spawnId} · coder · done]\nchild answer`,
+      },
+    ]);
+  });
+
   it("delivers two settled children in settlement order", async () => {
     vi.spyOn(OpenAiProvider.prototype, "initialize").mockResolvedValue();
     vi.spyOn(OpenAiProvider.prototype, "setModel").mockReturnValue(true);
