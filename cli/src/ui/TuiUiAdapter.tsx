@@ -19,14 +19,19 @@ class TuiUiAdapter implements UiAdapter {
   protected instance?: ReturnType<typeof render>;
   protected onSubmit: (prompt: string) => void = () => {};
   protected onExit: () => void = () => {};
+  // Text typed in the input box and not sent yet. Ink owns stdin, so the app
+  // is the only one that knows it; it reports every change here.
+  protected draft = "";
+  // Receives that text, when the owner asked to be told about it.
+  protected onDraftChange: ((draft: string) => void) | null = null;
   // Resolver for the approval currently on screen, if any.
   protected pendingApproval: ((decision: ApprovalDecision) => void) | null = null;
   // Markdown accumulators for the two streamed roles. Kept out of the state so
   // keystrokes never re-parse what already arrived.
   protected streams: Partial<Record<"answer" | "reasoning", MarkdownStream>> = {};
-  // Index of the entry each streamed role is writing. Anchoring by role instead
-  // of by position keeps a delta going into its own entry when something else
-  // (a child settling, a tool line) lands in between.
+  // Index of the entry each streamed role is writing. Anchoring by role
+  // instead of by position keeps a delta going into its own entry when
+  // something else (a child settling, a tool line) lands in between.
   protected anchors: RoleAnchors = noAnchors();
 
   constructor(theme?: UiTheme) {
@@ -40,11 +45,24 @@ class TuiUiAdapter implements UiAdapter {
     };
   }
 
-  // Registers the callbacks the app needs and mounts Ink.
-  start(options: { onSubmit: (prompt: string) => void; onExit: () => void }) {
+  // Registers the callbacks the app needs and mounts Ink. onDraftChange is
+  // optional: without it the adapter simply reports an empty draft.
+  start(options: {
+    onSubmit: (prompt: string) => void;
+    onExit: () => void;
+    onDraftChange?: (draft: string) => void;
+  }) {
     this.onSubmit = options.onSubmit;
     this.onExit = options.onExit;
+    this.onDraftChange = options.onDraftChange ?? null;
     this.mount();
+  }
+
+  // True while the input box holds text the user has not sent. A mounted app
+  // keeps this in sync on every keystroke; with no app (or no callback passed)
+  // the box is empty by definition.
+  hasDraft(): boolean {
+    return this.draft.length > 0;
   }
 
   protected get theme(): Theme {
@@ -60,8 +78,17 @@ class TuiUiAdapter implements UiAdapter {
         onDecision={(decision) => this.resolveApproval(decision)}
         onToggle={(kind, index) => this.toggleEntry(kind, index)}
         onToggleAll={(kind) => this.toggleAll(kind)}
+        onDraftChange={(draft) => this.reportDraft(draft)}
       />
     );
+  }
+
+  // Keeps the last reported draft and forwards it to the owner, if any.
+  protected reportDraft(draft: string) {
+    if (draft === this.draft) return;
+
+    this.draft = draft;
+    this.onDraftChange?.(draft);
   }
 
   protected mount() {
@@ -122,10 +149,10 @@ class TuiUiAdapter implements UiAdapter {
   }
 
   protected pushLine(line: TuiLine) {
-    const written = trimAnchored([...this.state.lines, line], this.anchors, MAX_LINES);
+    const { lines, anchors } = trimAnchored([...this.state.lines, line], this.anchors, MAX_LINES);
 
-    this.anchors = written.anchors;
-    this.state = { ...this.state, lines: written.lines };
+    this.anchors = anchors;
+    this.state = { ...this.state, lines };
     this.mount();
   }
 
@@ -156,8 +183,15 @@ class TuiUiAdapter implements UiAdapter {
 
     this.streams[role] = undefined;
 
-    const entry: TuiLine = { role, doc };
-    const written = writeAnchored(this.state.lines, this.anchors, role, () => entry, MAX_LINES);
+    // The final text replaces the entry the role was writing, found by its
+    // anchor: a notice that landed mid-stream must not leave a second copy.
+    const written = writeAnchored(
+      this.state.lines,
+      this.anchors,
+      role,
+      () => ({ role, doc }) as TuiLine,
+      MAX_LINES,
+    );
 
     this.anchors = written.anchors;
     this.state = { ...this.state, lines: written.lines };
@@ -168,11 +202,16 @@ class TuiUiAdapter implements UiAdapter {
     role: "answer" | "reasoning",
     doc: ReturnType<MarkdownStream["push"]>,
   ) {
-    const entry: TuiLine = { role, doc };
-
-    // The delta continues the entry this role opened, wherever it sits: another
-    // role may have written in between without splitting the stream in two.
-    const written = writeAnchored(this.state.lines, this.anchors, role, () => entry, MAX_LINES);
+    // The role keeps writing into the entry its anchor points at, so a notice
+    // landing in the middle of the stream does not open a second entry. The
+    // anchor is stored again, because pushLine leaves it where it was.
+    const written = writeAnchored(
+      this.state.lines,
+      this.anchors,
+      role,
+      () => ({ role, doc }) as TuiLine,
+      MAX_LINES,
+    );
 
     this.anchors = written.anchors;
     this.state = { ...this.state, lines: written.lines };
@@ -203,7 +242,9 @@ class TuiUiAdapter implements UiAdapter {
         // The input box reports what the turn is doing right now.
         this.state = { ...this.state, activity: `working · ${event.name}` };
         this.pushLine({ role: "tool", text: `→ ${event.name}` });
-        // The chunks of this command land in this entry, wherever it sits.
+        // pushLine leaves the anchors alone, so the header has to become the
+        // open tool entry itself: otherwise its chunks would land in the
+        // previous command's entry.
         this.anchors = { ...this.anchors, tool: this.state.lines.length - 1 };
         return;
       case "toolOutput":
@@ -213,8 +254,6 @@ class TuiUiAdapter implements UiAdapter {
         this.state = { ...this.state, activity: "working" };
         break;
       case "turnStart":
-        // A new turn opens with no entry in progress for any role.
-        this.anchors = noAnchors();
         this.pushLine({ role: "user", text: event.prompt });
         // A new turn starts settled: every reasoning/tool entry collapses by
         // default, so the transcript stays readable as it grows.
@@ -225,17 +264,18 @@ class TuiUiAdapter implements UiAdapter {
           expanded: new Set<number>(),
         };
         break;
-      case "turnEnd":
+      case "turnEnd": {
         this.finishStream("answer");
         this.finishStream("reasoning");
         this.state = { ...this.state, activity: undefined, running: false };
-        // A completed turn says nothing: the answer is the closing line already.
+        // The closing line is only printed when the turn did not complete.
         const closing = formatTurnOutcome(event.outcome);
         if (closing) {
           this.pushLine({ role: "notice", text: closing });
           return;
         }
         break;
+      }
       case "spawn":
         this.state = {
           ...this.state,
@@ -254,8 +294,8 @@ class TuiUiAdapter implements UiAdapter {
         };
         break;
       case "spawnSettled":
-        // The strip only shows the child is no longer running; the transcript
-        // still owes the user its result or its error.
+        // The strip only shows the state; the transcript gets the outcome, so a
+        // child that finishes while the user looks elsewhere is not lost.
         this.pushLine({ role: "notice", text: formatSpawnOutcome(event.handle) });
         this.state = {
           ...this.state,
@@ -281,19 +321,19 @@ class TuiUiAdapter implements UiAdapter {
     this.mount();
   }
 
-  // Live tool output: appended to the entry of the running command so a chatty
-  // command does not create one line per chunk.
+  // Live tool output: appended to the open tool entry so a chatty command does
+  // not create one line per chunk, and so chunks land under their own header
+  // even when a notice arrives in between.
   protected appendToolOutput(chunk: string) {
-    // Concatenated into the entry of the running command, so a notice arriving
-    // mid-command cannot split its output in two.
-    const written = writeAnchored<TuiLine>(
+    const written = writeAnchored(
       this.state.lines,
       this.anchors,
       "tool",
-      (open) => ({
-        role: "tool",
-        text: (open?.role === "tool" ? open.text : "") + chunk,
-      }),
+      (open) =>
+        ({
+          role: "tool",
+          text: `${open?.role === "tool" ? open.text : ""}${chunk}`,
+        }) as TuiLine,
       MAX_LINES,
     );
 

@@ -74,15 +74,15 @@ class CliUiAdapter implements UiAdapter {
       case "toolEnd":
         break;
       case "answer":
-        // Blank lines before and after the final text, but only when the turn
-        // already printed something: a lone answer starts flush.
-        this.notify(this.turnPrinted ? `\n${event.text}\n` : event.text);
+        // The answer is set apart from what the turn already printed. A bare
+        // answer stays flush: a leading blank line would open the screen.
+        if (this.turnPrinted) this.notify(`\n${event.text}\n`);
+        else this.notify(event.text);
         break;
       case "turnStart":
         this.turnPrinted = false;
         break;
       case "turnEnd": {
-        // A completed turn says nothing: the answer is its summary.
         const closing = formatTurnOutcome(event.outcome);
         if (closing) this.notify(closing);
         break;

@@ -1,12 +1,12 @@
 import { Box, Text, useInput, useStdout } from "ink";
-import { Fragment, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import type { UiStatus } from "../UiAdapter";
 import type { Block, InlineSpan, StreamDocument, TableBlock } from "./markdown";
 import { colorFor, elapsedFor, iconFor, type SpawnEntry, spawnStrip } from "./progress";
 import { GLYPH, resolveTheme, type Role, type Theme } from "./theme";
 import { collapse } from "./collapse";
-import { windowOf } from "./entries";
 import { fitColumns, truncateCell, wrapText } from "./layout";
+import { windowOf } from "./entries";
 
 // One rendered entry. `answer` and `reasoning` carry the live markdown
 // document; everything else is plain text.
@@ -45,15 +45,17 @@ interface AppProps {
   onDecision: (decision: "allow" | "deny" | "always") => void;
   onToggle: (kind: "reasoning" | "tool", index: number) => void;
   onToggleAll: (kind: "reasoning" | "tool") => void;
+  // Reports the text of the input box on every change, including the emptying
+  // that follows a send. The owner needs it to know whether the user is
+  // half-way through a thought.
+  onDraftChange?: (draft: string) => void;
 }
 
 // Columns reserved for the pane border and its horizontal padding.
 const PANEL_CHROME = 6;
 // Below this the layout stops shrinking and lets the terminal scroll.
 const MIN_WIDTH = 20;
-
-// Transcript entries kept on screen. Older ones stay in state but are not
-// painted, so the pane never grows past the terminal.
+// How many entries of the transcript the pane keeps on screen.
 const VISIBLE = 60;
 
 const CHOICES = [
@@ -62,7 +64,15 @@ const CHOICES = [
   { key: "deny" as const, label: "deny" },
 ];
 
-export const App = ({ state, onSubmit, onExit, onDecision, onToggle, onToggleAll }: AppProps) => {
+export const App = ({
+  state,
+  onSubmit,
+  onExit,
+  onDecision,
+  onToggle,
+  onToggleAll,
+  onDraftChange,
+}: AppProps) => {
   const [draft, setDraft] = useState("");
   const [choice, setChoice] = useState(0);
   const [now, setNow] = useState(() => Date.now());
@@ -80,6 +90,12 @@ export const App = ({ state, onSubmit, onExit, onDecision, onToggle, onToggleAll
     const timer = setInterval(() => setNow(Date.now()), 1_000);
     return () => clearInterval(timer);
   }, [lingering]);
+
+  // The owner is told what the box holds on every change, including the
+  // emptying that follows a send.
+  useEffect(() => {
+    onDraftChange?.(draft);
+  }, [draft, onDraftChange]);
 
   useInput((input, key) => {
     if (key.ctrl && input === "c") {
@@ -169,11 +185,10 @@ export const App = ({ state, onSubmit, onExit, onDecision, onToggle, onToggleAll
   });
 
   const strip = spawnStrip(state.spawns, state.history ?? [], now);
-  // The window is cut here so every entry arrives with its absolute index and
-  // its gap already resolved: the expanded set speaks absolute transcript
-  // indexes (`absolute`), while the key only has to be unique inside the window
-  // (`index`).
-  const { entries: window } = windowOf(state.lines, VISIBLE);
+  // The pane only keeps the tail of the transcript. The window resolves each
+  // entry's absolute index and its air, so the render never recalculates an
+  // index of its own.
+  const window = windowOf(state.lines, VISIBLE);
   // The panel frame and its padding eat a few columns; keep a floor so the
   // layout never collapses on a tiny terminal.
   const width = Math.max(
@@ -184,19 +199,16 @@ export const App = ({ state, onSubmit, onExit, onDecision, onToggle, onToggleAll
   return (
     <Box flexDirection="column" height="100%">
       <Box flexDirection="column" flexGrow={1} borderStyle="round" paddingX={1}>
-        {window.map(({ line, absolute, gap }, index) => (
-          <Fragment key={index}>
-            {gap > 0 && <Box marginTop={gap} />}
-            <Line
-              line={line}
-              theme={theme}
-              running={state.running ?? false}
-              // `expanded` holds absolute transcript indexes (see toggleEntry in
-              // TuiUiAdapter), so it is queried with `absolute`, never with `index`.
-              expanded={state.expanded.has(absolute)}
-              width={width}
-            />
-          </Fragment>
+        {window.entries.map((entry) => (
+          <Line
+            key={entry.absolute}
+            line={entry.line}
+            gap={entry.gap}
+            theme={theme}
+            running={state.running ?? false}
+            expanded={state.expanded.has(entry.absolute)}
+            width={width}
+          />
         ))}
       </Box>
 
@@ -224,7 +236,7 @@ export const App = ({ state, onSubmit, onExit, onDecision, onToggle, onToggleAll
                 color={index === choice ? "green" : undefined}
                 inverse={index === choice}
               >
-                {index === choice ? "› " : "  "}
+                {index === choice ? "› " : " "}
                 {option.label}
               </Text>
             ))}
@@ -247,15 +259,18 @@ export const App = ({ state, onSubmit, onExit, onDecision, onToggle, onToggleAll
 };
 
 // Renders one entry with the style of its role. Colour alone is not enough to
-// tell speakers apart, so each role also gets a glyph.
+// tell speakers apart, so each role also gets a glyph. `gap` is the blank line
+// above the entry, already resolved from the absolute index.
 const Line = ({
   line,
+  gap,
   theme,
   running,
   expanded,
   width,
 }: {
   line: TuiLine;
+  gap: number;
   theme: Theme;
   running: boolean;
   expanded: boolean;
@@ -280,15 +295,17 @@ const Line = ({
 
     if (!view.shown) {
       return (
-        <Text {...style}>
-          {glyph}
-          {view.summary} · ctrl+r
-        </Text>
+        <Box flexDirection="column" marginTop={gap}>
+          <Text {...style}>
+            {glyph}
+            {view.summary} · ctrl+r
+          </Text>
+        </Box>
       );
     }
 
     return (
-      <Box flexDirection="column">
+      <Box flexDirection="column" marginTop={gap}>
         <Text {...style}>
           {glyph}
           {view.hidden ? `${view.summary} · ctrl+r` : view.summary}
@@ -302,7 +319,7 @@ const Line = ({
 
   if (line.role === "answer") {
     return (
-      <Box flexDirection="column">
+      <Box flexDirection="column" marginTop={gap}>
         {line.doc.blocks.map((block, index) => (
           <Block key={index} block={block} role={line.role} style={style} width={width} />
         ))}
@@ -324,15 +341,17 @@ const Line = ({
 
     if (!view.shown) {
       return (
-        <Text {...style}>
-          {glyph}
-          {view.summary} · ctrl+t
-        </Text>
+        <Box flexDirection="column" marginTop={gap}>
+          <Text {...style}>
+            {glyph}
+            {view.summary} · ctrl+t
+          </Text>
+        </Box>
       );
     }
 
     return (
-      <Box flexDirection="column">
+      <Box flexDirection="column" marginTop={gap}>
         <Text {...style}>
           {glyph}
           {view.hidden ? `${view.summary} · ctrl+t` : view.summary}
@@ -345,10 +364,12 @@ const Line = ({
   }
 
   return (
-    <Text {...style}>
-      {glyph}
-      {textLine.text}
-    </Text>
+    <Box flexDirection="column" marginTop={gap}>
+      <Text {...style}>
+        {glyph}
+        {textLine.text}
+      </Text>
+    </Box>
   );
 };
 
