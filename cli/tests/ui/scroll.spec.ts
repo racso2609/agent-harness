@@ -101,10 +101,35 @@ describe("scrollBy / clampView", () => {
   });
 
   it("stops following new content as soon as the user scrolls up", () => {
-    const view = clampView(scrollBy(bottomView(), 3), 100, 10);
+    // Asked of `scrollBy` and not of the clamped result: `clampView` recomputes
+    // `follow` from the offset, so asserting after it would hide a `scrollBy`
+    // that keeps following and would let the stream drag the user back down.
+    const moved = scrollBy(bottomView(), 3);
 
-    expect(view.offset).toBe(3);
-    expect(view.follow).toBe(false);
+    expect(moved).toEqual({ offset: 3, follow: false });
+  });
+
+  it("releases the follow on every manual move, in both directions", () => {
+    // Up, down and back to the bottom by hand: none of them may keep following,
+    // or the next delta would yank the view out of the place the user chose.
+    expect(scrollBy({ offset: 4, follow: true }, 1).follow).toBe(false);
+    expect(scrollBy({ offset: 4, follow: true }, -1).follow).toBe(false);
+    expect(scrollBy({ offset: 1, follow: true }, -1).follow).toBe(false);
+  });
+
+  it("keeps a scrolled-up window on the same lines while the content grows", () => {
+    // 20 one-line entries in a 5-line pane, scrolled 12 lines up. A delta lands
+    // below: the same entry must stay at the top of the pane.
+    const view = clampView(scrollBy(bottomView(), 12), 20, 5);
+    const before = visibleWindow({ heights: rowOf(20), viewportLines: 5, view: view });
+    const after = visibleWindow({ heights: rowOf(24), viewportLines: 5, view });
+
+    // 20 lines in a 5-line pane: following sits at the top of entry 15, and 12
+    // lines up from there is entry 3.
+    expect(before.rows[0]!.absolute).toBe(3);
+    // Across growth the offset wins over following, so the pane keeps showing
+    // entry 7: the same content, now counted from a longer transcript.
+    expect(after.rows[0]!.absolute).toBe(7);
   });
 
   it("re-arms follow when the user reaches the bottom again", () => {
@@ -245,6 +270,24 @@ describe("visibleWindow", () => {
     expect(window.padBottom).toBe(0);
     expect(window.rows).toEqual([{ absolute: 0, cutTop: 0, cutBottom: 20 }]);
     expect(30 - window.rows[0]!.cutTop - window.rows[0]!.cutBottom).toBe(10);
+  });
+
+  it("shows one row at a time without padding or cuts when the pane has a single line", () => {
+    const window = visibleWindow({ heights: rowOf(3), viewportLines: 1, view: bottomView() });
+
+    expect(window.rows).toEqual([{ absolute: 2, cutTop: 0, cutBottom: 0 }]);
+    expect(window.padTop + window.padBottom).toBe(0);
+  });
+
+  it("paints nothing but the transcript when the content is exactly the viewport", () => {
+    const window = visibleWindow({ heights: rowOf(4), viewportLines: 4, view: bottomView() });
+
+    expect(window.start).toBe(0);
+    expect(window.rows.map((row) => row.absolute)).toEqual([0, 1, 2, 3]);
+    // No padding at all: there is no slack, so a padding here would have shown
+    // an empty line and pushed the oldest entry out of sight.
+    expect(window.padTop).toBe(0);
+    expect(window.padBottom).toBe(0);
   });
 
   it("returns a full padding window for an empty transcript", () => {
