@@ -42,6 +42,8 @@ class CliUiAdapter implements UiAdapter {
   }
 
   // Builds a core logger whose lines are routed through the prompt-safe sink.
+  // The sink is unchanged: core already filters by level (default "error"), so
+  // warn/info only reach it with LOG_LEVEL or --debug.
   logger(): ILogger {
     const sink: LoggerSink = (line) => {
       clearPrompt();

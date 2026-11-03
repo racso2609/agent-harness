@@ -1,12 +1,13 @@
-import { Box, Text, useInput, useStdout } from "ink";
-import { Fragment, useEffect, useState } from "react";
+import { Box, Text, useInput, useStdout, useWindowSize } from "ink";
+import { useEffect, useMemo, useState } from "react";
 import type { UiStatus } from "../UiAdapter";
 import type { Block, InlineSpan, StreamDocument, TableBlock } from "./markdown";
 import { colorFor, elapsedFor, iconFor, type SpawnEntry, spawnStrip } from "./progress";
 import { GLYPH, resolveTheme, type Role, type Theme } from "./theme";
 import { collapse } from "./collapse";
-import { windowOf } from "./entries";
 import { fitColumns, truncateCell, wrapText } from "./layout";
+import { bottomView, clampView, measureEntries, visibleWindow, type ScrollView } from "./scroll";
+import { chromeRows, nextView, viewportRows } from "./viewport";
 
 // One rendered entry. `answer` and `reasoning` carry the live markdown
 // document; everything else is plain text.
@@ -52,23 +53,39 @@ const PANEL_CHROME = 6;
 // Below this the layout stops shrinking and lets the terminal scroll.
 const MIN_WIDTH = 20;
 
-// Transcript entries kept on screen. Older ones stay in state but are not
-// painted, so the pane never grows past the terminal.
-const VISIBLE = 60;
-
 const CHOICES = [
   { key: "allow" as const, label: "allow once" },
   { key: "always" as const, label: "always allow this" },
   { key: "deny" as const, label: "deny" },
 ];
 
+// Plain text of one entry: what `Line` collapses and what the measurement wraps
+// with. Both must agree, otherwise the pane reserves a different number of rows
+// than it paints and the transcript jitters while scrolling.
+const entryText = (line: TuiLine): string => {
+  if (line.role === "answer" || line.role === "reasoning") {
+    return [...line.doc.blocks.map((block) => plainBlock(block)), line.doc.open]
+      .filter(Boolean)
+      .join("\n");
+  }
+
+  return (line as Extract<TuiLine, { text: string }>).text;
+};
+
 export const App = ({ state, onSubmit, onExit, onDecision, onToggle, onToggleAll }: AppProps) => {
   const [draft, setDraft] = useState("");
   const [choice, setChoice] = useState(0);
   const [now, setNow] = useState(() => Date.now());
+  // Where the transcript is looking. `bottomView()` starts pinned to the bottom,
+  // like a shell: the newest line is the first thing the user sees.
+  const [view, setView] = useState<ScrollView>(() => bottomView());
   const approval = state.approval;
   const theme = state.theme;
   const { stdout } = useStdout();
+  // The transcript is a viewport, not "the last N entries": its height comes
+  // from the terminal and is rebuilt on resize, which is also when the scroll
+  // position has to be re-clamped.
+  const { rows } = useWindowSize();
 
   // Only a child of this run needs the clock: a running one counts up and a
   // settled one lingers. Restored rows keep their frozen time, so they never
@@ -96,6 +113,25 @@ export const App = ({ state, onSubmit, onExit, onDecision, onToggle, onToggleAll
 
     if (key.ctrl && input === "t") {
       onToggleAll("tool");
+      return;
+    }
+
+    // Scroll keys come before text input so a PageUp or an arrow no longer
+    // disappears into the draft. In the approval box the arrows pick an option,
+    // which `nextView` knows because it is told about `approval`; paging still
+    // scrolls there, so an older part of the transcript can be read while a
+    // question waits.
+    const scrolled = nextView(
+      key,
+      input,
+      effectiveView,
+      measured.total,
+      viewportLines,
+      approval != null,
+    );
+
+    if (scrolled) {
+      setView(scrolled);
       return;
     }
 
@@ -153,6 +189,10 @@ export const App = ({ state, onSubmit, onExit, onDecision, onToggle, onToggleAll
         return;
       }
 
+      // Sending is the one moment the user asked to see what comes next. Any
+      // other content change (a streamed delta, a child settling, an automatic
+      // turn) must leave the scroll where the user put it.
+      setView(bottomView());
       setDraft("");
       onSubmit(value);
       return;
@@ -168,35 +208,70 @@ export const App = ({ state, onSubmit, onExit, onDecision, onToggle, onToggleAll
     }
   });
 
-  const strip = spawnStrip(state.spawns, state.history ?? [], now);
-  // The window is cut here so every entry arrives with its absolute index and
-  // its gap already resolved: the expanded set speaks absolute transcript
-  // indexes (`absolute`), while the key only has to be unique inside the window
-  // (`index`).
-  const { entries: window } = windowOf(state.lines, VISIBLE);
   // The panel frame and its padding eat a few columns; keep a floor so the
   // layout never collapses on a tiny terminal.
   const width = Math.max(
     MIN_WIDTH,
     ((stdout as { columns?: number } | undefined)?.columns ?? 80) - PANEL_CHROME,
   );
+  const strip = spawnStrip(state.spawns, state.history ?? [], now);
+  const stripRows = strip.rows.length + (strip.hidden > 0 ? 1 : 0);
+  // What the transcript can paint: the terminal, minus the panels stacked under
+  // it. Derived on every render, so a resize moves the viewport and the scroll
+  // position is re-clamped right below.
+  const viewportLines = viewportRows(rows, chromeRows({ stripRows, approval: approval != null }));
+  const running = state.running ?? false;
+  // Measuring is the expensive part (it wraps every entry), so it only runs when
+  // the transcript or the width it is wrapped to changes, never per keystroke.
+  const measured = useMemo(
+    () =>
+      measureEntries(state.lines, {
+        width,
+        running,
+        expanded: state.expanded,
+        textOf: entryText,
+      }),
+    [state.lines, state.expanded, running, width],
+  );
+  // The state holds what the user asked for; the effective view is that ask
+  // squeezed into a transcript that may have grown or shrunk since.
+  const effectiveView = clampView(view, measured.total, viewportLines);
+  // Resolved once so the window, the padding and the panel agree on how many
+  // rows are painted. Ink clips a box that grows past its height, and it clips
+  // the bottom, which is exactly where the newest lines live.
+  const visible = visibleWindow({ heights: measured.heights, viewportLines, view: effectiveView });
 
   return (
     <Box flexDirection="column" height="100%">
-      <Box flexDirection="column" flexGrow={1} borderStyle="round" paddingX={1}>
-        {window.map(({ line, absolute, gap }, index) => (
-          <Fragment key={index}>
-            {gap > 0 && <Box marginTop={gap} />}
-            <Line
-              line={line}
-              theme={theme}
-              running={state.running ?? false}
-              // `expanded` holds absolute transcript indexes (see toggleEntry in
-              // TuiUiAdapter), so it is queried with `absolute`, never with `index`.
-              expanded={state.expanded.has(absolute)}
-              width={width}
-            />
-          </Fragment>
+      <Box
+        flexDirection="column"
+        height={viewportLines}
+        borderStyle="round"
+        paddingX={1}
+        // A row entering or leaving the viewport is painted whole, so for one
+        // frame the content can be taller than the box. Clipping hides that
+        // overflow instead of letting it push the panels below and make the
+        // layout dance every time the scroll moves a single line.
+        overflowY="hidden"
+      >
+        {Array.from({ length: visible.padTop }, (_, blank) => (
+          <Text key={`pad-${blank}`}> </Text>
+        ))}
+        {visible.rows.map(({ absolute }) => (
+          <Line
+            // Keyed by the position in the transcript, never by the position in
+            // the window: a shifting key makes React reuse the wrong entry while
+            // scrolling, which is half of the "it jumps" bug.
+            key={absolute}
+            line={state.lines[absolute]!}
+            theme={theme}
+            running={running}
+            // `expanded` holds absolute transcript indexes (see toggleEntry in
+            // TuiUiAdapter), so it is queried with `absolute`, never with a
+            // window index.
+            expanded={state.expanded.has(absolute)}
+            width={width}
+          />
         ))}
       </Box>
 
@@ -267,9 +342,7 @@ const Line = ({
   const glyph = line.role === "spawn" ? "◈ " : GLYPH[role];
 
   if (line.role === "reasoning") {
-    const text = [...line.doc.blocks.map((block) => plainBlock(block)), line.doc.open]
-      .filter(Boolean)
-      .join("\n");
+    const text = entryText(line);
     const view = collapse({
       role: "reasoning",
       text,

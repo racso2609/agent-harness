@@ -6,8 +6,8 @@ Dos renderers sobre un mismo contrato (`UiAdapter`/`UiEvent`), decidido en `P0`:
 `CliUiAdapter` (líneas, **default**) y `TuiUiAdapter` (ink, `--tui`). `MainLoop` no
 escribe a stdout: solo emite eventos, así que la lógica del turno es idéntica en ambos.
 
-Hecho hasta hoy: `P0`, `P1`, `P2` y `P3` cerrados y el core (§9.1) completo. Quedan la
-deuda del TUI (`P5`, que gana dos pendientes al cerrar `P2`) y la instalación (`P4`).
+Hecho hasta hoy: `P0`, `P1`, `P2`, `P3` y `P4.5` cerrados y el core (§9.1) completo.
+Quedan la instalación (`P4`), la deuda del TUI (`P5`) y la continuación automática (`P6`).
 
 Formato de este archivo: ver la skill `todo-format`.
 
@@ -221,6 +221,56 @@ exige clonar y construir. Publicar es requisito para lo de `core/TODO.md` §10.
       Done when: el README tiene una sección de instalación con el comando exacto, la
       versión de Node requerida y qué ficheros crea en `~/.racso-harness/`.
       Depends on: fijar un smoke test de instalación limpia.
+
+## P4.5 — Scroll del transcript y ruido del logger
+
+Lo que el usuario reportó: "scrolleo un poco para arriba y el contenido se vuelve
+loco y me lleva muy arriba en el historial; si scrolleas mientras se genera pasan
+cosas raras" y "que los logger info y warn no aparezcan salvo con un modo debug".
+
+- [x] **Medir el transcript en líneas visuales, no en "las últimas 60 entradas"**
+hecho: `ui/tui/scroll.ts` (puro: `ScrollView{offset,follow}`, `bottomView`,
+`scrollBy`, `scrollToTop/Bottom`, `clampView`, `viewWithContent`, `measureEntries`,
+`visibleWindow` con `cutTop`/`cutBottom`/`padTop`) y `ui/tui/viewport.ts`
+(`chromeRows`, `viewportRows`, `scrollActionForKey`, `nextView`). La ventana se pide
+al alto real del terminal (`useWindowSize`), el gap viaja dentro de la altura de cada
+entrada (nunca se pinta un segundo `marginTop`) y el panel recibe `padTop` para medir
+exactamente el viewport: ink recorta por abajo, que es donde está la respuesta, y ese
+recorte era una de las causas del salto. Los trucos que se quitaron: clave de React
+por índice absoluto (antes usaba la posición en la ventana, así que al desplazarse
+React reutilizaba la entrada equivocada), `overflowY="hidden"` para que una fila que
+entra o sale no empuje los paneles, y ninguna altura `flexGrow` que deje rebosar.
+hecho (teclas): `pageUp`/`pageDown` = una página (viewport − 1, para conservar una
+línea de contexto), `ctrl+u`/`ctrl+d` = media página, flechas = una línea —antes las
+swallowaba el fallback que añade texto al borrador—, `home`/`end` = extremos. En el
+approval las flechas siguen eligiendo opción y el paging sigue scrolleando.
+hecho (estabilidad): contenido nuevo no mueve la vista si el usuario está scrolleado
+(`follow: false`), cada evento se re-clampa contra el tamaño actual (resize incluido),
+y volver al fondo re-engancha `follow`; al empezar un turno la vista vuelve al fondo.
+tests: 24 en `tests/ui/scroll.spec.ts` (ventana, clamp, relleno, alturas de entradas
+colapsadas/expandidas, trim) y 18 en `tests/ui/viewport.spec.ts` (geometría, teclas,
+clamp de un offset obsoleto).
+pendiente: verificado por tests de la lógica pura; falta la prueba en un TTY real (ver
+"Probar la interacción real por teclado" en `P5`). ink 8 no soporta ratón, así que la
+rueda no scrollea: es una limitación del renderer, no del modelo.
+Depends on: ninguno.
+
+- [x] **Silenciar `logger.info`/`warn` del core salvo en modo debug**
+El core emitía `logger.info`/`warn` en cada tool call, loader y cambio de agente, y
+los adapters los pintaban como `notice`: se leían como si fueran conversación.
+hecho: el nivel por defecto de `core/src/utils/logger.ts` pasa de `"info"` a
+`DEFAULT_LOG_LEVEL = "error"`, así que pino no formatea ni entrega a nadie los
+`info`/`warn`. Se añaden `setLoggerLevel`/`getLoggerLevel` y `createLogger(sink,
+{level})` (retrocompatible), exportados desde `core/src/index.ts`. `cli/src/flags.ts`
+extrae `parseFlags(argv)` (`--tui`, `--debug`/`-v`) y `main.ts` fija el nivel `debug`
+**antes** de construir `MainLoop`: `env.ts` se evalúa en import-time, así que tocar
+`process.env` después del arranque no habría tenido efecto. En `--tui` el sink del
+adapter descarta: un log nunca puede pintarse dentro del transcript.
+tests: 6 en `core/tests/utils/logger.spec.ts` (nivel por defecto, `debug` por env y
+por setter, `silent`, contrato de orden) y 4 en `cli/tests/flags.spec.ts`.
+pendiente: decidir si en `--debug --tui` los logs deberían ir a un archivo en vez de
+descartarse; hoy el modo debug es útil en modo líneas.
+Depends on: ninguno.
 
 ## P5 — Deuda conocida del TUI
 

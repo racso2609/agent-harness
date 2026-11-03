@@ -22,6 +22,13 @@ export interface SpawnHandle {
   result?: string;
   // Error message once the child fails.
   error?: string;
+  // One-line summary of what the child did, derived at settlement from the
+  // result (success) or the error message (failure). Undefined when the child
+  // produced nothing summarisable.
+  summary?: string;
+  // Wall-clock duration in milliseconds, derived from startedAt/finishedAt at
+  // settlement so readers never have to subtract the two ISO strings.
+  durationMs?: number;
 }
 
 // Runs one child to completion. Injected so the manager stays decoupled from
@@ -58,6 +65,21 @@ interface SpawnJob extends SpawnHandle {
 }
 
 export const DEFAULT_MAX_CHILDREN = 4;
+
+// Budget of the one-line summary kept on a settled handle.
+const SUMMARY_MAX_CHARS = 120;
+
+// Builds the summary from the child's own output: no extra model call is
+// made, the child's answer (or its error) is already the shortest faithful
+// description of what happened. Whitespace is flattened so the value is
+// always a single line, and empty text yields undefined rather than "".
+const summarize = (text?: string): string | undefined => {
+  const flat = (text ?? "").replace(/\s+/g, " ").trim();
+
+  if (!flat) return undefined;
+
+  return flat.length > SUMMARY_MAX_CHARS ? `${flat.slice(0, SUMMARY_MAX_CHARS - 1)}…` : flat;
+};
 
 // Tracks background child agents spawned by a parent session. Children run
 // concurrently up to `maxChildren`; extra submissions wait in FIFO order.
@@ -188,9 +210,22 @@ class SpawnManager {
       job.error = err instanceof Error ? err.message : String(err);
     } finally {
       if (timer) clearTimeout(timer);
-      job.finishedAt = new Date().toISOString();
+      this.settle(job);
       this.emit({ type: "settled", handle: this.snapshot(job) });
     }
+  }
+
+  // Single settlement point. Success, error, timeout and cancel all end up in
+  // the finally above, so this is the only place where finishedAt and the
+  // derived summary/durationMs are written.
+  protected settle(job: SpawnJob) {
+    job.finishedAt = new Date().toISOString();
+
+    const elapsed = Date.parse(job.finishedAt) - Date.parse(job.startedAt);
+
+    // A backwards clock jump must not leak a negative duration to consumers.
+    job.durationMs = Number.isFinite(elapsed) ? Math.max(0, elapsed) : undefined;
+    job.summary = summarize(job.result ?? job.error);
   }
 
   // Notifies subscribers; listener errors never break the scheduler.
@@ -223,6 +258,8 @@ class SpawnManager {
       finishedAt: job.finishedAt,
       result: job.result,
       error: job.error,
+      summary: job.summary,
+      durationMs: job.durationMs,
     };
   }
 }

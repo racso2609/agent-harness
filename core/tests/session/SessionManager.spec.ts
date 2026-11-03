@@ -904,6 +904,23 @@ describe("SessionManager spawn", () => {
     return session;
   };
 
+  // Child results reach the parent when it starts its next turn, so every
+  // case that inspects the parent history has to run one. The parent answers
+  // on its own stub: the child provider stub is not always installed (a child
+  // that fails during initialize never reaches chat).
+  const parentTurn = async (session: ReturnType<typeof makeSession>, prompt = "next turn") => {
+    vi.spyOn(session, "classifyAction").mockResolvedValue("textGeneration");
+    session.provider!.chat = vi.fn(async () => stopTurn("parent ok"));
+    await session.ask(prompt);
+  };
+
+  // The parent system messages that carry a child result.
+  const deliveredFor = (session: ReturnType<typeof makeSession>, spawnId: string): string[] =>
+    session.history
+      .filter((message) => message.role === "system")
+      .map((message) => message.content)
+      .filter((content) => content.includes(`[spawn ${spawnId} `));
+
   afterEach(() => {
     vi.restoreAllMocks();
   });
@@ -945,13 +962,11 @@ describe("SessionManager spawn", () => {
 
     const handle = session.spawn("coder", "do the thing");
     await session.waitSpawn(handle.spawnId);
+    await parentTurn(session);
 
-    const injected = session.history.find(
-      (message) =>
-        message.role === "system" && message.content.includes(`[spawn ${handle.spawnId}`),
-    );
-    expect(injected?.content).toContain("child");
-    expect(injected?.content).toContain("…");
+    const [injected] = deliveredFor(session, handle.spawnId);
+    expect(injected).toContain("child");
+    expect(injected).toContain("…");
   });
 
   it("injects a system message with error status when the child fails", async () => {
@@ -960,12 +975,10 @@ describe("SessionManager spawn", () => {
 
     const handle = session.spawn("coder", "do the thing");
     await session.waitSpawn(handle.spawnId);
+    await parentTurn(session);
 
-    expect(session.history).toContainEqual(
-      expect.objectContaining({
-        role: "system",
-        content: expect.stringContaining(`[spawn ${handle.spawnId} · coder · error]`),
-      }),
+    expect(deliveredFor(session, handle.spawnId)).toContainEqual(
+      expect.stringContaining(`[spawn ${handle.spawnId} · coder · error]`),
     );
   });
 
@@ -978,11 +991,11 @@ describe("SessionManager spawn", () => {
 
     const handle = session.spawn("coder", "do the thing");
     await session.waitSpawn(handle.spawnId);
+    await parentTurn(session);
 
-    expect(session.history).toContainEqual({
-      role: "system",
-      content: `[spawn ${handle.spawnId} · coder · done]\nthe child answer`,
-    });
+    expect(deliveredFor(session, handle.spawnId)).toEqual([
+      `[spawn ${handle.spawnId} · coder · done]\nthe child answer`,
+    ]);
   });
 
   it("marks a child that answered nothing instead of injecting a blank line", async () => {
@@ -991,11 +1004,11 @@ describe("SessionManager spawn", () => {
 
     const handle = session.spawn("coder", "do the thing");
     await session.waitSpawn(handle.spawnId);
+    await parentTurn(session);
 
-    expect(session.history).toContainEqual({
-      role: "system",
-      content: `[spawn ${handle.spawnId} · coder · done]\n(no output)`,
-    });
+    expect(deliveredFor(session, handle.spawnId)).toEqual([
+      `[spawn ${handle.spawnId} · coder · done]\n(no output)`,
+    ]);
   });
 
   // The formatting is inspected directly for the error paths: launching a
@@ -1084,12 +1097,11 @@ describe("SessionManager spawn", () => {
 
     const handle = session.spawn("coder", "do the thing");
     await session.waitSpawn(handle.spawnId);
+    await parentTurn(session);
 
-    const injected = session.history.find(
-      (message) =>
-        message.role === "system" && message.content.includes(`[spawn ${handle.spawnId}`),
-    );
-    expect(injected?.content).toContain("child answer");
+    expect(deliveredFor(session, handle.spawnId)).toEqual([
+      `[spawn ${handle.spawnId} · coder · done]\nchild answer`,
+    ]);
   });
 
   it("survives a throwing listener without breaking the child", async () => {
@@ -1130,6 +1142,44 @@ describe("SessionManager spawn", () => {
       startedAt: expect.any(String),
     });
     expect(Number.isNaN(Date.parse(child!.startedAt))).toBe(false);
+    // Both derived fields arrive with the settlement, never before it.
+    expect(child!.summary).toBeUndefined();
+    expect(child!.durationMs).toBeUndefined();
+  });
+
+  it("measures the duration and summarizes the answer once the child settles", async () => {
+    stubProvider("child answer");
+    const session = makeSession();
+
+    const handle = session.spawn("coder", "do the thing");
+    await session.waitSpawn(handle.spawnId);
+    const [child] = session.listSpawns();
+
+    // Recomputed here from the two stamps, not read back from durationMs.
+    const expected = Date.parse(child.finishedAt!) - Date.parse(child.startedAt);
+
+    expect(child.status).toBe("done");
+    expect(typeof child.durationMs).toBe("number");
+    expect(child.durationMs).toBe(expected);
+    expect(child.durationMs).toBeGreaterThanOrEqual(0);
+    expect(child.durationMs).toBeLessThan(60_000);
+    expect(child.summary).toBe("child answer");
+  });
+
+  it("measures the duration of a child that failed", async () => {
+    vi.spyOn(OpenAiProvider.prototype, "initialize").mockRejectedValue(new Error("provider down"));
+    const session = makeSession();
+
+    const handle = session.spawn("coder", "do the thing");
+    await session.waitSpawn(handle.spawnId);
+    const [child] = session.listSpawns();
+
+    const expected = Date.parse(child.finishedAt!) - Date.parse(child.startedAt);
+
+    expect(child.status).toBe("error");
+    expect(typeof child.durationMs).toBe("number");
+    expect(child.durationMs).toBe(expected);
+    expect(child.summary).toBe("provider down");
   });
 
   it("adds the result and the finish time once the child settles", async () => {
@@ -1144,6 +1194,58 @@ describe("SessionManager spawn", () => {
       result: "child answer",
       finishedAt: expect.any(String),
     });
+  });
+
+  it("restores the summary and duration of a settled child on resume", async () => {
+    stubProvider("child answer");
+    const session = makeSession();
+
+    const handle = session.spawn("coder", "do the thing");
+    await session.waitSpawn(handle.spawnId);
+
+    // Same JSON round trip SessionStore performs on disk.
+    const saved = vi.mocked(session.store.save).mock.calls.at(-1)?.[0];
+    const persisted = JSON.parse(JSON.stringify(saved));
+    const resumed = makeSession();
+    resumed.store.load = vi.fn(() => persisted) as unknown as typeof resumed.store.load;
+
+    await expect(resumed.load("session-1")).resolves.toBe(true);
+
+    const [child] = resumed.childHistory();
+    const expected = Date.parse(child.finishedAt!) - Date.parse(child.startedAt);
+
+    expect(child.spawnId).toBe(handle.spawnId);
+    expect(child.summary).toBe("child answer");
+    expect(child.durationMs).toBe(expected);
+    expect(typeof child.durationMs).toBe("number");
+  });
+
+  it("leaves the summary and duration undefined for a record written before them", async () => {
+    stubProvider();
+    const session = makeSession();
+    const legacy = handleWith({
+      spawnId: "spawn-legacy",
+      status: "done",
+      finishedAt: new Date(1_000).toISOString(),
+      result: "done before the fields existed",
+    });
+
+    session.store.load = vi.fn(() => ({
+      id: "session-1",
+      createdAt: new Date(0).toISOString(),
+      updatedAt: new Date(0).toISOString(),
+      provider: "openai",
+      model: "model",
+      agentId: "default",
+      history: [],
+      spawns: [legacy],
+    })) as unknown as typeof session.store.load;
+
+    await expect(session.load("session-1")).resolves.toBe(true);
+
+    // Absent, not NaN nor an empty string.
+    expect(session.childHistory()[0].summary).toBeUndefined();
+    expect(session.childHistory()[0].durationMs).toBeUndefined();
   });
 
   it("keeps the children of a resumed session as read-only history", async () => {
@@ -1193,6 +1295,94 @@ describe("SessionManager spawn", () => {
     session.childHistory().pop();
 
     expect(session.childHistory()).toHaveLength(1);
+  });
+
+  // The CLI needs to know whether a delegate already came back before it
+  // starts reason about the parent conversation, so the list of children whose
+  // result has not reached a parent turn is part of the contract.
+  it("reports a settled child until the parent runs the turn that delivers it", async () => {
+    stubProvider("child answer");
+    const session = makeSession();
+
+    const handle = session.spawn("coder", "do the thing");
+    await session.waitSpawn(handle.spawnId);
+
+    const pending = session.pendingSpawns();
+    expect(pending.map((entry) => entry.spawnId)).toEqual([handle.spawnId]);
+    expect(session.history.filter((message) => message.role === "system")).toEqual([]);
+
+    await parentTurn(session);
+
+    expect(session.pendingSpawns()).toEqual([]);
+    const injected = session.history.filter(
+      (message) =>
+        message.role === "system" && message.content.includes(`[spawn ${handle.spawnId} `),
+    );
+    expect(injected).toEqual([
+      {
+        role: "system",
+        content: `[spawn ${handle.spawnId} · coder · done]\nchild answer`,
+      },
+    ]);
+  });
+
+  it("delivers two settled children in settlement order", async () => {
+    vi.spyOn(OpenAiProvider.prototype, "initialize").mockResolvedValue();
+    vi.spyOn(OpenAiProvider.prototype, "setModel").mockReturnValue(true);
+    vi.spyOn(OpenAiProvider.prototype, "getContextWindow").mockReturnValue(1000);
+    vi.spyOn(OpenAiProvider.prototype, "chat").mockImplementation(async (history) => {
+      const prompt = history.at(-1)?.content ?? "";
+      // The slow child settles after the fast one, so launch order and
+      // settlement order differ and cannot pass by accident.
+      if (prompt.includes("slow")) await new Promise((resolve) => setTimeout(resolve, 20));
+      return stopTurn(prompt.includes("slow") ? "slow answer" : "fast answer");
+    });
+    const session = makeSession();
+
+    const slow = session.spawn("coder", "slow task");
+    const fast = session.spawn("coder", "fast task");
+    await session.waitSpawn(fast.spawnId);
+    await session.waitSpawn(slow.spawnId);
+
+    expect(session.pendingSpawns().map((entry) => entry.result)).toEqual([
+      "fast answer",
+      "slow answer",
+    ]);
+
+    await parentTurn(session);
+
+    expect(
+      session.history
+        .filter((message) => message.role === "system")
+        .map((message) => message.content.match(/^\[spawn [^ ]+/)?.[0]),
+    ).toEqual([`[spawn ${fast.spawnId}`, `[spawn ${slow.spawnId}`]);
+    expect(session.pendingSpawns()).toEqual([]);
+  });
+
+  it("does not report a running child as pending", async () => {
+    vi.spyOn(OpenAiProvider.prototype, "initialize").mockResolvedValue();
+    vi.spyOn(OpenAiProvider.prototype, "setModel").mockReturnValue(true);
+    vi.spyOn(OpenAiProvider.prototype, "getContextWindow").mockReturnValue(1000);
+    // Never resolves: the child stays running for the whole case.
+    vi.spyOn(OpenAiProvider.prototype, "chat").mockImplementation(() => new Promise(() => {}));
+    const session = makeSession();
+
+    const handle = session.spawn("coder", "do the thing");
+
+    expect(session.pollSpawn(handle.spawnId)?.status).toBe("running");
+    expect(session.pendingSpawns()).toEqual([]);
+  });
+
+  it("hands out a copy of the pending children, not its own array", async () => {
+    stubProvider("child answer");
+    const session = makeSession();
+
+    const handle = session.spawn("coder", "do the thing");
+    await session.waitSpawn(handle.spawnId);
+
+    session.pendingSpawns().length = 0;
+
+    expect(session.pendingSpawns().map((entry) => entry.spawnId)).toEqual([handle.spawnId]);
   });
 
   it("returns undefined/empty results when nothing was spawned", async () => {

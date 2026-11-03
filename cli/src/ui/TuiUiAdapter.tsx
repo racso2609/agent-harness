@@ -302,10 +302,13 @@ class TuiUiAdapter implements UiAdapter {
     this.mount();
   }
 
+  // Core diagnostics never enter the transcript: mixing them with the
+  // conversation is exactly the bug this guards against. Ink owns the screen,
+  // so the sink discards instead of writing to stderr either, which would
+  // corrupt the live render. Debugging the TUI relies on the line renderer or
+  // on LOG_LEVEL there; the level filter in core is what decides what exists.
   logger(): ILogger {
-    return createLogger((line) => {
-      this.pushLine({ role: "notice", text: line });
-    });
+    return createLogger(() => {});
   }
 
   // Shows the request as a selectable question and waits for the keystroke.
