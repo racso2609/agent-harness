@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { fitColumns, MIN_COLUMN_WIDTH, truncateCell, wrapText } from "../../src/ui/tui/layout";
+import {
+  fitColumns,
+  GAP,
+  gapBefore,
+  MIN_COLUMN_WIDTH,
+  truncateCell,
+  wrapText,
+} from "../../src/ui/tui/layout";
 
 describe("fitColumns", () => {
   it("keeps natural widths when everything fits", () => {
@@ -71,5 +78,23 @@ describe("table width", () => {
     const columns = fitColumns([4, 4], 40);
 
     expect(columns.every((column) => !column.truncated)).toBe(true);
+  });
+});
+
+describe("gapBefore", () => {
+  it("starts the first entry flush", () => {
+    expect(gapBefore(0)).toBe(0);
+  });
+
+  it("separates any two entries by GAP lines", () => {
+    expect(gapBefore(1)).toBe(GAP);
+    expect(gapBefore(400)).toBe(GAP);
+  });
+
+  it("takes an absolute transcript index, not a visible-window one", () => {
+    // A transcript longer than the window is painted from entry 60 onwards:
+    // that entry is not the first of the transcript, so it still gets air.
+    expect(gapBefore(60)).toBe(GAP);
+    expect(gapBefore(61)).toBe(GAP);
   });
 });

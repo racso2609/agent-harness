@@ -98,3 +98,16 @@ export const wrapText = (text: string, width: number): string[] => {
 
   return lines;
 };
+
+// Blank lines the transcript keeps between entries. Vertical rhythm is a
+// layout constant, not a theme decision, so it lives here with the other
+// width-aware helpers.
+export const GAP = 1;
+
+// Air above the entry at `absoluteIndex`: its position in the whole transcript,
+// not in the visible window. The first entry starts flush so the pane never
+// opens with a blank line; every later entry gets GAP lines, even when the
+// window starts partway down the transcript. An empty transcript needs no
+// special case: there is no entry to pad.
+// Separation inside an entry is markdown's job, not this helper's.
+export const gapBefore = (absoluteIndex: number): number => (absoluteIndex <= 0 ? 0 : GAP);

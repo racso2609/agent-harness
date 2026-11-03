@@ -188,6 +188,17 @@
 - [x] **Incluir un resumen de cierre en `AgentResponse`**
       hecho: `TurnOutcome { status: "completed" | "toolError" | "incomplete", pending: string[], next? }` y `AgentResponse.outcome?`. `runAgentLoop` acumula las tools que fallaron (`pending`) y distingue el corte por `tools.maxIterations` (`incomplete` + qué hacer). El campo es opcional, así ningún `toEqual` existente cambió. 3 tests (completed, toolError con la tool nombrada, incomplete por tope de iteraciones).
       Nota: hoy lo rellena `runAgentLoop`; el camino de `generateImage` no lo emite (no hay turno ReAct que resumir).
+- [ ] **Añadir resumen del hijo y duración a `SpawnHandle`**
+      `SpawnHandle` no lleva ni un resumen de lo que hizo el hijo ni una duración
+      explícita (`startedAt`/`finishedAt` como ISO obligan a recalcular), así que la
+      franja del CLI mide el tiempo por su cuenta y, al reanudar una sesión, el resumen
+      se pierde: el histórico (`childHistory()`) solo conserva `result`/`error`, sin
+      resumen corto ni métrica de tokens.
+      Done when: `SpawnHandle` gana `summary?: string` y `durationMs?: number` (fijados
+      al asentar, `durationMs` derivado de `startedAt`/`finishedAt`) y `childHistory()`
+      los devuelve al reanudar, con un test en `tests/session/SessionManager.spec.ts`
+      que lo comprueba; el CLI pinta la duración desde `durationMs` sin recalcular.
+      Depends on: devolver estado consultable de los hijos.
 
 ### 9.1 orden sugerido
 

@@ -71,10 +71,42 @@ describe("the line renderer", () => {
       expect(output).toBe("spawn spawn-1 error (coder): provider down\n");
     });
 
+    // The other empty case: a failed child with no message. Same failure mode as
+    // the empty result, so it gets its own pinned line instead of relying on the
+    // formatter's tests.
+    it("says unknown error instead of a header with an empty body", () => {
+      const output = printed([
+        { type: "spawnSettled", handle: settled({ status: "error", error: "" }) },
+      ]);
+
+      expect(output).toBe("spawn spawn-1 error (coder): unknown error\n");
+    });
+
     it("says (no output) instead of a header with an empty body", () => {
       const output = printed([{ type: "spawnSettled", handle: settled({ result: "" }) }]);
 
       expect(output).toBe("spawn spawn-1 done (coder): (no output)\n");
+    });
+  });
+
+  describe("the final answer", () => {
+    // The answer is set apart from what the turn already printed: one blank line
+    // before and after it. A turn that printed nothing before the answer gets no
+    // leading blank line, because the line would be the first thing on screen.
+    it("puts a blank line before and after an answer that follows output", () => {
+      const output = printed([
+        { type: "turnStart" },
+        { type: "toolStart", id: "call-1", name: "shell" },
+        { type: "answer", text: "all tests pass" },
+      ]);
+
+      expect(output).toBe("→ shell\n\nall tests pass\n\n");
+    });
+
+    it("does not open with a blank line when the answer is the first output", () => {
+      const output = printed([{ type: "turnStart" }, { type: "answer", text: "all tests pass" }]);
+
+      expect(output).toBe("all tests pass\n");
     });
   });
 

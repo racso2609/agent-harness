@@ -1,10 +1,11 @@
 import { Box, Text, useInput, useStdout } from "ink";
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import type { UiStatus } from "../UiAdapter";
 import type { Block, InlineSpan, StreamDocument, TableBlock } from "./markdown";
 import { colorFor, elapsedFor, iconFor, type SpawnEntry, spawnStrip } from "./progress";
 import { GLYPH, resolveTheme, type Role, type Theme } from "./theme";
 import { collapse } from "./collapse";
+import { windowOf } from "./entries";
 import { fitColumns, truncateCell, wrapText } from "./layout";
 
 // One rendered entry. `answer` and `reasoning` carry the live markdown
@@ -50,6 +51,10 @@ interface AppProps {
 const PANEL_CHROME = 6;
 // Below this the layout stops shrinking and lets the terminal scroll.
 const MIN_WIDTH = 20;
+
+// Transcript entries kept on screen. Older ones stay in state but are not
+// painted, so the pane never grows past the terminal.
+const VISIBLE = 60;
 
 const CHOICES = [
   { key: "allow" as const, label: "allow once" },
@@ -164,6 +169,11 @@ export const App = ({ state, onSubmit, onExit, onDecision, onToggle, onToggleAll
   });
 
   const strip = spawnStrip(state.spawns, state.history ?? [], now);
+  // The window is cut here so every entry arrives with its absolute index and
+  // its gap already resolved: the expanded set speaks absolute transcript
+  // indexes (`absolute`), while the key only has to be unique inside the window
+  // (`index`).
+  const { entries: window } = windowOf(state.lines, VISIBLE);
   // The panel frame and its padding eat a few columns; keep a floor so the
   // layout never collapses on a tiny terminal.
   const width = Math.max(
@@ -174,15 +184,19 @@ export const App = ({ state, onSubmit, onExit, onDecision, onToggle, onToggleAll
   return (
     <Box flexDirection="column" height="100%">
       <Box flexDirection="column" flexGrow={1} borderStyle="round" paddingX={1}>
-        {state.lines.slice(-60).map((line, index) => (
-          <Line
-            key={index}
-            line={line}
-            theme={theme}
-            running={state.running ?? false}
-            expanded={state.expanded.has(index)}
-            width={width}
-          />
+        {window.map(({ line, absolute, gap }, index) => (
+          <Fragment key={index}>
+            {gap > 0 && <Box marginTop={gap} />}
+            <Line
+              line={line}
+              theme={theme}
+              running={state.running ?? false}
+              // `expanded` holds absolute transcript indexes (see toggleEntry in
+              // TuiUiAdapter), so it is queried with `absolute`, never with `index`.
+              expanded={state.expanded.has(absolute)}
+              width={width}
+            />
+          </Fragment>
         ))}
       </Box>
 

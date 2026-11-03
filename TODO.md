@@ -15,7 +15,6 @@ dependencias. Formato de cada lista: skill `core/skills/todo-format.md`.
 | Split core/cli, tooling, agents, skills, session reporting | `core/TODO.md` §0–9  | histórico + pendientes                                       |
 | Gateway persistente (cronjobs + webhooks)                  | `core/TODO.md` §10   | nuevo, c3                                                    |
 | TUI de pantalla completa y feedback del turno              | `cli/TODO.md` §P0–P3 | P0–P3 cerrados salvo las tareas nuevas abiertas en §P1 y §P3 |
-| Progreso en vivo de los hijos                              | `core/TODO.md` §11   | nuevo, c3                                                    |
 | Instalación y distribución                                 | `cli/TODO.md` §P4    | nuevo, c3                                                    |
 
 ## Origen de las tareas nuevas
@@ -29,9 +28,12 @@ Los tres puntos que había en este archivo se trocearon así:
 
 Las cuatro notas sueltas que había en este archivo se cerraron así:
 
-- **logs de los hijos como summary en el card del proceso delegado** → se partió en
-  dos: el progreso en vivo en el contrato (`core/TODO.md` §11) y el card con resumen y
-  duración en `cli/TODO.md` §P1.
+- **logs de los hijos como summary en el card del proceso delegado** → el progreso
+  en vivo quedó cubierto por `core/TODO.md` §9 (`SpawnEvent`, `onSpawnEvent`,
+  `listSpawns`) y el aviso de cierre por `cli/TODO.md` §P1 y §P2. Lo que sigue
+  faltando del card —resumen del hijo y duración en el contrato— se registra en
+  `core/TODO.md` §9. La sección §11 citada antes nunca existió, así que se retira
+  la referencia.
 - **scroll inestable mientras el modelo va generando** → `cli/TODO.md` §P3.
 - **animación del cursor para saber dónde está el foco** → `cli/TODO.md` §P3.
 - **limitar el número de caracteres de las secciones colapsadas (`ctrl+t`/`ctrl+r`)**
@@ -46,3 +48,7 @@ Las cuatro notas sueltas que había en este archivo se cerraron así:
   generando los», es decir, sin objeto completo → se registró el problema observable
   (la vista salta durante el streaming) y el criterio de cierre queda en la tarea de
   `cli/TODO.md` §P3, no en la nota.
+
+  ## nuevo issue
+
+  cuando un delegate termine si aun hay trabajo que hacer la session debe seguir el trabajo que queda no esperar por mi
