@@ -53,7 +53,12 @@ private closing = false;
 // Prompts submitted by the TUI. The line renderer reads stdin directly.
 // A continuation travels here too, marked, so a user prompt can drop it.
 private queue: QueuedPrompt[] = [];
-private pending: ((prompt: string) => void) | null = null;
+private pending: ((turn: QueuedPrompt) => void) | null = null;
+// True from the moment the loop takes a prompt until the turn it starts has
+// closed. Without it a prompt taken out of the queue looks parked in
+// nextPrompt(), and a child settling right then would start a second turn
+// behind the one still running.
+private turnInFlight = false;
 // Batch of undelivered children the "I will wait for your prompt" notice was
 // already shown for, so typing does not repeat it on every keystroke.
 private noticedBatch = "";
@@ -113,7 +118,7 @@ onSubmit: (prompt) => this.enqueueFromUser(prompt),
 onExit: () => this.shutdown(0),
 // The draft decides whether a continuation may start: the box reports every
 // change, including the emptying that follows a send.
-onDraftChange: () => this.maybeContinue(),
+onDraftChange: () => this.maybeContinue({ fromDraft: true }),
 });
 } else {
 this.printStatus();
@@ -132,14 +137,26 @@ protected installKeyHandlers() {
 process.on("SIGINT", () => this.shutdown(130));
 }
 
-// Hands a prompt to the loop waiting for one.
-protected enqueue(prompt: string, kind: "user" | "continuation" = "user") {
-const entry: QueuedPrompt = { text: prompt, continuation: kind === "continuation" };
+// Hands a prompt to the loop waiting for one. The entry is built even on the
+// direct hand-off: the turn it starts marks the batch it waits for, which is
+// what tells its end that the work was delivered.
+protected enqueue(
+prompt: string,
+kind: "user" | "continuation" = "user",
+batch: QueuedPrompt["batch"] = undefined,
+fromDraft = false,
+) {
+const entry: QueuedPrompt = {
+text: prompt,
+continuation: kind === "continuation",
+...(fromDraft ? { fromDraft } : {}),
+...(batch ? { batch } : {}),
+};
 
 if (this.pending) {
 const resolve = this.pending;
 this.pending = null;
-resolve(prompt);
+resolve(entry);
 return;
 }
 this.queue.push(entry);
@@ -154,7 +171,10 @@ protected enqueueFromUser(prompt: string) {
 // Any prompt the user sends opens a new budget, whether it drops a
 // continuation or arrives after the cap stopped the chain.
 this.autoContinuations = 0;
-if (dropContinuations(this.queue) > 0) {
+// The send empties the input box, and that draft change may have queued a
+// continuation a moment ago: it is the user prompt itself that supersedes it,
+// so it goes with the ones already waiting.
+if (dropContinuations(this.queue, this.queue.length) > 0) {
 this.ui.render({ type: "notice", message: CONTINUATION_DROPPED_NOTICE });
 }
 this.enqueue(prompt);
@@ -165,7 +185,11 @@ this.enqueue(prompt);
 // true: a child settling, and the end of a turn, because a settle that lands
 // mid-turn (or behind an approval dialog) is only continuable once the turn
 // that was running is over. Both go through here so the rule lives once.
-protected maybeContinue() {
+//
+// `userPrompt` marks the end of a turn the user asked for: their prompt
+// supersedes any continuation still owed, and delivering the batch is all the
+// work it needs.
+protected maybeContinue(options: { userPrompt?: boolean; fromDraft?: boolean } = {}) {
 const pending = this.harness.pendingSpawns();
 const key = batchKey(pending);
 // Another batch is another chance to announce we are waiting; an emptied
@@ -177,13 +201,20 @@ waitingForPrompt: this.isWaitingForPrompt(),
 hasUserDraft: this.hasUserDraft(),
 pending,
 budget: { used: this.autoContinuations, max: this.maxAutoContinuations() },
+userSentPrompt: options.userPrompt ?? false,
+fromDraft: options.fromDraft ?? false,
 });
+// The queue is the truth about what will run next, so dropping from the
+// verdict keeps the budget honest: a dropped continuation never runs.
+if (decision.discard && dropContinuations(this.queue, this.queue.length) > 0) {
+this.ui.render({ type: "notice", message: CONTINUATION_DROPPED_NOTICE });
+}
 
 if (decision.notice && this.noticedBatch !== key) {
 this.noticedBatch = key;
 this.ui.render({ type: "notice", message: decision.notice });
 }
-if (decision.continue) this.enqueue(CONTINUATION_PROMPT, "continuation");
+if (decision.continue) this.enqueue(CONTINUATION_PROMPT, "continuation", pending);
 }
 
 // The cap from the config, read on every decision so an edited value applies
@@ -194,9 +225,11 @@ return this.config.config.sessions?.maxAutoContinuations ?? 5;
 }
 
 // True when the loop is parked in nextPrompt() with nobody to hand a prompt
-// to: the only moment a turn may start without the user asking for it.
+// to: the only moment a turn may start without the user asking for it. A turn
+// already running is not waiting, even between taking its prompt and parking
+// again.
 protected isWaitingForPrompt(): boolean {
-return this.pending !== null && this.queue.length === 0;
+return !this.turnInFlight && this.pending !== null && this.queue.length === 0;
 }
 
 // Only the TUI knows whether the input box holds text the user has not sent;
@@ -222,11 +255,9 @@ return { text, continuation: false };
 const queued = this.queue.shift();
 if (queued !== undefined) return queued;
 
-const text = await new Promise<string>((resolve) => {
+return new Promise<QueuedPrompt>((resolve) => {
 this.pending = resolve;
 });
-
-return { text, continuation: false };
 }
 
 // Main prompt loop: reads, dispatches to the harness and renders output.
@@ -254,6 +285,13 @@ continue;
 }
 
 this.ui.render({ type: "turnStart", prompt });
+// From here until turnEnd the loop owes the user an answer: no child settling
+// in between may start a turn of its own.
+this.turnInFlight = true;
+// A turn nobody asked for carries the batch it was queued for: delivering it
+// is the work it owed.
+const owed = turn.continuation ? (turn.batch ?? []) : [];
+let userPrompt = !turn.continuation;
 
 try {
 const { text, images, outcome } = await this.harness.ask(prompt, {
@@ -268,12 +306,22 @@ for (const uiEvent of toUiEvents(event)) this.ui.render(uiEvent);
 if (text) {
 this.ui.render({ type: "answer", text });
 }
+// A prompt the user sent while this turn ran was queued, not dropped: it
+// supersedes the continuation and the work this turn delivered. Reading it
+// before continuing keeps the same batch from being handed twice.
+const queued = this.queue.find((entry) => !entry.continuation);
+if (queued) userPrompt = true;
+// Delivering the batch a continuation waited for is the continuation itself,
+// so the same results are not continued a second time.
+const delivered = batchKey(this.harness.pendingSpawns()) !== batchKey(owed);
 for (const image of images ?? []) {
 await this.ui.renderImage(image.url);
 }
 // The children that settled while this turn ran are judged now, with the
-// loop free to take a prompt again and the turn no longer holding ask().
-this.maybeContinue();
+// loop free to take a prompt again and the turn no longer holding ask(). The
+// prompt just taken is not in the queue, so the turn flag covers the window
+// between taking it and asking.
+this.maybeContinue({ userPrompt: userPrompt && delivered });
 // A turn nobody asked for that queues another one goes on alone: its close
 // says so instead of looking like a stopped process. The last turn of the
 // chain (a completed one queues nothing) closes like any other turn.
@@ -283,8 +331,12 @@ text,
 outcome,
 continuation: turn.continuation && this.queue.some((entry) => entry.continuation),
 });
+// Only after the turn closed: anything settled before this point belongs to
+// the turn that just ended.
+this.turnInFlight = false;
 this.printStatus();
 } catch (err) {
+this.turnInFlight = false;
 this.ui.render({
 type: "notice",
 message: `failed to handle prompt: ${String(err)}`,

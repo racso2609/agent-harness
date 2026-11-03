@@ -141,15 +141,16 @@ expect(settled).not.toContain('event.type === "started") this.maybeContinue()');
 it("evaluates it again when a turn ends", () => {
 // This is the only path that continues a child that settled mid-turn or
 // behind an approval dialog: ask() held the loop, so the settle itself
-// could not start anything.
+// could not start anything. The verdict is told whether the turn was the
+// user's, since their prompt supersedes the continuation.
 const turn = between('this.ui.render({ type: "turnStart"', "} catch (err) {");
 
-expect(turn).toContain("this.maybeContinue();");
+expect(turn).toContain("this.maybeContinue({ userPrompt: userPrompt && delivered })");
 });
 
 it("asks the core what is still undelivered instead of trusting the event", () => {
 // A settle event says a child finished, not that its result is still owed.
-const body = between("protected maybeContinue()", "protected isWaitingForPrompt()");
+const body = between("protected maybeContinue(", "protected isWaitingForPrompt()");
 
 expect(body).toContain("this.harness.pendingSpawns()");
 expect(body).toContain("continuationDecision(");
@@ -168,15 +169,17 @@ expect(body).toContain("this.queue.length === 0");
 
 it("queues the continuation through enqueue, marked as such", () => {
 // The mark is what lets a user prompt drop it; enqueue is the only way in.
-const body = between("protected maybeContinue()", "protected isWaitingForPrompt()");
+const body = between("protected maybeContinue(", "protected isWaitingForPrompt()");
 
-expect(body).toContain('this.enqueue(CONTINUATION_PROMPT, "continuation")');
+// The batch travels with the entry: the turn it starts knows which children
+// it is delivering, so its end does not continue them a second time.
+expect(body).toContain('this.enqueue(CONTINUATION_PROMPT, "continuation", pending)');
 });
 
 it("says it is waiting at most once per undelivered batch", () => {
 // The box reports every keystroke: without the batch key the notice would
 // repeat on each one.
-const body = between("protected maybeContinue()", "protected isWaitingForPrompt()");
+const body = between("protected maybeContinue(", "protected isWaitingForPrompt()");
 
 expect(body).toContain("batchKey(pending)");
 expect(body).toContain("this.noticedBatch !== key");
@@ -187,7 +190,10 @@ it("drops queued continuations when the user sends a prompt", () => {
 // Otherwise the user's prompt is followed by a turn doing the same work.
 const body = between("protected enqueueFromUser(", "// Starts a turn on its own");
 
-expect(body).toContain("dropContinuations(this.queue)");
+// The user prompt enters the queue at its current length: everything ahead
+// of that point, including a continuation the emptied draft just queued, is
+// what the send supersedes.
+expect(body).toContain("dropContinuations(this.queue, this.queue.length)");
 expect(body).toContain("CONTINUATION_DROPPED_NOTICE");
 expect(mainLoop).toContain("onSubmit: (prompt) => this.enqueueFromUser(prompt)");
 });
@@ -213,7 +219,7 @@ expect(body).toContain("this.autoContinuations = 0;");
 
 it("reads the cap from the config instead of hardcoding it in the decision", () => {
 // The number belongs to the configuration; the decision only receives it.
-const body = between("protected maybeContinue()", "protected maxAutoContinuations()");
+const body = between("protected maybeContinue(", "protected maxAutoContinuations()");
 
 expect(body).toContain("budget: { used: this.autoContinuations");
 expect(body).toContain("this.maxAutoContinuations()");
@@ -234,6 +240,6 @@ expect(body.indexOf("maybeContinue")).toBe(-1);
 it("feeds the draft signal the TUI reports", () => {
 // Without this the loop cannot know the user is half-way through a thought
 // and would start a turn over their text.
-expect(mainLoop).toContain("onDraftChange: () => this.maybeContinue()");
+expect(mainLoop).toContain("onDraftChange: () => this.maybeContinue({ fromDraft: true })");
 });
 });
