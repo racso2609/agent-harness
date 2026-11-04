@@ -148,14 +148,15 @@ export const scrollToBottom = (): ScrollView => ({ offset: 0, follow: true });
 //   on screen while a delta arrives below (following, by contrast, drags the
 //   user to the bottom). A following view stays at offset 0, which already means
 //   "the bottom", so no arithmetic is needed.
-// - Trimming from the head (`trimAnchored` drops entries at the front): the old
+// - Trimming from the head (`trimAnchored` drops secondary entries at the front
+//   once there are too many; messages and answers are never dropped): the old
 //   offset points at content that no longer exists. It is re-clamped against the
 //   new size, i.e. the view slides with the content and is never left showing
 //   past the top. Keeping a stale offset would silently turn a "scrolled up"
 //   view into the very head of a shorter transcript, which is more confusing
 //   than the small jump; the cost is that a user reading at the top loses the
-//   `dropped` lines that were cut. That is acceptable because the head is only
-//   trimmed far behind the viewport (MAX_LINES is much larger than the pane).
+//   lines that were cut. That is acceptable because the head is only trimmed far
+//   behind the viewport (the secondary budget is much larger than the pane).
 export const viewWithContent = (
   view: ScrollView,
   contentLines: number,

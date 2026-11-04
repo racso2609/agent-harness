@@ -24,27 +24,53 @@ export interface AnchoredWrite<T> {
 // A new turn opens with every role closed.
 export const noAnchors = (): RoleAnchors => ({});
 
-// Keeps the transcript bounded. Trimming shifts every index, so the anchors
-// move with the window: they are re-based on the new start, and the ones whose
-// entry fell out of it are dropped (that role just opens a new entry the next
-// time it writes).
-export const trimAnchored = <T>(
+// Roles that make up the conversation itself. They are never trimmed: dropping
+// a message or the answer that belongs to it would break the transcript the user
+// reads back. Everything else (tool output, reasoning, notices) is secondary and
+// can be dropped from the head once there are too many.
+export const CONVERSATION_ROLES: ReadonlySet<string> = new Set(["user", "answer"]);
+
+// Keeps the secondary entries bounded without ever dropping a message or an
+// answer: at most `max` entries whose role is not part of the conversation are
+// kept, the oldest ones going first. Trimming shifts every index, so the anchors
+// move with the window: they are re-based on the entries that survive, and the
+// ones whose entry fell out are dropped (that role just opens a new entry the
+// next time it writes).
+export const trimAnchored = <T extends { role?: string }>(
   lines: T[],
   anchors: RoleAnchors,
   max: number,
 ): AnchoredWrite<T> => {
-  if (lines.length <= max) return { lines, anchors };
+  const trimmable: number[] = [];
 
-  const dropped = lines.length - max;
+  for (let index = 0; index < lines.length; index++) {
+    const role = lines[index]?.role;
+    if (role == null || !CONVERSATION_ROLES.has(role)) trimmable.push(index);
+  }
+
+  if (trimmable.length <= max) return { lines, anchors };
+
+  const drop = new Set(trimmable.slice(0, trimmable.length - max));
+  const kept: T[] = [];
+  const remap = new Map<number, number>();
+
+  for (let index = 0; index < lines.length; index++) {
+    if (drop.has(index)) continue;
+    remap.set(index, kept.length);
+    kept.push(lines[index]!);
+  }
+
   const shifted: RoleAnchors = {};
 
   for (const role of Object.keys(anchors) as StreamRole[]) {
     const index = anchors[role];
+    if (index == null) continue;
 
-    if (index != null && index >= dropped) shifted[role] = index - dropped;
+    const mapped = remap.get(index);
+    if (mapped != null) shifted[role] = mapped;
   }
 
-  return { lines: lines.slice(dropped), anchors: shifted };
+  return { lines: kept, anchors: shifted };
 };
 
 // One entry as the render consumes it: the line, its index in the whole

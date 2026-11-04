@@ -294,9 +294,9 @@ describe("a notice in the middle of another streamed role", () => {
 });
 
 // Anchors are indices, so trimming the transcript has to move them. Covered
-// on the pure helpers with a small window; the adapter cases would need 400
-// entries to shift a single position.
-describe("anchors survive the MAX_LINES window", () => {
+// on the pure helpers with a small budget; the adapter cases would need 400
+// secondary entries to shift a single position.
+describe("trimming the secondary entries", () => {
   const line = (role: string, text: string) => ({ role, text });
 
   it("re-bases every anchor on the new start", () => {
@@ -305,6 +305,25 @@ describe("anchors survive the MAX_LINES window", () => {
 
     expect(trimmed.lines.map((entry) => entry.text)).toEqual(["c", "d"]);
     expect(trimmed.anchors).toEqual({ answer: 1 });
+  });
+
+  it("never drops a message or an answer", () => {
+    const lines = [
+      line("user", "pregunta 1"),
+      line("answer", "respuesta 1"),
+      ...Array.from({ length: 10 }, (_, i) => line("notice", `log ${i}`)),
+      line("user", "pregunta 2"),
+      line("answer", "respuesta 2"),
+    ];
+    const trimmed = trimAnchored(lines, noAnchors(), 2);
+    const kept = trimmed.lines.map((entry) => entry.text);
+
+    // Every message and answer survives, wherever it sits in the transcript.
+    for (const text of ["pregunta 1", "respuesta 1", "pregunta 2", "respuesta 2"]) {
+      expect(kept).toContain(text);
+    }
+    // Only the two newest secondary entries are kept.
+    expect(kept.filter((text) => text.startsWith("log"))).toEqual(["log 8", "log 9"]);
   });
 
   it("keeps writing into the open entry after a trim", () => {
@@ -323,8 +342,8 @@ describe("anchors survive the MAX_LINES window", () => {
       2,
     );
 
-    expect(written.lines.map((entry) => entry.text)).toEqual(["c", "d+"]);
-    expect(written.anchors).toEqual({ answer: 1 });
+    expect(written.lines.map((entry) => entry.text)).toEqual(["b", "c", "d+"]);
+    expect(written.anchors).toEqual({ answer: 2 });
   });
 
   it("opens a fresh entry when the anchored one fell out of the window", () => {
@@ -333,7 +352,7 @@ describe("anchors survive the MAX_LINES window", () => {
       noAnchors(),
       "answer",
       () => line("answer", "x"),
-      2,
+      1,
     );
 
     expect(written.lines.map((entry) => entry.role)).toEqual(["notice", "answer"]);
@@ -357,6 +376,25 @@ describe("anchors survive the MAX_LINES window", () => {
 
     expect(answers).toHaveLength(1);
     expect(ui.text(answers[0]!)).toBe("respuesta final");
+  });
+
+  it("keeps every message and answer across a long session", () => {
+    const ui = new Probe();
+
+    for (let i = 0; i < 500; i += 1) {
+      ui.render({ type: "turnStart", prompt: `pregunta ${i}` });
+      ui.render({ type: "text", delta: `respuesta ${i}` });
+      ui.render({ type: "answer", text: `respuesta ${i}` });
+      ui.render({ type: "notice", message: `log ${i}` });
+      ui.render({ type: "turnEnd" });
+    }
+
+    const users = ui.lines.filter((line) => line.role === "user");
+
+    expect(users).toHaveLength(500);
+    expect(ui.of("answer")).toHaveLength(500);
+    // The transcript is bounded on the noise, never on the conversation.
+    expect(ui.of("notice").length).toBeLessThanOrEqual(400);
   });
 });
 

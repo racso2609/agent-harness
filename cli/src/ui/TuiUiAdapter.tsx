@@ -9,7 +9,10 @@ import { toSpawnEntry } from "./tui/progress";
 import { resolveTheme, type Theme } from "./tui/theme";
 import type { UiAdapter, UiEvent } from "./UiAdapter";
 
-const MAX_LINES = 400;
+// How many secondary entries (tool output, reasoning, notices) the transcript
+// keeps. The conversation itself — every user message and every answer — is
+// never trimmed, so the user can always scroll back through the whole chat.
+const MAX_SECONDARY_ENTRIES = 400;
 
 // Ink-backed renderer: full-screen panes, live activity and a spawn strip.
 // It owns one Ink instance and re-renders on every state change; the loop
@@ -149,7 +152,11 @@ class TuiUiAdapter implements UiAdapter {
   }
 
   protected pushLine(line: TuiLine) {
-    const { lines, anchors } = trimAnchored([...this.state.lines, line], this.anchors, MAX_LINES);
+    const { lines, anchors } = trimAnchored(
+      [...this.state.lines, line],
+      this.anchors,
+      MAX_SECONDARY_ENTRIES,
+    );
 
     this.anchors = anchors;
     this.state = { ...this.state, lines };
@@ -190,7 +197,7 @@ class TuiUiAdapter implements UiAdapter {
       this.anchors,
       role,
       () => ({ role, doc }) as TuiLine,
-      MAX_LINES,
+      MAX_SECONDARY_ENTRIES,
     );
 
     this.anchors = written.anchors;
@@ -210,7 +217,7 @@ class TuiUiAdapter implements UiAdapter {
       this.anchors,
       role,
       () => ({ role, doc }) as TuiLine,
-      MAX_LINES,
+      MAX_SECONDARY_ENTRIES,
     );
 
     this.anchors = written.anchors;
@@ -255,6 +262,11 @@ class TuiUiAdapter implements UiAdapter {
         break;
       case "turnStart":
         this.pushLine({ role: "user", text: event.prompt });
+        // A new turn owns its entries: without dropping the anchors, this
+        // turn's answer would be written into the previous turn's answer entry
+        // (found by its still-valid anchor) instead of opening a fresh one
+        // below the new message, and the user would read the last answer only.
+        this.anchors = noAnchors();
         // A new turn starts settled: every reasoning/tool entry collapses by
         // default, so the transcript stays readable as it grows.
         this.state = {
@@ -335,7 +347,7 @@ class TuiUiAdapter implements UiAdapter {
           role: "tool",
           text: `${open?.role === "tool" ? open.text : ""}${chunk}`,
         }) as TuiLine,
-      MAX_LINES,
+      MAX_SECONDARY_ENTRIES,
     );
 
     this.anchors = written.anchors;
