@@ -2,6 +2,7 @@ import type { CommandOption } from "@/commands/CommandRepository";
 import {
 COMMAND_KEYS,
 menuItems,
+menuQueryFor,
 menuRows,
 menuSelectAt,
 type MenuRows,
@@ -9,16 +10,10 @@ type MenuState,
 } from "@/terminal/commandMenu";
 import { MENU_VISIBLE_ROWS } from "./viewport";
 
-// The query the "/" dropdown filters by, or null when the dropdown must stay
-// shut. Only the first token is a command: once a space is typed the user is
-// writing arguments, and a list that kept filtering then would cover the
-// transcript for nothing.
-export const menuQueryFor = (draft: string): string | null => {
-if (!draft.startsWith("/")) return null;
-if (/\s/.test(draft)) return null;
-
-return draft.slice(1);
-};
+// Re-exported rather than redefined: the line prompt asks the same question
+// from terminal/commandMenu, and two copies of "when is the dropdown open"
+// is exactly how the two renderers drifted apart before.
+export { menuQueryFor };
 
 // What the dropdown shows for a query. The rows come from the shared model, so
 // the ink renderer and the line renderer cannot drift on which commands fit.

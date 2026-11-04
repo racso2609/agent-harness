@@ -2,14 +2,13 @@ import fs from "node:fs";
 import path from "node:path";
 import terminalImage from "terminal-image";
 import type { CommandOption } from "@/commands/CommandRepository";
+import { clampSelection, menuRows } from "./commandMenu";
 import {
-  COMMAND_KEYS,
-  clampSelection,
-  menuItems,
-  menuRows,
-  moveSelection,
-  type MenuState,
-} from "./commandMenu";
+interpretMenuInput,
+menuRangeLabel,
+promptMenuState,
+type PromptMenuState,
+} from "./promptMenu";
 
 // State of the prompt currently waiting for input, kept so async output
 // (logs) can wipe and redraw the line without losing what the user typed.
@@ -34,11 +33,7 @@ const write = (text: string) => {
 // The filtered list in the shared shape. Storing the selection next to it
 // lets the window maths come from commandMenu instead of being written again
 // here, where it could drift from what the TUI paints.
-const menuState = (): MenuState<CommandOption> => {
-const query = typed.slice(1);
-
-return { items: menuItems(query, activeCommands, COMMAND_KEYS), query, selected: menu?.selected ?? 0 };
-};
+const menuState = () => promptMenuState(typed, menu?.selected ?? null, activeCommands);
 
 // How many rows fit under the prompt without pushing the menu off screen.
 const maxVisibleRows = () =>
@@ -75,10 +70,8 @@ const rows = menuRows(state, maxVisibleRows());
 const width = Math.max(20, (process.stdout.columns ?? 80) - 1);
 // The range only appears when part of the list is out of sight, so it does
 // not become noise on the usual short list.
-const range =
-rows.hiddenAbove || rows.hiddenBelow
-? ` ${state.selected + 1}/${state.items.length}`
-: "";
+const rangeLabel = menuRangeLabel(state, rows);
+const range = rangeLabel ? ` ${rangeLabel}` : "";
 
 const painted = rows.rows.map((command, index) => {
 const aliases = command.aliases?.length
@@ -114,14 +107,6 @@ const reset = () => {
   linesBelow = 0;
 };
 
-const selectedCommand = () => {
-if (!menu) return undefined;
-
-const state = menuState();
-
-return state.items[clampSelection(state.selected, state.items.length)];
-};
-
 export interface InputOptions {
   // When present, typing "/" on an empty prompt opens a command menu.
   commands?: CommandOption[];
@@ -136,122 +121,49 @@ export function input(message: string, options: InputOptions = {}): Promise<stri
     linesBelow = 0;
     render();
 
-    // Partial escape sequence (e.g. arrow key split across data events).
-    let pending = "";
+   // What the prompt has read and not acted on yet. The keys themselves live in
+// the reducer, which is pure and tested on its own; this closure owns the
+// terminal and nothing else. The dropdown only exists on a terminal: with a
+// redirected stdin, "/" has to stay plain text as it always did.
+let read: PromptMenuState = {
+pending: "",
+draft: "",
+read: 0,
+selected: null,
+commands: activeCommands,
+enabled: process.stdin.isTTY && process.stdout.isTTY,
+};
 
-    const closeMenu = () => {
-      menu = null;
-      render();
-    };
-
+// The reducer decides and this applies: fold the chunk into the draft, then
+// paint, submit or leave as the action says. Following the reducer's `selected`
+// is what closes the dropdown the moment the text stops being a bare command.
 const onData = (buf: Buffer) => {
-const str = pending + buf.toString("utf8");
-pending = "";
+// The tty flags are read per chunk: the dropdown is a thing only a terminal
+// can paint, and a redirected stdin must keep treating "/" as plain text.
+const result = interpretMenuInput(read, buf.toString("utf8"));
 
-for (let i = 0; i < str.length; i++) {
-const char = str[i];
+read = { ...result.state, enabled: process.stdin.isTTY && process.stdout.isTTY };
+typed = read.draft;
+menu = read.selected === null ? null : { selected: read.selected };
 
-if (char === "\t") {
-// Tab completes the highlighted command and closes the menu, so the
-// next keystroke writes arguments instead of filtering again.
-if (menu) {
-const command = selectedCommand();
-if (command) typed = `/${command.name} `;
-closeMenu();
-}
-continue;
-}
-
-if (char === "\u001b") {
-const rest = str.slice(i);
-
-if (rest.startsWith("\u001b[A") || rest.startsWith("\u001b[B")) {
-i += 2;
-if (menu) {
-const delta = rest.startsWith("\u001b[A") ? -1 : 1;
-menu.selected = moveSelection(menu.selected, delta, menuState().items.length);
+switch (result.action.kind) {
+case "render":
 render();
-}
-continue;
-}
-
-if (rest.startsWith("\u001b[C") || rest.startsWith("\u001b[D")) {
-i += 2;
-continue;
-}
-
-if (rest.length < 3 && rest.startsWith("\u001b[")) {
-pending = rest;
 return;
-}
-
-// Esc, or any other escape sequence: the menu closes and the draft is
-// left as it is, because the text on screen is the user's.
-closeMenu();
-continue;
-}
-
-if (char === "\r" || char === "\n") {
-if (menu) {
-const command = selectedCommand();
-
-if (command) {
-typed = `/${command.name}`;
-render();
-} else {
-// Nothing matches, so the menu has no answer. Closing it and sending
-// the draft beats the old dead end, where enter did nothing at all on
-// a query the filter rejected.
-menu = null;
-render();
-}
-}
-finish();
+case "submit":
+finish(result.action.value);
 return;
-}
-
-if (char === "\u0003") {
-// Ctrl-C
+case "exit":
 cleanup();
 process.stdout.write("\n");
 process.exit(130);
-}
-
-if (char === "\u007f" || char === "\b") {
-if (!typed.length) continue;
-typed = typed.slice(0, -1);
-if (menu) {
-if (typed.startsWith("/")) menu.selected = 0;
-else menu = null;
-}
-render();
-continue;
-}
-
-if (
-char === "/" &&
-!menu &&
-typed === "" &&
-activeCommands.length &&
-process.stdin.isTTY &&
-process.stdout.isTTY
-) {
-typed = "/";
-menu = { selected: 0 };
-render();
-continue;
-}
-
-if (char >= " ") {
-typed += char;
-if (menu) menu.selected = 0;
-render();
-}
+return;
+default:
+return;
 }
 };
 
-    const finish = () => {
-      const answer = typed;
+const finish = (answer: string) => {
       clearRenderedLines();
       cleanup();
       process.stdout.write("\n");

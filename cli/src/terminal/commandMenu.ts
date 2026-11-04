@@ -59,6 +59,18 @@ hiddenAbove: number;
 hiddenBelow: number;
 }
 
+// The query the "/" dropdown filters by, or null when the dropdown must stay
+// shut. Only the first token is a command: once a space is typed the user is
+// writing arguments, and a list that kept filtering then would cover the
+// transcript for nothing. Both renderers call this, so the line prompt and the
+// TUI cannot disagree on when the dropdown is open.
+export const menuQueryFor = (draft: string): string | null => {
+if (!draft.startsWith("/")) return null;
+if (/\s/.test(draft)) return null;
+
+return draft.slice(1);
+};
+
 // What a command is matched by when the user types: its name and its aliases.
 export const COMMAND_KEYS = (command: CommandOption): string[] => [
 command.name,
