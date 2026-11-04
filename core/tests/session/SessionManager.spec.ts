@@ -687,6 +687,39 @@ describe("SessionManager turn outcome", () => {
     });
   });
 
+  it("retries an empty answer instead of closing the turn with it", async () => {
+    const session = makeSession();
+
+    provider.chat = vi
+      .fn()
+      .mockResolvedValueOnce(stopTurn(""))
+      .mockResolvedValueOnce(stopTurn("finally"));
+
+    const response = await session.ask("go");
+
+    expect(provider.chat).toHaveBeenCalledTimes(2);
+    expect(response.text).toBe("finally");
+    // The empty attempt is not persisted: only "go" and the real answer remain.
+    const assistant = session.history.filter((message) => message.role === "assistant");
+    expect(assistant.map((message) => message.content)).toEqual(["finally"]);
+  });
+
+  it("fails the turn when the model stays empty, without persisting the empty message", async () => {
+    const session = makeSession();
+
+    provider.chat = vi.fn(async () => stopTurn(""));
+
+    const response = await session.ask("go");
+
+    // The loop retries the empty answer up to maxIterations (8 by default).
+    expect(provider.chat.mock.calls.length).toBeGreaterThan(1);
+    expect(response.text).toContain("empty response");
+    expect(response.outcome?.status).toBe("incomplete");
+    expect(response.outcome?.pending).toContain("get a non-empty answer from the model");
+    // No assistant message with empty content reached the history.
+    expect(session.history.some((message) => message.role === "assistant")).toBe(false);
+  });
+
   it("reports an incomplete turn when the iteration cap is reached", async () => {
     const session = makeSession();
 
@@ -1023,8 +1056,10 @@ recordingStore(saved),
     await session.waitSpawn(handle.spawnId);
     await parentTurn(session);
 
+    // A child with an empty answer is now a failed turn, not a "done" with no
+    // output: the parent is told the child returned nothing to report.
     expect(deliveredFor(session, handle.spawnId)).toEqual([
-      `[spawn ${handle.spawnId} · coder · done]\n(no output)`,
+      `[spawn ${handle.spawnId} · coder · done]\nStopped: the model returned an empty response`,
     ]);
   });
 

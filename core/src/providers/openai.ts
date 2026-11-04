@@ -183,8 +183,14 @@ export class OpenAiProvider extends BasicProvider implements Provider {
             }
 
             if (json.usage) usage = this.mapUsage(json.usage);
-          } catch {
-            // Ignorar errores de parseo en chunks parciales
+          } catch (err) {
+            // A chunk that does not parse is either a partial line split across
+            // reads (harmless, the next read completes it) or a gateway error
+            // payload. Silence here used to hide the second case and left the
+            // turn ending empty with nothing in the log: keep a debug trace
+            // with the raw line so the cause is reachable.
+            const raw = trimmed.slice(0, 200);
+            logger.debug({ err, raw }, "Unparseable stream chunk");
           }
         }
       }

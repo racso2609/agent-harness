@@ -752,21 +752,50 @@ deliveredSpawns: deliveredSpawns.length ? deliveredSpawns : undefined,
       this.addUsage(usage, result.usage);
       costUsd += result.costUsd ?? 0;
       lastText = result.turn.text;
-      this.appendAssistant(result.turn.text, result.turn.toolCalls);
 
-      const readyToAnswer =
-        result.turn.finishReason !== "toolCalls" || result.turn.toolCalls.length === 0;
+      const toolCalls = result.turn.toolCalls ?? [];
+      // An answer with neither text nor a tool call is the gateway coming back
+      // empty (transient error, rate limit, truncated stream). It is not a
+      // valid "finished" turn: treating it as one closed the turn with an empty
+      // assistant message, the "turn failed" the user sees with nothing to
+      // explain it. Retry a couple of times; if it stays empty, report a
+      // failure instead of a silent success.
+      const empty = !result.turn.text.trim() && toolCalls.length === 0;
 
-      if (readyToAnswer) {
+      if (empty && iteration < maxIterations - 1) {
+        logger.warn("Empty assistant turn; retrying");
+        continue;
+      }
+
+      // The empty answer is not persisted: an assistant message with no content
+      // and no tool call only pollutes the history and confuses the UI.
+      if (!empty) this.appendAssistant(result.turn.text, toolCalls);
+
+      if (!empty) {
+        // With no tool calls this is the final answer; with them, keep looping
+        // and feed the results back.
+        if (result.turn.finishReason !== "toolCalls" || toolCalls.length === 0) {
+          return {
+            text: result.turn.text,
+            usage,
+            costUsd,
+            outcome: this.outcomeOf(failedTools),
+          };
+        }
+      } else {
         return {
-          text: result.turn.text,
+          text: "Stopped: the model returned an empty response",
           usage,
           costUsd,
-          outcome: this.outcomeOf(failedTools),
+          outcome: {
+            status: "incomplete",
+            pending: [...failedTools, "get a non-empty answer from the model"],
+            next: "Retry the turn; if it persists, check the gateway quota and status.",
+          },
         };
       }
 
-      for (const call of result.turn.toolCalls) {
+      for (const call of toolCalls) {
         const toolResult = await this.runTool(call, onEvent);
         if (toolResult.isError) failedTools.push(call.name);
         const content = toolResult.isError
