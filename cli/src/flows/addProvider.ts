@@ -1,5 +1,9 @@
 import type { IHarness } from "@racso/core";
-import { input, select } from "@/terminal/stdin";
+// The text prompts still read stdin: these flows run either from the line
+// renderer (which owns stdin anyway) or during first-run setup, before Ink is
+// mounted. Only the pickers go through the UI, so the TUI can show them.
+import { input } from "@/terminal/stdin";
+import type { UiAdapter } from "@/ui/UiAdapter";
 
 // Narrow view of the harness the provider flows need, so first-run setup can
 // reuse them straight on top of `Config`.
@@ -15,6 +19,7 @@ export type ProviderTarget = ProviderPrimitives;
 // Interactive flow to register a provider instance. Core only receives the
 // resolved values: the CLI owns every prompt.
 export const addProvider = async (
+ ui: UiAdapter,
   harness: ProviderTarget,
   types: readonly string[] = [],
 ): Promise<{ id: string; changedDefault: boolean } | undefined> => {
@@ -33,7 +38,14 @@ export const addProvider = async (
     if (overwrite !== "y" && overwrite !== "yes") return undefined;
   }
 
-  const type = available.length === 1 ? available[0] : await select("Backend type:", available);
+  const type =
+available.length === 1
+? available[0]
+: await ui.select({
+message: "Backend type:",
+options: available.map((option) => ({ id: option, label: option })),
+});
+if (!type) return undefined;
 
   const url = (await input(`[${id}] Base URL: `)).trim();
   if (!url) throw new Error("Base URL is required");

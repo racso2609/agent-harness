@@ -79,9 +79,11 @@ private autoContinuations = 0;
 
 constructor(options: MainLoopOptions = {}) {
 this.config = options.config ?? new Config();
-this.flows = createFlows([...SUPPORTED_PROVIDERS]);
 this.commands = new CommandRepository();
+// The UI comes before the flows: they ask their pickers through it, so it
+// has to exist before anything that may open one is built.
 this.ui = options.tui ? new TuiUiAdapter(this.config.config.ui?.theme) : new CliUiAdapter();
+this.flows = createFlows(this.ui, [...SUPPORTED_PROVIDERS]);
 this.harness = createHarness({
 config: this.config,
 logger: uiLogger(this.ui),
@@ -130,6 +132,9 @@ onExit: () => this.shutdown(0),
 // The draft decides whether a continuation may start: the box reports every
 // change, including the emptying that follows a send.
 onDraftChange: () => this.maybeContinue({ fromDraft: true }),
+// The catalog the input box completes: the dropdown is a menu of the
+// commands the loop can actually run.
+commands: this.commands.list(),
 });
 } else {
 this.printStatus();

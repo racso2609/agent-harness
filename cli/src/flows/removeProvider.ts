@@ -1,9 +1,13 @@
 import type { IHarness } from "@racso/core";
-import { input, select } from "@/terminal/stdin";
+// The confirmation stays on stdin: only the selection is a picker, and the
+// renderer that owns the input stream is what draws it.
+import { input } from "@/terminal/stdin";
+import type { UiAdapter } from "@/ui/UiAdapter";
 
 // Interactive flow to drop a provider instance. Refuses to remove the last
 // remaining one so the harness always has something to boot from.
 export const removeProvider = async (
+ ui: UiAdapter,
   harness: IHarness,
   id?: string,
 ): Promise<string | undefined> => {
@@ -14,8 +18,15 @@ export const removeProvider = async (
     `${provider.id} (${provider.type})${provider.isDefault ? " *default" : ""}`;
 
   const labels = details.map(label);
-  const target = id?.trim() || (await select("Select the provider to remove:", labels));
-  if (!target) return undefined;
+// The option id is the provider id, so the label is only what the user reads
+// and an id typed on the command line is accepted as is.
+const target =
+id?.trim() ||
+(await ui.select({
+message: "Select the provider to remove:",
+options: details.map((provider) => ({ id: provider.id, label: label(provider) })),
+}));
+if (!target) return undefined;
 
   // Accept either the raw id or the labelled menu entry.
   const selected =

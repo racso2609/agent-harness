@@ -28,6 +28,7 @@ useStdout: () => ({ stdout: { columns: 80, rows: 24 } }),
 const { MainLoop } = await import("../../src/MainLoop");
 const { Config, SUPPORTED_PROVIDERS } = await import("@racso/core");
 const { TuiUiAdapter } = await import("../../src/ui/TuiUiAdapter");
+const { createFlows } = await import("../../src/flows");
 
 // The loop runs a stdin loop that cannot be mounted, so the prompts are handed
 // to it the way the TUI does: through the callback the adapter gets from
@@ -300,5 +301,46 @@ await until(() => calls.ask.length === 1);
 
 expect(calls.ask[0]!.prompt).toBe("run the tests");
 expect(calls.ask[0]!.options?.unprompted).toBeUndefined();
+});
+});
+
+// /resume without an argument is a picker, and the picker used to hand back a
+// "N) id" label that the flow decoded with a regex. These cases pin the two
+// halves of that contract: the app receives the catalog of commands, and the
+// flow hands the harness the id the option carried.
+describe("the session picker", () => {
+it("identifies a session by its id, not by its position in the list", async () => {
+// The harness can order listSessions() differently between two calls, so a
+// position was never a stable identity for the session the user chose.
+const loaded: string[] = [];
+const { harness } = fakeHarness();
+const ui = {
+select: async (request: { options: { label: string }[] }) => {
+expect(request.options.map((option) => option.label)).toEqual([
+"session-old — hola",
+]);
+
+return "session-old";
+},
+} as unknown as Parameters<typeof createFlows>[0];
+
+const changed = await createFlows(ui, []).changeSession(
+{ ...harness, loadSession: async (id: string) => (loaded.push(id), true) } as IHarness,
+);
+
+expect(changed).toBe(true);
+expect(loaded).toEqual(["session-old"]);
+});
+
+it("sends the command catalog to the app, which is what the dropdown lists", async () => {
+const start = vi.spyOn(TuiUiAdapter.prototype, "start");
+
+await boot();
+
+const received = start.mock.calls[0]?.[0] as { commands?: { name: string }[] };
+const names = received.commands?.map((command) => command.name) ?? [];
+
+expect(names).toContain("resume");
+expect(names).toContain("model");
 });
 });
