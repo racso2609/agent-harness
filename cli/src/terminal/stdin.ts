@@ -2,7 +2,14 @@ import fs from "node:fs";
 import path from "node:path";
 import terminalImage from "terminal-image";
 import type { CommandOption } from "@/commands/CommandRepository";
-import { clampSelection, filterCommands, moveSelection, visibleCommands } from "./commandMenu";
+import {
+  COMMAND_KEYS,
+  clampSelection,
+  menuItems,
+  menuRows,
+  moveSelection,
+  type MenuState,
+} from "./commandMenu";
 
 // State of the prompt currently waiting for input, kept so async output
 // (logs) can wipe and redraw the line without losing what the user typed.
@@ -24,7 +31,18 @@ const write = (text: string) => {
   process.stdout.write(`${text}\n`);
 };
 
-const matches = () => filterCommands(activeCommands, typed.slice(1));
+// The filtered list in the shared shape. Storing the selection next to it
+// lets the window maths come from commandMenu instead of being written again
+// here, where it could drift from what the TUI paints.
+const menuState = (): MenuState<CommandOption> => {
+const query = typed.slice(1);
+
+return { items: menuItems(query, activeCommands, COMMAND_KEYS), query, selected: menu?.selected ?? 0 };
+};
+
+// How many rows fit under the prompt without pushing the menu off screen.
+const maxVisibleRows = () =>
+Math.max(1, Math.min(MAX_VISIBLE_COMMANDS, (process.stdout.rows ?? 24) - 4));
 
 // Erases the menu lines and leaves the cursor at the start of the prompt line.
 const clearRenderedLines = () => {
@@ -40,27 +58,41 @@ const clearRenderedLines = () => {
 };
 
 const renderMenuLines = (): string[] => {
-  if (!menu) return [];
-  const state = menu;
+if (!menu) return [];
 
-  const commands = matches();
-  state.selected = clampSelection(state.selected, commands.length);
+const state = menuState();
+// The stored index is clamped in place: the user's next arrow starts from
+// where the list actually is, not from where it was before the query shrank
+// it.
+state.selected = clampSelection(state.selected, state.items.length);
+menu = { selected: state.selected };
 
-  if (!commands.length) return ["  No matching commands"];
+// The dropdown says so instead of vanishing: an empty list looks like the
+// menu broke, and enter still sends the draft.
+if (!state.items.length) return [" no matching commands"];
 
-  const maxVisible = Math.max(1, Math.min(MAX_VISIBLE_COMMANDS, (process.stdout.rows ?? 24) - 4));
-  const visible = visibleCommands(commands, state.selected, maxVisible);
-  const width = Math.max(20, (process.stdout.columns ?? 80) - 1);
+const rows = menuRows(state, maxVisibleRows());
+const width = Math.max(20, (process.stdout.columns ?? 80) - 1);
+// The range only appears when part of the list is out of sight, so it does
+// not become noise on the usual short list.
+const range =
+rows.hiddenAbove || rows.hiddenBelow
+? ` ${state.selected + 1}/${state.items.length}`
+: "";
 
-  return visible.map((command) => {
-    const aliases = command.aliases?.length
-      ? ` (${command.aliases.map((alias) => `/${alias}`).join(", ")})`
-      : "";
-    const label = `  /${command.name}${aliases}  ${command.description}`;
-    const text = label.length > width ? `${label.slice(0, Math.max(0, width - 1))}…` : label;
+const painted = rows.rows.map((command, index) => {
+const aliases = command.aliases?.length
+? ` (${command.aliases.map((alias) => `/${alias}`).join(", ")})`
+: "";
+const label = ` /${command.name}${aliases} ${command.description}${
+index === rows.rows.length - 1 ? range : ""
+}`;
+const text = label.length > width ? `${label.slice(0, Math.max(0, width - 1))}…` : label;
 
-    return command === commands[state.selected] ? `\x1b[7m${text}\x1b[0m` : text;
-  });
+return rows.start + index === state.selected ? `\x1b[7m${text}\x1b[0m` : text;
+});
+
+return painted;
 };
 
 const render = () => {
@@ -83,9 +115,11 @@ const reset = () => {
 };
 
 const selectedCommand = () => {
-  if (!menu) return undefined;
-  const commands = matches();
-  return commands[clampSelection(menu.selected, commands.length)];
+if (!menu) return undefined;
+
+const state = menuState();
+
+return state.items[clampSelection(state.selected, state.items.length)];
 };
 
 export interface InputOptions {
@@ -110,90 +144,111 @@ export function input(message: string, options: InputOptions = {}): Promise<stri
       render();
     };
 
-    const onData = (buf: Buffer) => {
-      const str = pending + buf.toString("utf8");
-      pending = "";
+const onData = (buf: Buffer) => {
+const str = pending + buf.toString("utf8");
+pending = "";
 
-      for (let i = 0; i < str.length; i++) {
-        const char = str[i];
+for (let i = 0; i < str.length; i++) {
+const char = str[i];
 
-        if (char === "\u001b") {
-          const rest = str.slice(i);
+if (char === "\t") {
+// Tab completes the highlighted command and closes the menu, so the
+// next keystroke writes arguments instead of filtering again.
+if (menu) {
+const command = selectedCommand();
+if (command) typed = `/${command.name} `;
+closeMenu();
+}
+continue;
+}
 
-          if (rest.startsWith("\u001b[A") || rest.startsWith("\u001b[B")) {
-            i += 2;
-            if (menu) {
-              const delta = rest.startsWith("\u001b[A") ? -1 : 1;
-              menu.selected = moveSelection(menu.selected, delta, matches().length);
-              render();
-            }
-            continue;
-          }
+if (char === "\u001b") {
+const rest = str.slice(i);
 
-          if (rest.startsWith("\u001b[C") || rest.startsWith("\u001b[D")) {
-            i += 2;
-            continue;
-          }
+if (rest.startsWith("\u001b[A") || rest.startsWith("\u001b[B")) {
+i += 2;
+if (menu) {
+const delta = rest.startsWith("\u001b[A") ? -1 : 1;
+menu.selected = moveSelection(menu.selected, delta, menuState().items.length);
+render();
+}
+continue;
+}
 
-          if (rest.length < 3 && rest.startsWith("\u001b[")) {
-            pending = rest;
-            return;
-          }
+if (rest.startsWith("\u001b[C") || rest.startsWith("\u001b[D")) {
+i += 2;
+continue;
+}
 
-          closeMenu();
-          continue;
-        }
+if (rest.length < 3 && rest.startsWith("\u001b[")) {
+pending = rest;
+return;
+}
 
-        if (char === "\r" || char === "\n") {
-          if (menu) {
-            const command = selectedCommand();
-            if (!command) continue;
-            typed = `/${command.name}`;
-            render();
-          }
-          finish();
-          return;
-        }
+// Esc, or any other escape sequence: the menu closes and the draft is
+// left as it is, because the text on screen is the user's.
+closeMenu();
+continue;
+}
 
-        if (char === "\u0003") {
-          // Ctrl-C
-          cleanup();
-          process.stdout.write("\n");
-          process.exit(130);
-        }
+if (char === "\r" || char === "\n") {
+if (menu) {
+const command = selectedCommand();
 
-        if (char === "\u007f" || char === "\b") {
-          if (!typed.length) continue;
-          typed = typed.slice(0, -1);
-          if (menu) {
-            if (typed.startsWith("/")) menu.selected = 0;
-            else menu = null;
-          }
-          render();
-          continue;
-        }
+if (command) {
+typed = `/${command.name}`;
+render();
+} else {
+// Nothing matches, so the menu has no answer. Closing it and sending
+// the draft beats the old dead end, where enter did nothing at all on
+// a query the filter rejected.
+menu = null;
+render();
+}
+}
+finish();
+return;
+}
 
-        if (
-          char === "/" &&
-          !menu &&
-          typed === "" &&
-          activeCommands.length &&
-          process.stdin.isTTY &&
-          process.stdout.isTTY
-        ) {
-          typed = "/";
-          menu = { selected: 0 };
-          render();
-          continue;
-        }
+if (char === "\u0003") {
+// Ctrl-C
+cleanup();
+process.stdout.write("\n");
+process.exit(130);
+}
 
-        if (char >= " ") {
-          typed += char;
-          if (menu) menu.selected = 0;
-          render();
-        }
-      }
-    };
+if (char === "\u007f" || char === "\b") {
+if (!typed.length) continue;
+typed = typed.slice(0, -1);
+if (menu) {
+if (typed.startsWith("/")) menu.selected = 0;
+else menu = null;
+}
+render();
+continue;
+}
+
+if (
+char === "/" &&
+!menu &&
+typed === "" &&
+activeCommands.length &&
+process.stdin.isTTY &&
+process.stdout.isTTY
+) {
+typed = "/";
+menu = { selected: 0 };
+render();
+continue;
+}
+
+if (char >= " ") {
+typed += char;
+if (menu) menu.selected = 0;
+render();
+}
+}
+};
 
     const finish = () => {
       const answer = typed;
