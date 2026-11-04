@@ -314,14 +314,17 @@ TUI de pantalla completa (`--tui`). La lógica del turno es idéntica en ambos.
 | `pageUp` / `pageDown` | Una página de historial (deja una línea de contexto)          |
 | `ctrl+u` / `ctrl+d`   | Media página                                                  |
 | `↑` / `↓`             | Una línea                                                     |
+| rueda / trackpad      | Tres líneas por muesca                                        |
 | `home` / `end`        | Tope / fondo del historial                                    |
 | `ctrl+r` / `ctrl+t`   | Colapsar o expandir todo el razonamiento / la salida de tools |
 | `ctrl+c`              | Salir                                                         |
 
 El historial se mide en líneas reales a la altura del terminal: si estás desplazado
 hacia arriba, la respuesta que se está generando **no** mueve la vista; al volver al
-fondo el seguimiento se re-engancha solo. La rueda del ratón no scrollea: ink 8 no
-reporta eventos de ratón.
+fondo el seguimiento se re-engancha solo. La rueda y el trackpad scrollean tres líneas
+por muesca: ink 8 no reporta eventos de ratón, así que la TUI activa el modo SGR y lee
+las muescas de stdin por su cuenta. Eso hace que el ratón quede capturado por la app:
+para seleccionar texto hay que mantener `Shift` (u `Option`, según el terminal).
 
 ### Logs
 

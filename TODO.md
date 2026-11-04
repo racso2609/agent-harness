@@ -23,7 +23,7 @@ dependencias. Formato de cada lista: skill `core/skills/todo-format.md`.
 Los puntos y las notas sueltas que había en este archivo se cerraron así:
 
 - **easy install** → `cli/TODO.md` §P4 (4 tareas).
-- **core gateway persistente (cronjobs + webhooks)** → `core/TODO.md` §10 (9 tareas).
+- **core gateway persistente (cronjobs + webhooks)** → `core/TODO.md` §10 (12 tareas).
 - **analizar si vale la pena usar el gateway en el CLI** → no es tarea mientras el
   gateway no exista: queda como pregunta abierta en `cli/TODO.md`.
 

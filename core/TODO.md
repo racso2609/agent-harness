@@ -295,10 +295,52 @@ Nota: los puntos 1–2 desbloquean `cli/TODO.md` §P1; el 3 desbloquea §P3; el 
       API pública nueva añade (`createGateway(...)` o equivalente).
       Depends on: recibir webhooks como disparadores.
 
+- [ ] **Extraer la ejecución de un turno fuera del bucle del CLI**
+`cli/src/MainLoop.ts` mezcla el bucle de stdin con la ejecución del turno
+(`harness.ask` + traducción de `ChatEvent` a `UiEvent`), así que hoy el core no
+puede completar un turno sin una terminal abierta y cada consumidor nuevo
+(gateway, web) reimplementaría el turno por su cuenta.
+Done when: existe una pieza que recibe un prompt y devuelve los eventos del turno
+sin leer stdin ni escribir en stdout, `MainLoop` la consume en lugar de ejecutarlo
+por dentro, y los tests existentes del CLI siguen en verde.
+Depends on: nada.
+Decidir antes: si esa pieza vive en `core` (y entonces `CONTRACT.md` gana una
+entrada en `IHarness`) o en `cli`, dado que el contrato ya prohíbe interacción
+dentro del core.
+
+- [ ] **Definir la política de aprobaciones de un trabajo sin usuario**
+Un trabajo de gateway no tiene a quién preguntar y hoy `SessionManager.approve`
+deniega cuando no hay handler instalado, así que una tool sujeta a aprobación
+(`shell`) mata el trabajo en silencio sin que el usuario se entere.
+Done when: está escrito por job `allow`/`deny`/`queue` y un test en
+`core/tests/session/` verifica que un trabajo con política `deny` no invoca el
+`approvalHandler` y que la decisión queda registrada en su `SpawnHandle`.
+Depends on: diseñar el contrato del gateway.
+Decidir antes: si la política vive en la definición del trabajo o en el bloque
+`gateway` de `Config`, y si `queue` puede esperar indefinidamente o expira.
+
+- [ ] **Serializar las escrituras del `SessionStore` entre turnos concurrentes**
+`SessionStore.save` reescribe el fichero entero sin lock ni escritura atómica, así
+que dos turnos concurrentes de la misma sesión se pisan (last-write-wins, con
+riesgo de fichero a medio escribir si el proceso cae), y un gateway necesita N
+sesiones con turnos que pueden solaparse.
+Done when: existe un test en `core/tests/session/SessionStore.spec.ts` que lanza
+dos escrituras concurrentes sobre el mismo id y fija que no se pierde ninguna y
+que el fichero final siempre es JSON válido.
+Depends on: definir el almacenamiento de trabajos.
+Decidir antes: si el lock es por fichero de sesión o por proceso/mutex en memoria,
+dado que el gateway puede correr en un solo proceso.
+
 ### 10.1 orden sugerido
 
 1. Contrato (`GATEWAY.md`) — sin él las otras piezas divergen.
-2. Almacenamiento de trabajos + bloque `gateway` en `Config`.
-3. Servidor HTTP (`spawn`/`status`) + token.
-4. Cronjobs + webhooks.
-5. Persistencia entre reinicios y documentación en `CONTRACT.md`.
+2. Extracción del turno fuera del `MainLoop` — sin ella el gateway no puede
+   completar un turno sin terminal y lo reimplementaría.
+3. Almacenamiento de trabajos + bloque `gateway` en `Config`.
+4. Servidor HTTP (`spawn`/`status`) + token.
+5. Política de aprobaciones por job — entra aquí, cuando ya hay trabajos que
+   pueden pedir una tool sujeta a aprobación sin nadie delante.
+6. Lock de escritura del `SessionStore` — antes de que cronjobs y webhooks
+   solapen turnos sobre la misma sesión.
+7. Cronjobs + webhooks.
+8. Persistencia entre reinicios y documentación en `CONTRACT.md`.
