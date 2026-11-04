@@ -53,6 +53,10 @@ class Harness implements IHarness {
     this.session.save();
   }
 
+  conversation() {
+    return this.session.conversation();
+  }
+
   listProviders() {
     return this.session.listProviders();
   }

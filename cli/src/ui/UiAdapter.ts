@@ -1,4 +1,4 @@
-import type { ApprovalRequest, SpawnHandle, SpawnStatus } from "@racso/core";
+import type { ApprovalRequest, ConversationEntry, SpawnHandle, SpawnStatus } from "@racso/core";
 
 // Session snapshot rendered in the status bar. Kept as a plain shape so the
 // UI layer never imports the core session internals.
@@ -49,6 +49,10 @@ continuation?: boolean;
 // so a resumed session shows what it launched instead of an empty strip.
 | { type: "spawnHistory"; handles: SpawnHandle[] }
 | { type: "spawnSettled"; handle: SpawnHandle }
+// The conversation of the session now in charge, oldest first. It replaces
+// the transcript: a resumed session must not keep showing the messages of
+// the one we left. Empty means the session has nothing to show.
+| { type: "conversation"; entries: ConversationEntry[] }
 | { type: "reset" };
 
 export type SpawnSnapshot = { handle: SpawnHandle; status: SpawnStatus };

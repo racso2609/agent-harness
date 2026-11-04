@@ -1665,3 +1665,92 @@ recordingStore(saved),
     await expect(session.collectSpawns()).resolves.toEqual([]);
   });
 });
+
+// The UI repaints the transcript from core, so what counts as conversation
+// has to be filtered here and not in each caller.
+describe("SessionManager conversation", () => {
+const makeSession = () => {
+const session = new SessionManager(makeConfig({ autoCompact: false }), makeStore());
+session.provider = new OpenAiProvider("https://api.example.com", "key", "model");
+session.providerName = "openai";
+session.model = "model";
+return session;
+};
+
+it("keeps user and assistant messages and drops system and tool ones", () => {
+const session = makeSession();
+session.history = [
+{ role: "system", content: "you are a reviewer" },
+{ role: "user", content: "first" },
+{ role: "assistant", content: "answer one" },
+{ role: "tool", content: "file contents", toolCallId: "call-1" },
+{ role: "assistant", content: "answer two" },
+];
+
+expect(session.conversation()).toEqual([
+{ role: "user", content: "first" },
+{ role: "assistant", content: "answer one" },
+{ role: "assistant", content: "answer two" },
+]);
+});
+
+it("omits assistant turns that carry only tool calls", () => {
+const session = makeSession();
+session.history = [
+{ role: "user", content: "do it" },
+{ role: "assistant", content: "" },
+{ role: "assistant", content: "   \n  " },
+{ role: "assistant", content: "done" },
+];
+
+expect(session.conversation()).toEqual([
+{ role: "user", content: "do it" },
+{ role: "assistant", content: "done" },
+]);
+});
+
+it("trims the content and drops entries left empty", () => {
+const session = makeSession();
+session.history = [
+{ role: "user", content: "   " },
+{ role: "user", content: "  real question  " },
+];
+
+expect(session.conversation()).toEqual([{ role: "user", content: "real question" }]);
+});
+
+it("returns an empty list for a record without history", () => {
+const session = makeSession();
+
+expect(session.conversation()).toEqual([]);
+});
+
+it("keeps the oldest message first", () => {
+const session = makeSession();
+session.history = [
+{ role: "user", content: "one" },
+{ role: "assistant", content: "two" },
+{ role: "user", content: "three" },
+{ role: "assistant", content: "four" },
+];
+
+expect(session.conversation().map((entry) => entry.content)).toEqual([
+"one",
+"two",
+"three",
+"four",
+]);
+});
+
+it("hands out a copy, so mutating it never touches the history", () => {
+const session = makeSession();
+session.history = [{ role: "user", content: "keep me" }];
+
+const conversation = session.conversation();
+conversation.pop();
+conversation.push({ role: "assistant", content: "invented" });
+
+expect(session.history).toEqual([{ role: "user", content: "keep me" }]);
+expect(session.conversation()).toEqual([{ role: "user", content: "keep me" }]);
+});
+});

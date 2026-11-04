@@ -414,3 +414,63 @@ describe("transcript anchoring", () => {
     expect(source).toContain("writeAnchored");
   });
 });
+
+// /resume loads another session: its conversation replaces the whole
+// transcript, and the live strip of the session we left has no business on
+// screen. `history` is left to spawnHistory, which the loop sends right after.
+describe("the conversation of the session now in charge", () => {
+  const switchTo = (entries: { role: "user" | "assistant"; content: string }[]): UiEvent[] => [
+    { type: "turnStart", prompt: "de la sesión anterior" },
+    { type: "text", delta: "respuesta anterior" },
+    { type: "turnEnd" },
+    { type: "spawn", handle: settled({ status: "running", finishedAt: undefined }) },
+    { type: "notice", message: "log de la anterior" },
+    { type: "conversation", entries },
+  ];
+
+  it("replaces the entries with the restored conversation", () => {
+    const ui = play(
+      switchTo([
+        { role: "user", content: "pregunta vieja" },
+        { role: "assistant", content: "respuesta vieja" },
+      ]),
+    );
+
+    expect(ui.lines.map((line) => line.role)).toEqual(["user", "answer"]);
+    expect(ui.text(0)).toBe("pregunta vieja");
+    // Answers go through the markdown stream, like a live one.
+    expect(ui.text(1)).toBe("respuesta vieja");
+  });
+
+  it("empties the live strip and the collapsed set of the previous session", () => {
+    const ui = play(switchTo([{ role: "user", content: "hola" }]));
+
+    const state = (ui as unknown as { state: TuiState }).state;
+
+    expect(state.spawns).toEqual([]);
+    expect(state.expanded.size).toBe(0);
+  });
+
+  it("keeps the restored children the loop sends next", () => {
+    const handle = settled({ spawnId: "spawn-old", status: "done" });
+
+    const ui = play([
+      ...switchTo([{ role: "user", content: "hola" }]),
+      { type: "spawnHistory", handles: [handle] },
+    ]);
+
+    expect((ui as unknown as { state: TuiState }).state.history.map((entry) => entry.id)).toEqual([
+      "spawn-old",
+    ]);
+  });
+
+  it("does not clear an empty transcript: nothing to show, nothing to do", () => {
+    const ui = play([
+      { type: "turnStart", prompt: "hola" },
+      { type: "answer", text: "listo" },
+      { type: "conversation", entries: [] },
+    ]);
+
+    expect(ui.lines.map((line) => line.role)).toEqual(["user", "answer"]);
+  });
+});

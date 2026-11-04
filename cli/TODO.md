@@ -406,7 +406,47 @@ formatSpawnOutcome(handle))`, es decir, comparaba la salida del adaptador contra
       conserva; y si se conserva, hay un test que fija que una entrada expandida en el
       turno N sigue expandida en el turno N+1, y una poda para que el set no crezca sin
       límite.
-      Depends on: nada.
+Depends on: nada.
+
+- [x] **`/resume` dejaba en pantalla la conversación de la sesión anterior**
+El core ya restauraba el historial (`SessionManager.load` → `this.history =
+record.history`), pero el CLI no tenía con qué leerlo ni evento para repintarlo, así que
+una sesión reanudada seguía mostrando los mensajes viejos hasta que el usuario los
+borraba y ponía los de la sesión cargada a mano.
+hecho (core): `conversation(): ConversationEntry[]` en `src/session/SessionManager.ts:575`
+filtra `system` (persona del agente, memoria de compactación) y `tool` (su resultado ya
+está resumido en la respuesta), descarta mensajes con `content` vacío tras `trim()`,
+respeta el orden más antiguo primero y devuelve copia (nunca la referencia interna
+`this.history`). Tipo `ConversationEntry` en `src/types/session.ts:36`, en `IHarness`
+(`src/contract.ts:78`) y delegado de una línea en `src/harness.ts:56`; documentado en
+`core/CONTRACT.md:92`.
+hecho (cli): evento `{ type: "conversation"; entries }` en `UiEvent`
+(`src/ui/UiAdapter.ts:55`), que **reemplaza** el transcript y no va con `reset`;
+`MainLoop#showConversation` (`src/MainLoop.ts:37`) no emite nada si la conversación está
+vacía (una sesión nueva no debe borrar la pantalla) y se llama tras `initialize()`
+(`src/MainLoop.ts:110`) y cuando un comando cambia de sesión (`src/MainLoop.ts:289`, antes
+de `showChildHistory`). La TUI (`src/ui/TuiUiAdapter.tsx:318`) sustituye `lines` (`user` →
+entrada `user`, `assistant` → `answer` pasado por `MarkdownStream` para que el histórico
+se pinte con el mismo markdown que una respuesta en vivo) y limpia `streams`, `anchors`,
+`spawns` (la franja viva era de la sesión anterior) y `expanded`; conserva `history` (los
+hijos restaurados llegan justo después) y `status`. El modo líneas
+(`src/ui/CliUiAdapter.ts:147`) limpia la pantalla y resume en vez de volcar al scrollback:
+`formatConversationSummary` (`src/ui/CliUiAdapter.ts:45`) compone
+`conversation restored: N messages`, `you: …` y `assistant: …` con el último intercambio,
+colapsando espacios y saltos y recortando a 200 con `…`.
+tests: 6 en `core/tests/session/SessionManager.spec.ts` (filtrado de system/tool, respuesta
+vacía, copia, historial vacío, orden), 5 en `tests/ui/cliAdapter.spec.ts` (limpia antes de
+resumir, solo el último intercambio, recorte a 200, sesión sin respuesta, conversación
+vacía sin tocar pantalla), 4 en `tests/ui/spawnWiring.spec.ts` (el helper emite lo que dice
+el harness, silencio si vacía, y dos guardas de fuente sobre cuándo lo llama `MainLoop`) y
+4 en `tests/ui/transcript.spec.ts` (reemplaza las entradas, vacía la franja viva y el set
+`expanded`, conserva los hijos restaurados, no limpia si está vacía).
+pendiente: no hay flag `--resume`/`-r` y `src/main.ts` sigue sin pasar `sessionId`, así que
+el repintado de `start()` (`src/MainLoop.ts:110`) solo se activa cuando esa ruta se use; y
+falta verlo en una sesión real reanudada con `/resume`.
+Done when: tras `/resume` la pantalla muestra solo la conversación de la sesión reanudada,
+en los dos renderers y sin intervención manual.
+Depends on: nada.
 - [ ] **Un mensaje de commit afirma el estado del padre, y hay que medirlo en el padre**
       Los commits `eae796b` y `aa46e50` afirman cosas sobre el commit anterior («five
       mutations», «only one of them was covered») que resultaron falsas al medirlas: se

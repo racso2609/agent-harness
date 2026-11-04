@@ -234,3 +234,71 @@ it("prints nothing for an empty snapshot", () => {
 expect(printed([{ type: "status", status: {} }])).toBe("");
 });
 });
+
+// /resume changes session but the screen kept the previous conversation. The
+// loop now sends the one it is in charge of, and the line renderer starts over:
+// the scrollback cannot take a whole transcript back, so it says how many
+// messages came and repeats only the last exchange.
+describe("a session that replaced the transcript", () => {
+ const conversation = (entries: { role: "user" | "assistant"; content: string }[]) => [
+   { type: "conversation" as const, entries },
+ ];
+
+ it("clears the screen before printing the summary", () => {
+   const output = printed(
+     conversation([
+       { role: "user", content: "hola" },
+       { role: "assistant", content: "buenas" },
+     ]),
+   );
+
+   // \x1Bc is the reset CliUiAdapter.reset writes; the logo follows it through
+   // the stubbed printLogo, so only the escape itself is observable here.
+   expect(output.startsWith("\x1Bc")).toBe(true);
+ });
+
+ it("summarises the last exchange instead of dumping the transcript", () => {
+   const output = printed(
+     conversation([
+       { role: "user", content: "primera pregunta" },
+       { role: "assistant", content: "primera respuesta" },
+       { role: "user", content: "segunda pregunta" },
+       { role: "assistant", content: "segunda respuesta" },
+     ]),
+   );
+
+   expect(output).toContain("conversation restored: 4 messages\n");
+   expect(output).toContain("you: segunda pregunta\n");
+   expect(output).toContain("assistant: segunda respuesta\n");
+   // The older turns are not repeated on the scrollback.
+   expect(output).not.toContain("primera pregunta");
+   expect(output).not.toContain("primera respuesta");
+ });
+
+ it("cuts a long message down to a readable excerpt", () => {
+   const long = "a".repeat(500);
+   const output = printed(
+     conversation([
+       { role: "user", content: long },
+       { role: "assistant", content: long },
+     ]),
+   );
+
+   expect(output).toContain(`you: ${"a".repeat(200)}…\n`);
+   expect(output).toContain(`assistant: ${"a".repeat(200)}…\n`);
+   // The whole message never reaches the scrollback.
+   expect(output).not.toContain("a".repeat(201));
+ });
+
+ it("prints only the message when the session has no answer yet", () => {
+   const output = printed(conversation([{ role: "user", content: "hola" }]));
+
+   expect(output).toContain("you: hola\n");
+   expect(output).not.toContain("assistant:");
+ });
+
+ it("leaves the screen alone when the session has nothing to show", () => {
+   // A fresh session must not wipe the screen on boot.
+   expect(printed(conversation([]))).toBe("");
+ });
+});

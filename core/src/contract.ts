@@ -5,7 +5,7 @@ import type { SpawnEvent, SpawnEventListener, SpawnHandle, SpawnStatus } from "@
 import type { SessionStore } from "@/session/SessionStore";
 import type { ApprovalDecision, ApprovalRequest } from "@/tools";
 import type { ChatEventListener, AgentResponse, Model } from "@/types/providers";
-import type { SessionStatus, SessionSummary } from "@/types/session";
+import type { ConversationEntry, SessionStatus, SessionSummary } from "@/types/session";
 
 // Structured logger handed to the harness. Compatible with pino call shapes:
 // both logger.info("message") and logger.info({ meta }, "message") work.
@@ -73,6 +73,9 @@ export interface IHarness {
   // Persists the current session and loads the resolved one.
   loadSession(target: string): Promise<boolean>;
   save(): void;
+  // The conversation as the UI reads it back, oldest first. Only user and
+  // assistant messages: system, tool output and empty turns are filtered out.
+  conversation(): ConversationEntry[];
 
   // --- providers / models ---
   listProviders(): string[];

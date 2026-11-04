@@ -9,6 +9,15 @@ import { toSpawnEntry } from "./tui/progress";
 import { resolveTheme, type Theme } from "./tui/theme";
 import type { UiAdapter, UiEvent } from "./UiAdapter";
 
+// Parses a restored message into a finished document, the same way
+// replaceStreamWith closes a streamed answer.
+const restoredDocument = (text: string) => {
+  const stream = new MarkdownStream();
+  stream.push(text);
+
+  return stream.finish();
+};
+
 // How many secondary entries (tool output, reasoning, notices) the transcript
 // keeps. The conversation itself — every user message and every answer — is
 // never trimmed, so the user can always scroll back through the whole chat.
@@ -306,6 +315,28 @@ class TuiUiAdapter implements UiAdapter {
           })),
         };
         break;
+      case "conversation": {
+        // A session with nothing to show must not clear the transcript a new
+        // session already has on screen.
+        if (!event.entries.length) return;
+        // The conversation belongs to the session we left, so it replaces the
+        // transcript whole: two events (a reset plus the messages) would show the
+        // old one under the new session in between. Answers go through the
+        // markdown stream, the same path a live answer takes, so restored text is
+        // styled instead of printed raw.
+        this.streams = {};
+        this.anchors = noAnchors();
+        const lines = event.entries.map((entry): TuiLine =>
+          entry.role === "user"
+            ? { role: "user", text: entry.content }
+            : { role: "answer", doc: restoredDocument(entry.content) },
+        );
+        // `history` stays: the children of the session are the next event
+        // (spawnHistory). The live strip belongs to the previous session, and
+        // every entry of the old transcript was collapsed or expanded for it.
+        this.state = { ...this.state, lines, spawns: [], expanded: new Set<number>() };
+        break;
+      }
       case "spawnSettled":
         // The strip only shows the state; the transcript gets the outcome, so a
         // child that finishes while the user looks elsewhere is not lost.

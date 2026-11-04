@@ -86,6 +86,10 @@ export interface IHarness {
   // Persiste la actual y carga la resuelta. false si no existe/ambigua.
   loadSession(target: string): Promise<boolean>;
   save(): void;
+  // La conversación tal como la lee la UI, de la más antigua a la más reciente.
+  // Solo user y assistant: se filtran system (persona, memoria de compactación),
+  // la salida de tools y los turnos assistant sin texto. Devuelve una copia.
+  conversation(): ConversationEntry[];
 
   // --- providers / modelos ---
   listProviders(): string[];

@@ -29,3 +29,11 @@ export interface SessionStatus {
   autoCompact: boolean;
   autoCompactThreshold: number;
 }
+
+// One message of a session as the UI reads it back: only what a person
+// wrote and what the model answered. Provider-only messages (system persona,
+// compaction memory, tool output) are not part of the conversation.
+export interface ConversationEntry {
+  role: "user" | "assistant";
+  content: string;
+}

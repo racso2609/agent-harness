@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
-import type { IHarness, SpawnEvent, SpawnHandle } from "@racso/core";
-import { showChildHistory } from "../../src/MainLoop";
+import type { ConversationEntry, IHarness, SpawnEvent, SpawnHandle } from "@racso/core";
+import { showChildHistory, showConversation } from "../../src/MainLoop";
 import { toUiEvents } from "../../src/ui/renderEvents";
 import type { UiEvent } from "../../src/ui/UiAdapter";
 
@@ -242,4 +242,63 @@ it("feeds the draft signal the TUI reports", () => {
 // and would start a turn over their text.
 expect(mainLoop).toContain("onDraftChange: () => this.maybeContinue({ fromDraft: true })");
 });
+});
+
+// /resume changes session but the screen kept the previous conversation. The
+// helper drives the renderer from what the core says the session carries; the
+// other two cases are the source-level guards for when the loop calls it, for
+// the same reason as the children: MainLoop cannot be mounted here.
+describe("conversation of the session now in charge", () => {
+ const ui = () => {
+   const events: UiEvent[] = [];
+
+   return { events, render: (event: UiEvent) => events.push(event) };
+ };
+
+ const harnessWith = (entries: ConversationEntry[]) =>
+   ({ conversation: () => entries }) as unknown as IHarness;
+
+ it("sends the conversation the harness reports", () => {
+   const renderer = ui();
+   const entries: ConversationEntry[] = [
+     { role: "user", content: "hola" },
+     { role: "assistant", content: "buenas" },
+   ];
+
+   showConversation(harnessWith(entries), renderer);
+
+   expect(renderer.events).toEqual([{ type: "conversation", entries }]);
+ });
+
+ it("stays silent when the session has nothing to show", () => {
+   // Otherwise every new session would wipe the screen on boot.
+   const renderer = ui();
+
+   showConversation(harnessWith([]), renderer);
+
+   expect(renderer.events).toEqual([]);
+ });
+
+ const mainLoop = readFileSync(new URL("../../src/MainLoop.ts", import.meta.url), "utf8");
+
+ it("does not ship it before the session is initialized", () => {
+   const boot = mainLoop.indexOf("await this.harness.initialize(");
+   const conversation = mainLoop.indexOf("showConversation(this.harness, this.ui)");
+
+   expect(boot).toBeGreaterThan(-1);
+   expect(conversation).toBeGreaterThan(boot);
+ });
+
+ it("repaints it when a command switched the session", () => {
+   // The body of the session-change block: a command handler can load another
+   // session, and the messages on screen are still the ones we left.
+   const switchAt = mainLoop.indexOf("this.harness.status().sessionId !== before");
+   const repaint = mainLoop.indexOf("showConversation(this.harness, this.ui)", switchAt);
+   const children = mainLoop.indexOf("showChildHistory(this.harness, this.ui)", switchAt);
+
+   expect(switchAt).toBeGreaterThan(-1);
+   expect(repaint).toBeGreaterThan(switchAt);
+   // The conversation goes first: the strip belongs to the session it paints.
+   expect(children).toBeGreaterThan(repaint);
+ });
 });

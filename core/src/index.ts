@@ -39,5 +39,10 @@ export type {
   Provider,
   TokenUsage,
 } from "./types/providers";
-export type { SessionStatus, SessionSummary, SessionUsage } from "./types/session";
+export type {
+  ConversationEntry,
+  SessionStatus,
+  SessionSummary,
+  SessionUsage,
+} from "./types/session";
 export type { UiConfig, UiRoleStyle, UiTheme } from "./configuration";

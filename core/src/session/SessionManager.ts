@@ -24,7 +24,7 @@ import {
   ToolCall,
   ToolResult,
 } from "@/types/providers";
-import { SessionStatus, SessionSummary, SessionUsage } from "@/types/session";
+import { ConversationEntry, SessionStatus, SessionSummary, SessionUsage } from "@/types/session";
 import { generateSessionId } from "@/utils/session";
 import { logger } from "@/utils/logger";
 import type { ApprovalHandler } from "@/contract";
@@ -567,6 +567,19 @@ deliveredSpawns: deliveredSpawns.length ? deliveredSpawns : undefined,
   // the persisted transcript, in launch order and read-only after a resume.
   childHistory(): SpawnHandle[] {
     return [...this.spawnHistory];
+  }
+
+  // Conversation as the UI reads it back, oldest first. Provider-only messages
+  // (system persona, compaction memory, tool output) and assistant turns with
+  // no text are filtered out here so every consumer sees the same thing.
+  conversation(): ConversationEntry[] {
+    return this.history.flatMap((message) => {
+      if (message.role !== "user" && message.role !== "assistant") return [];
+      const content = message.content.trim();
+      if (!content) return [];
+
+      return [{ role: message.role, content }];
+    });
   }
 
   // Children already settled (done or error) whose result has not entered a

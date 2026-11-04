@@ -1,4 +1,10 @@
-import type { ApprovalDecision, ApprovalRequest, ILogger, LoggerSink } from "@racso/core";
+import type {
+  ConversationEntry,
+  ApprovalDecision,
+  ApprovalRequest,
+  ILogger,
+  LoggerSink,
+} from "@racso/core";
 import { createLogger } from "@racso/core";
 import { clearPrompt, input, printImage, printLogo, restorePrompt } from "@/terminal/stdin";
 import { formatSpawnOutcome, formatTurnOutcome } from "./outcome";
@@ -8,6 +14,46 @@ import type { UiAdapter, UiEvent } from "./UiAdapter";
 // Re-exported so the line renderer keeps its `formatStatusBar` import surface
 // while both renderers share the single formatter in statusBar.ts.
 export { formatStatusBar } from "./statusBar";
+
+// Longest excerpt of a single message the summary shows. A scrollback cannot
+// take a whole conversation back, so long messages are cut here.
+const EXCERPT = 200;
+
+// Cuts a message down to one readable line.
+const excerpt = (text: string): string => {
+  const one = text.replace(/\s+/g, " ").trim();
+  const chars = Array.from(one);
+
+  return chars.length > EXCERPT ? `${chars.slice(0, EXCERPT).join("")}…` : one;
+};
+
+// Newest entry of a role, if the conversation has one.
+const lastOf = (entries: ConversationEntry[], role: ConversationEntry["role"]) => {
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index];
+    if (entry?.role === role) return entry;
+  }
+
+  return undefined;
+};
+
+// Short summary of a resumed conversation: the scrollback cannot receive a
+// whole transcript (it would bury the session the user just opened under
+// hundreds of lines they already read), so the renderer says how many messages
+// came back and repeats only the last exchange. The TUI, which owns the screen,
+// shows the conversation whole through the same event.
+export const formatConversationSummary = (entries: ConversationEntry[]): string[] => {
+  if (!entries.length) return [];
+
+  const lines = [`conversation restored: ${entries.length} messages`];
+  const lastUser = lastOf(entries, "user");
+  const lastAnswer = lastOf(entries, "assistant");
+
+  if (lastUser) lines.push(`you: ${excerpt(lastUser.content)}`);
+  if (lastAnswer) lines.push(`assistant: ${excerpt(lastAnswer.content)}`);
+
+  return lines;
+};
 
 // Line-oriented renderer: the behaviour the CLI shipped with. It stays the
 // default so existing sessions and tests keep working while the ink TUI is
@@ -98,6 +144,15 @@ class CliUiAdapter implements UiAdapter {
       case "spawnSettled":
         this.notify(formatSpawnOutcome(event.handle));
         break;
+      case "conversation": {
+        // The previous transcript belongs to another session: it goes away. An
+        // empty conversation leaves the screen alone, so a new session starts
+        // where it already is.
+        if (!event.entries.length) break;
+        this.reset();
+        for (const line of formatConversationSummary(event.entries)) this.notify(line);
+        break;
+      }
       case "reset":
         this.reset();
         break;

@@ -31,6 +31,14 @@ const handles = harness.childHistory();
 if (handles.length) ui.render({ type: "spawnHistory", handles });
 };
 
+// Emits the conversation the session now in charge carries, so a resumed one
+// paints its messages instead of keeping the previous transcript on screen. An
+// empty conversation stays silent: a new session must not clear the screen.
+export const showConversation = (harness: IHarness, ui: UiAdapter) => {
+const entries = harness.conversation();
+if (entries.length) ui.render({ type: "conversation", entries });
+};
+
 interface MainLoopOptions {
 // Id of a previously persisted session to resume on boot.
 sessionId?: string;
@@ -97,6 +105,9 @@ agent: options.agent,
 // strip starts with them; starting and settling produce pushed events, since
 // the UI shows a child the moment it exists, even inside a turn.
 showChildHistory(this.harness, this.ui);
+// The session may have been resumed by id: its conversation is what the
+// screen must show, not what a previous run left there.
+showConversation(this.harness, this.ui);
 
 this.harness.onSpawnEvent((event) => {
 this.ui.render(
@@ -270,9 +281,12 @@ if (!prompt) continue;
 if (prompt.startsWith("/")) {
 const before = this.harness.status().sessionId;
 const handled = await this.commands.run(prompt, this.commandContext());
-// A command can switch sessions (/resume, /switch): the strip must show
-// the children of the session we are in now, not the previous one.
+// A command can switch sessions (/resume, /switch): the screen must show
+// the conversation and the children of the session we are in now, not the
+// previous one. The conversation goes first: it replaces the transcript, and
+// the strip belongs to the session it just painted.
 if (this.harness.status().sessionId !== before) {
+showConversation(this.harness, this.ui);
 showChildHistory(this.harness, this.ui);
 }
 if (!handled) {
