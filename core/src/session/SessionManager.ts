@@ -197,7 +197,7 @@ class SessionManagerImpl implements SessionManager {
   // Children that already settled but whose result has not been handed to a
   // parent turn yet, in settlement order. The push into history is what marks
 // a child as delivered, so the queue never holds the same one twice.
-  protected undelivered: SpawnHandle[] = [];
+ protected undelivered: SpawnHandle[] = [];
 
 // Ids of the children whose result already entered the history. Persisted so
 // a resume does not hand the parent the same result twice: the injected
@@ -655,13 +655,13 @@ deliveredSpawns: deliveredSpawns.length ? deliveredSpawns : undefined,
         content: this.formatSpawnResult(handle),
       });
 	this.delivered.add(handle.spawnId);
-    }
-    // Persist as soon as the results are delivered, not only at the end of the
-    // turn: the queue is drained here, so a turn that throws after the flush
-    // (provider error, abort, tool exception) would leave the message in memory
-    // only, and a restart would lose the child result for good. One save for
-    // the whole batch; the early return above keeps an empty queue from saving.
-    this.save();
+ }
+ // Persist as soon as the results are delivered, not only at the end of the
+ // turn: the queue is drained here, so a turn that throws after the flush
+ // (provider error, abort, tool exception) would leave the message in memory
+ // only, and a restart would lose the child result for good. One save for
+ // the whole batch; the early return above keeps an empty queue from saving.
+ this.save();
   }
 
   // Builds the compact system message injected into the parent's history once

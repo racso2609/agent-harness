@@ -1560,6 +1560,65 @@ recordingStore(saved),
     await session.ask("next turn");
 
     expect(deliveredFor(session, "spawn-running")).toEqual([]);
+});
+
+  it("delivers two settled children in settlement order", async () => {
+    vi.spyOn(OpenAiProvider.prototype, "initialize").mockResolvedValue();
+    vi.spyOn(OpenAiProvider.prototype, "setModel").mockReturnValue(true);
+    vi.spyOn(OpenAiProvider.prototype, "getContextWindow").mockReturnValue(1000);
+    vi.spyOn(OpenAiProvider.prototype, "chat").mockImplementation(async (history) => {
+      const prompt = history.at(-1)?.content ?? "";
+      // The slow child settles after the fast one, so launch order and
+      // settlement order differ and cannot pass by accident.
+      if (prompt.includes("slow")) await new Promise((resolve) => setTimeout(resolve, 20));
+      return stopTurn(prompt.includes("slow") ? "slow answer" : "fast answer");
+    });
+    const session = makeSession();
+
+    const slow = session.spawn("coder", "slow task");
+    const fast = session.spawn("coder", "fast task");
+    await session.waitSpawn(fast.spawnId);
+    await session.waitSpawn(slow.spawnId);
+
+    expect(session.pendingSpawns().map((entry) => entry.result)).toEqual([
+      "fast answer",
+      "slow answer",
+    ]);
+
+    await parentTurn(session);
+
+    expect(
+      session.history
+        .filter((message) => message.role === "system")
+        .map((message) => message.content.match(/^\[spawn [^ ]+/)?.[0]),
+    ).toEqual([`[spawn ${fast.spawnId}`, `[spawn ${slow.spawnId}`]);
+    expect(session.pendingSpawns()).toEqual([]);
+  });
+
+  it("does not report a running child as pending", async () => {
+    vi.spyOn(OpenAiProvider.prototype, "initialize").mockResolvedValue();
+    vi.spyOn(OpenAiProvider.prototype, "setModel").mockReturnValue(true);
+    vi.spyOn(OpenAiProvider.prototype, "getContextWindow").mockReturnValue(1000);
+    // Never resolves: the child stays running for the whole case.
+    vi.spyOn(OpenAiProvider.prototype, "chat").mockImplementation(() => new Promise(() => {}));
+    const session = makeSession();
+
+    const handle = session.spawn("coder", "do the thing");
+
+    expect(session.pollSpawn(handle.spawnId)?.status).toBe("running");
+    expect(session.pendingSpawns()).toEqual([]);
+  });
+
+  it("hands out a copy of the pending children, not its own array", async () => {
+    stubProvider("child answer");
+    const session = makeSession();
+
+    const handle = session.spawn("coder", "do the thing");
+    await session.waitSpawn(handle.spawnId);
+
+    session.pendingSpawns().length = 0;
+
+    expect(session.pendingSpawns().map((entry) => entry.spawnId)).toEqual([handle.spawnId]);
   });
 
   it("returns undefined/empty results when nothing was spawned", async () => {
