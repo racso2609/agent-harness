@@ -2,20 +2,12 @@ import type { ApprovalDecision, ApprovalRequest, ILogger, LoggerSink } from "@ra
 import { createLogger } from "@racso/core";
 import { clearPrompt, input, printImage, printLogo, restorePrompt } from "@/terminal/stdin";
 import { formatSpawnOutcome, formatTurnOutcome } from "./outcome";
-import type { UiAdapter, UiEvent, UiStatus } from "./UiAdapter";
+import { formatStatusBar } from "./statusBar";
+import type { UiAdapter, UiEvent } from "./UiAdapter";
 
-// Formats the status bar line shared by both renderers.
-export const formatStatusBar = (status: UiStatus): string => {
-  const parts: string[] = [];
-
-  if (status.provider) parts.push(`provider: ${status.provider}`);
-  if (status.model) parts.push(`model: ${status.model}`);
-  if (status.agent) parts.push(`agent: ${status.agent}`);
-  if (status.tokens != null) parts.push(`tokens: ${status.tokens}`);
-  if (status.costUsd != null) parts.push(`cost: $${status.costUsd.toFixed(4)}`);
-
-  return parts.join(" · ");
-};
+// Re-exported so the line renderer keeps its `formatStatusBar` import surface
+// while both renderers share the single formatter in statusBar.ts.
+export { formatStatusBar } from "./statusBar";
 
 // Line-oriented renderer: the behaviour the CLI shipped with. It stays the
 // default so existing sessions and tests keep working while the ink TUI is

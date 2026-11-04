@@ -31,21 +31,33 @@ describe("toUiEvents", () => {
 describe("toStatusEvent", () => {
   it("wraps the status snapshot into a status event", () => {
     const event = toStatusEvent({
+      sessionId: "65ee2a6f-1a2b-4c3d",
       provider: "openai",
       model: "gpt",
       agent: "default",
       tokens: 12,
       costUsd: 0.5,
+      contextTokens: 51200,
+      contextWindow: 128000,
+      contextUsage: 0.4,
+      autoCompact: true,
+      autoCompactThreshold: 60,
     });
 
     expect(event).toEqual({
       type: "status",
       status: {
+        sessionId: "65ee2a6f-1a2b-4c3d",
         provider: "openai",
         model: "gpt",
         agent: "default",
         tokens: 12,
         costUsd: 0.5,
+        contextTokens: 51200,
+        contextWindow: 128000,
+        contextUsage: 0.4,
+        autoCompact: true,
+        autoCompactThreshold: 60,
       },
     });
   });
@@ -55,5 +67,6 @@ describe("toStatusEvent", () => {
 
     expect(event.type).toBe("status");
     expect(event.status.provider).toBeUndefined();
+    expect(event.status.contextUsage).toBeUndefined();
   });
 });

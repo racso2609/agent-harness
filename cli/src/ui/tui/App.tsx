@@ -1,6 +1,7 @@
 import { Box, Text, useInput, useStdin, useStdout, useWindowSize } from "ink";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { UiStatus } from "../UiAdapter";
+import { formatStatusBar } from "../statusBar";
 import type { Block, InlineSpan, StreamDocument, TableBlock } from "./markdown";
 import { colorFor, elapsedFor, iconFor, type SpawnEntry, spawnStrip } from "./progress";
 import { GLYPH, resolveTheme, type Role, type Theme } from "./theme";
@@ -415,7 +416,10 @@ width={width}
       )}
 
       <Box paddingX={PANEL_PADDING_X}>
-        <Text dimColor>{statusLine(state.status)}</Text>
+        {/* Ink wraps instead of clipping, and a wrapped bar would steal a row from
+the transcript while STATUS_ROWS still charges one. Cutting to the content
+width keeps the line on its own row. */}
+<Text dimColor>{truncateCell(statusLine(state.status), width)}</Text>
       </Box>
     </Box>
   );
@@ -743,10 +747,6 @@ const Spans = ({
   </>
 );
 
-const statusLine = (status: UiStatus): string => {
-  const parts = [status.provider, status.model, status.agent].filter(Boolean);
-  if (status.tokens != null) parts.push(`${status.tokens} tok`);
-  if (status.costUsd != null) parts.push(`$${status.costUsd.toFixed(4)}`);
-
-  return parts.join(" · ") || "ready";
-};
+// The bar falls back to "ready" when the snapshot has nothing to show, so the
+// row is never blank.
+const statusLine = (status: UiStatus): string => formatStatusBar(status) || "ready";

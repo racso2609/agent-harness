@@ -19,21 +19,37 @@ export const toUiEvents = (event: ChatEvent): UiEvent[] => {
 };
 
 // Builds the status event from a harness status snapshot.
+//
+// The snapshot is a core `SessionStatus`, but it is taken as a structural shape
+// so the UI mapping still accepts partial snapshots (a session that has not run
+// yet has no provider) and the UI layer keeps its own vocabulary.
 export const toStatusEvent = (status: {
-  provider?: string;
-  model?: string;
-  agent?: string;
-  tokens?: number;
-  costUsd?: number;
+provider?: string;
+model?: string;
+agent?: string;
+tokens?: number;
+costUsd?: number;
+sessionId?: string;
+contextTokens?: number;
+contextWindow?: number;
+contextUsage?: number;
+autoCompact?: boolean;
+autoCompactThreshold?: number;
 }): UiEvent => ({
-  type: "status",
-  status: {
-    provider: status.provider,
-    model: status.model,
-    agent: status.agent,
-    tokens: status.tokens,
-    costUsd: status.costUsd,
-  },
+type: "status",
+status: {
+provider: status.provider,
+model: status.model,
+agent: status.agent,
+tokens: status.tokens,
+costUsd: status.costUsd,
+sessionId: status.sessionId,
+contextTokens: status.contextTokens,
+contextWindow: status.contextWindow,
+contextUsage: status.contextUsage,
+autoCompact: status.autoCompact,
+autoCompactThreshold: status.autoCompactThreshold,
+},
 });
 
 export type { AgentResponse, UiAdapter };

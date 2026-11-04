@@ -203,3 +203,34 @@ describe("the line renderer", () => {
     });
   });
 });
+
+describe("the status bar", () => {
+// Both renderers share one formatter: the line renderer must print exactly the
+// shared line, and must stay silent rather than open a blank line when the
+// snapshot has nothing to show.
+it("prints the shared one-line status", () => {
+const output = printed([
+{
+type: "status",
+status: {
+sessionId: "65ee2a6f-1a2b-4c3d",
+provider: "openai",
+model: "gpt-test",
+tokens: 15900,
+costUsd: 0.0042,
+contextTokens: 51200,
+contextWindow: 128000,
+contextUsage: 0.4,
+},
+},
+]);
+
+expect(output).toBe(
+"ses 65ee2a6f · openai/gpt-test · 16k tok · $0.0042 · ctx 40% 51k/128k\n",
+);
+});
+
+it("prints nothing for an empty snapshot", () => {
+expect(printed([{ type: "status", status: {} }])).toBe("");
+});
+});
