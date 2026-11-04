@@ -78,11 +78,20 @@ it("returns an empty line when there is nothing to show", () => {
 expect(formatStatusBar({})).toBe("");
 });
 
-it("omits the occupancy when the window is unknown", () => {
-const line = formatStatusBar({ ...full, contextWindow: undefined });
+// Regression: core reports `contextUsage: 0` when the provider publishes no
+// window, so guarding on usage alone still printed `ctx 0%`, the exact lie the
+// module promises to avoid.
+it("omits the whole context part when the window is unknown", () => {
+const line = formatStatusBar({ ...full, contextWindow: undefined, contextUsage: 0 });
 
-expect(line).toContain("ctx 40%");
-expect(line).not.toContain("51k");
+expect(line).not.toContain("ctx");
+expect(line).not.toContain("0%");
+});
+
+it("shows the context part when the window is known", () => {
+const line = formatStatusBar({ ...full, contextUsage: 0 });
+
+expect(line).toContain("ctx 0%");
 });
 
 it("omits the context part when no usage was reported", () => {

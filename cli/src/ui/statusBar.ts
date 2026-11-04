@@ -44,13 +44,15 @@ const trimZero = (value: number): string =>
 
 // The context part is the reason this module exists: the percentage is only
 // meaningful against a known window, so without one the whole part is dropped
-// instead of printing a "0%" that would be a lie.
+// instead of printing a "0%" that would be a lie. Core reports `contextUsage: 0`
+// when the provider publishes no window, so the guard has to be the window:
+// checking only `contextUsage` still painted `ctx 0%` for every such session.
 const contextPart = (status: UiStatus): string | null => {
-if (status.contextUsage == null) return null;
+if (status.contextWindow == null || status.contextUsage == null) return null;
 
 const percent = Math.round(Math.max(0, Math.min(1, status.contextUsage)) * 100);
 const occupancy =
-status.contextWindow != null && status.contextTokens != null
+status.contextTokens != null
 ? ` ${formatCompactTokens(status.contextTokens)}/${formatCompactTokens(status.contextWindow)}`
 : "";
 const autoCompact = autoCompactMark(status);
@@ -60,10 +62,12 @@ return `ctx ${percent}%${occupancy}${autoCompact}`;
 
 // Auto-compact is already automatic, so the bar only warns once the threshold
 // has been crossed: the mark then explains why the session is about to be
-// compacted instead of why it still runs as usual.
+// compacted instead of why it still runs as usual. It rides on the context part,
+// so it only applies when that part is shown at all, i.e. with a known window;
+// `contextUsage` still has to be checked for the percent it reads.
 const autoCompactMark = (status: UiStatus): string => {
 if (!status.autoCompact || status.autoCompactThreshold == null) return "";
-if (status.contextUsage == null) return "";
+if (status.contextWindow == null || status.contextUsage == null) return "";
 
 const percent = status.contextUsage * 100;
 if (percent < status.autoCompactThreshold) return "";
