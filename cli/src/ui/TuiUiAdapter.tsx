@@ -1,3 +1,4 @@
+import type { CommandOption } from "@/commands/CommandRepository";
 import type { ApprovalDecision, ApprovalRequest, ILogger, UiTheme } from "@racso/core";
 import { createLogger } from "@racso/core";
 import { render } from "ink";
@@ -7,7 +8,7 @@ import { noAnchors, trimAnchored, writeAnchored, type RoleAnchors } from "./tui/
 import { MarkdownStream } from "./tui/markdown";
 import { toSpawnEntry } from "./tui/progress";
 import { resolveTheme, type Theme } from "./tui/theme";
-import type { UiAdapter, UiEvent } from "./UiAdapter";
+import type { SelectionRequest, UiAdapter, UiEvent } from "./UiAdapter";
 
 // Parses a restored message into a finished document, the same way
 // replaceStreamWith closes a streamed answer.
@@ -36,8 +37,15 @@ class TuiUiAdapter implements UiAdapter {
   protected draft = "";
   // Receives that text, when the owner asked to be told about it.
   protected onDraftChange: ((draft: string) => void) | null = null;
+// Slash commands the dropdown offers. The app filters them on every
+// keystroke, so the adapter only carries the catalog.
+protected commands: CommandOption[] = [];
   // Resolver for the approval currently on screen, if any.
   protected pendingApproval: ((decision: ApprovalDecision) => void) | null = null;
+// Resolver for the picker currently on screen, if any. It is a separate modal
+// slot and not a queue: two flows never ask at once, and a stale answer would
+// resolve the wrong flow.
+protected pendingSelection: ((id: string | undefined) => void) | null = null;
   // Markdown accumulators for the two streamed roles. Kept out of the state so
   // keystrokes never re-parse what already arrived.
   protected streams: Partial<Record<"answer" | "reasoning", MarkdownStream>> = {};
@@ -59,14 +67,19 @@ class TuiUiAdapter implements UiAdapter {
 
   // Registers the callbacks the app needs and mounts Ink. onDraftChange is
   // optional: without it the adapter simply reports an empty draft.
-  start(options: {
-    onSubmit: (prompt: string) => void;
-    onExit: () => void;
-    onDraftChange?: (draft: string) => void;
-  }) {
+start(options: {
+onSubmit: (prompt: string) => void;
+onExit: () => void;
+onDraftChange?: (draft: string) => void;
+// Slash commands the input box offers in its dropdown. Ink owns stdin, so
+// the catalog has to travel through the adapter: the app cannot ask stdin
+// for the inline menu the line renderer uses.
+commands?: CommandOption[];
+}) {
     this.onSubmit = options.onSubmit;
     this.onExit = options.onExit;
     this.onDraftChange = options.onDraftChange ?? null;
+this.commands = options.commands ?? [];
     this.mount();
   }
 
@@ -84,10 +97,12 @@ class TuiUiAdapter implements UiAdapter {
   protected element() {
     return (
       <App
+commands={this.commands}
         state={this.state}
         onSubmit={(prompt) => this.onSubmit(prompt)}
         onExit={() => this.onExit()}
         onDecision={(decision) => this.resolveApproval(decision)}
+onSelect={(id) => this.resolveSelection(id)}
         onToggle={(kind, index) => this.toggleEntry(kind, index)}
         onToggleAll={(kind) => this.toggleAll(kind)}
         onDraftChange={(draft) => this.reportDraft(draft)}
@@ -123,7 +138,16 @@ class TuiUiAdapter implements UiAdapter {
     resolve?.(decision);
   }
 
-  // Expands or collapses one entry by index (its position in the transcript).
+  // Resolves the picker shown in the app and returns to the input box.
+protected resolveSelection(id: string | undefined) {
+const resolve = this.pendingSelection;
+this.pendingSelection = null;
+this.state = { ...this.state, selection: undefined };
+this.mount();
+resolve?.(id);
+}
+
+// Expands or collapses one entry by index (its position in the transcript).
   protected toggleEntry(kind: "reasoning" | "tool", index: number) {
     const expanded = new Set(this.state.expanded);
 
@@ -431,7 +455,21 @@ if (this.pendingApproval) this.resolveApproval("deny");
     });
   }
 
-  async renderImage(url: string) {
+  // Shows the options as a list the arrows walk through. Ink owns stdin, so the
+// flow cannot read the answer itself; cancelling resolves `undefined`, which
+// every caller treats as "nothing chosen".
+select(request: SelectionRequest): Promise<string | undefined> {
+if (this.pendingSelection) return Promise.resolve(undefined);
+
+this.state = { ...this.state, selection: request };
+this.mount();
+
+return new Promise<string | undefined>((resolve) => {
+this.pendingSelection = resolve;
+});
+}
+
+async renderImage(url: string) {
     this.pushLine({ role: "notice", text: `[image] ${url.slice(0, 32)}…` });
   }
 

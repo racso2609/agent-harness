@@ -57,12 +57,34 @@ continuation?: boolean;
 
 export type SpawnSnapshot = { handle: SpawnHandle; status: SpawnStatus };
 
+// One choice of a picker. `id` is what the caller gets back; `label` and `hint`
+// are what a renderer paints, so a flow can pass an opaque id while the user
+// reads something friendlier.
+export interface SelectionOption {
+id: string;
+label: string;
+hint?: string;
+}
+
+// A question with a list of answers. Every "/" flow that used to ask "which
+// one?" goes through this asynchronously, so the same flow drives the ink
+// picker and the numeric list of the line renderer.
+export interface SelectionRequest {
+message: string;
+options: SelectionOption[];
+}
+
 // Rendering surface used by MainLoop. Implementations own the terminal; the
 // loop never writes to stdout directly.
 export interface UiAdapter {
 render(event: UiEvent): void;
 // Asks the user to approve a side-effect request.
 promptApproval(request: ApprovalRequest): Promise<"allow" | "deny" | "always">;
+// Asks the user to pick one option, resolving to its id, or to `undefined`
+// when the user cancels. It is a UI concern and not a stdin read because the
+// renderer owns the input stream: Ink pauses and consumes it, so a second
+// listener would starve the TUI and read keystrokes meant for the app.
+select(request: SelectionRequest): Promise<string | undefined>;
 // Renders a data-url image inline.
 renderImage(url: string): Promise<void>;
 // Restores the terminal before the process exits.

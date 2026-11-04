@@ -6,10 +6,17 @@ import type {
   LoggerSink,
 } from "@racso/core";
 import { createLogger } from "@racso/core";
-import { clearPrompt, input, printImage, printLogo, restorePrompt } from "@/terminal/stdin";
+import {
+clearPrompt,
+input,
+printImage,
+printLogo,
+restorePrompt,
+select,
+} from "@/terminal/stdin";
 import { formatSpawnOutcome, formatTurnOutcome } from "./outcome";
 import { formatStatusBar } from "./statusBar";
-import type { UiAdapter, UiEvent } from "./UiAdapter";
+import type { SelectionRequest, UiAdapter, UiEvent } from "./UiAdapter";
 
 // Re-exported so the line renderer keeps its `formatStatusBar` import surface
 // while both renderers share the single formatter in statusBar.ts.
@@ -183,7 +190,22 @@ class CliUiAdapter implements UiAdapter {
     return /^y(es)?$/i.test(answer) ? "allow" : "deny";
   }
 
-  // The line renderer leaves the terminal as the prompt owns it.
+  // Shows the numeric list the CLI always had. The picker of stdin answers with
+// the label it printed, so the id is recovered by position: two options that
+// share a label are otherwise indistinguishable to the user too.
+async select(request: SelectionRequest): Promise<string | undefined> {
+if (!request.options.length) return undefined;
+
+const chosen = await select(
+request.message,
+request.options.map((option) => option.label),
+);
+const index = request.options.findIndex((option) => option.label === chosen);
+
+return index >= 0 ? request.options[index]!.id : undefined;
+}
+
+// The line renderer leaves the terminal as the prompt owns it.
   close() {
     if (process.stdin.isTTY) process.stdin.setRawMode(false);
   }
