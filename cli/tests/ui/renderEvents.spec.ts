@@ -31,7 +31,7 @@ describe("toUiEvents", () => {
 describe("toStatusEvent", () => {
   it("wraps the status snapshot into a status event", () => {
     const event = toStatusEvent({
-      sessionId: "65ee2a6f-1a2b-4c3d",
+      sessionId: "session-c2ba4fa1-d2fe-4a7b-9c3d-001122334455",
       provider: "openai",
       model: "gpt",
       agent: "default",
@@ -47,7 +47,7 @@ describe("toStatusEvent", () => {
     expect(event).toEqual({
       type: "status",
       status: {
-        sessionId: "65ee2a6f-1a2b-4c3d",
+        sessionId: "session-c2ba4fa1-d2fe-4a7b-9c3d-001122334455",
         provider: "openai",
         model: "gpt",
         agent: "default",

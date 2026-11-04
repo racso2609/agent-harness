@@ -19,7 +19,7 @@ const { CliUiAdapter } = await import("../../src/ui/CliUiAdapter");
 
 const settled = (overrides: Partial<SpawnHandle> = {}): SpawnHandle => ({
   spawnId: "spawn-1",
-  sessionId: "session-1",
+  sessionId: "session-c2ba4fa1-d2fe-4a7b-9c3d-001122334455",
   agentId: "coder",
   prompt: "implement",
   status: "done",
@@ -213,7 +213,7 @@ const output = printed([
 {
 type: "status",
 status: {
-sessionId: "65ee2a6f-1a2b-4c3d",
+sessionId: "session-c2ba4fa1-d2fe-4a7b-9c3d-001122334455",
 provider: "openai",
 model: "gpt-test",
 tokens: 15900,
@@ -226,7 +226,7 @@ contextUsage: 0.4,
 ]);
 
 expect(output).toBe(
-"ses 65ee2a6f · openai/gpt-test · 16k tok · $0.0042 · ctx 40% 51k/128k\n",
+"ses c2ba4fa1 · openai/gpt-test · 16k tok · $0.0042 · ctx 40% 51k/128k\n",
 );
 });
 

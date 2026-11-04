@@ -3,7 +3,7 @@ import type { UiStatus } from "../../src/ui/UiAdapter";
 import { abbreviateSession, formatCompactTokens, formatStatusBar } from "../../src/ui/statusBar";
 
 const full: UiStatus = {
-sessionId: "65ee2a6f-1a2b-4c3d-9e8f-001122334455",
+sessionId: "session-c2ba4fa1-d2fe-4a7b-9c3d-001122334455",
 provider: "openai",
 model: "gpt-test",
 agent: "default",
@@ -17,12 +17,29 @@ autoCompactThreshold: 60,
 };
 
 describe("abbreviateSession", () => {
-it("keeps the first eight characters", () => {
+// Real ids all start with "session-", so the prefix has to go before slicing:
+// otherwise every session abbreviates to the same constant prefix.
+it("skips the session prefix and shows the start of the uuid", () => {
+expect(abbreviateSession("session-c2ba4fa1-d2fe-4a7b-9c3d-001122334455")).toBe("c2ba4fa1");
+});
+
+it("abbreviates an id without the prefix as it comes", () => {
 expect(abbreviateSession("65ee2a6f-1a2b-4c3d")).toBe("65ee2a6f");
 });
 
 it("keeps short ids whole", () => {
 expect(abbreviateSession("abc")).toBe("abc");
+});
+
+// The case the old slice-by-position version got wrong: both ids rendered as
+// "session-", so the bar could not tell two sessions apart.
+it("tells two real sessions apart", () => {
+const first = abbreviateSession("session-c2ba4fa1-d2fe-4a7b-9c3d-001122334455");
+const second = abbreviateSession("session-8d41e7f0-1111-4222-8333-445566778899");
+
+expect(first).toBe("c2ba4fa1");
+expect(second).toBe("8d41e7f0");
+expect(first).not.toBe(second);
 });
 });
 
@@ -53,7 +70,7 @@ expect(formatCompactTokens(1_500_000)).toBe("1.5M");
 describe("formatStatusBar", () => {
 it("renders every part on one line", () => {
 expect(formatStatusBar(full)).toBe(
-"ses 65ee2a6f · openai/gpt-test · default · 16k tok · $0.0042 · ctx 40% 51k/128k",
+"ses c2ba4fa1 · openai/gpt-test · default · 16k tok · $0.0042 · ctx 40% 51k/128k",
 );
 });
 

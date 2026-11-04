@@ -10,7 +10,19 @@ import type { UiStatus } from "./UiAdapter";
 // the full id.
 const SHORT_ID = 8;
 
-const abbreviateSession = (sessionId: string): string => sessionId.slice(0, SHORT_ID);
+// The prefix is constant across every session, so cutting by position would
+// show "session-" for each one and never the identity; it has to be stripped
+// first. Ids without the prefix are abbreviated as they come, since tests and
+// external callers are not forced to follow the generator's format.
+const SESSION_PREFIX = "session-";
+
+const abbreviateSession = (sessionId: string): string => {
+const bare = sessionId.startsWith(SESSION_PREFIX)
+? sessionId.slice(SESSION_PREFIX.length)
+: sessionId;
+
+return bare.slice(0, SHORT_ID);
+};
 
 // Compact token counts: the bar has one row, so "12345" is noise and "12.3k" is
 // the same information. A tenth is only kept when it is not a zero one, so
