@@ -250,9 +250,43 @@ y volver al fondo re-engancha `follow`; al empezar un turno la vista vuelve al f
 tests: 24 en `tests/ui/scroll.spec.ts` (ventana, clamp, relleno, alturas de entradas
 colapsadas/expandidas, trim) y 18 en `tests/ui/viewport.spec.ts` (geometría, teclas,
 clamp de un offset obsoleto).
-pendiente: verificado por tests de la lógica pura; falta la prueba en un TTY real (ver
-"Probar la interacción real por teclado" en `P5`). ink 8 no soporta ratón, así que la
-rueda no scrollea: es una limitación del renderer, no del modelo.
+pendiente: verificado por tests de la lógica pura y por render real de `App` (ver el
+cierre de abajo); falta la prueba en un TTY real (ver "Probar la interacción real por
+teclado" en `P5`).
+Depends on: ninguno.
+
+- [x] **Rueda del ratón y arreglo del recorte del transcript**
+Lo que el usuario reportó después: "el scroll ya no existe" y "quiero poder usar el
+mouse o el touchpad sin problema y que no se sienta tosco".
+hecho (rueda): ink 8 no reporta eventos de ratón, así que la TUI activa el modo SGR
+(`ui/tui/viewport.ts#MOUSE_ENABLE`, `1000h`+`1006h`) y lee las muescas de stdin
+espiando el `read` que ink consume —no un listener `data`, que pondría stdin en modo
+fluyente y dejaría sin datos a ink—. `wheelScrollLines` (puro) traduce
+`ESC[<64;…M`/`ESC[<65;…M` a ±`WHEEL_LINES` (3 líneas) e ignora clics y arrastres. La
+captura desactiva la selección nativa: para copiar hay que mantener `Shift`/`Option`.
+hecho (recorte): tres bugs de render medidos montando `App` en ink. (1) sin
+`flexShrink={0}` Yoga encogía las filas al desbordar la caja y dos entradas se pintaban
+en la misma fila (líneas que desaparecían); (2) `cutTop` se calculaba pero no se
+pintaba: la primera fila de la ventana se dibujaba desde su primer renglón, así que al
+entrar en una entrada alta se veía su principio y se perdía lo nuevo; ahora el `gap`
+es `gapBefore(absolute) - cutTop` (margen negativo) y el clip de la caja corta por
+arriba; (3) `height={viewportLines}` contaba el borde, así que el panel pintaba dos
+filas menos de las que el modelo de scroll creía —el fondo del historial se recortaba
+siempre—; ahora suma `BORDER_ROWS`.
+hecho (formato): padding y aire, con las medidas en un solo sitio. `PANEL_PADDING_X=2` y
+`PANEL_PADDING_Y=1` viven en `viewport.ts` y los leen tanto el render como la geometría;
+antes el borde se contaba dos veces en un sitio y cero en otro. `PANEL_CHROME` ahora es
+`BORDER_ROWS + 2*PANEL_PADDING_X` (antes 6 fijo, que dejaba 2 columnas sin usar), la
+caja del transcript usa `viewportLines + TRANSCRIPT_CHROME_Y` y su clip vive en una caja
+interna, dentro del padding, para que una fila cortada no pinte sobre el borde; la caja
+de input y la de approval también llevan `paddingY` y sus constantes (`INPUT_ROWS=5`,
+`APPROVAL_ROWS=9`) ahora cuadran con lo que se pinta.
+tests: 6 en `tests/ui/wheel.spec.ts` (muescas, lote, clics ignorados, par
+enable/disable) y 3 de render en `tests/ui/scrollRender.spec.tsx` (fondo de una entrada
+alta visible, sin solape al scrollear dentro de ella, tres líneas por muesca sin
+ensuciar el borrador).
+pendiente: en un TTY real, confirmar que la rueda llega (tmux y algunos emuladores
+interceptan el modo SGR) y elegir si la captura de ratón debería ser opcional.
 Depends on: ninguno.
 
 - [x] **Silenciar `logger.info`/`warn` del core salvo en modo debug**

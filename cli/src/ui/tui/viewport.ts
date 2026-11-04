@@ -9,10 +9,11 @@
 import { clampView, scrollBy, scrollToBottom, scrollToTop, type ScrollView } from "./scroll";
 
 // Rows the transcript pane spends on things that are not transcript lines.
-// `inner` counts the rows inside the border (one top, one bottom); the other
-// rows belong to the panels stacked under it.
+// `inner` counts the two border rows the box adds on top of its content; the
+// other rows belong to the panels stacked under it.
 export interface ChromeRows {
-  // Rows of the transcript box: both borders plus everything painted inside.
+  // Border rows of the transcript box (one top, one bottom). The content area
+  // is `viewportRows`, and Ink's `height` must add these back (border box).
   inner: number;
   // Spawn strip, approval/question box or input box.
   middle: number;
@@ -22,6 +23,18 @@ export interface ChromeRows {
 
 // Border of a box drawn with `borderStyle` takes one row on each side.
 export const BORDER_ROWS = 2;
+
+// Breathing room inside every panel. Horizontal padding also has to be part of
+// the width the transcript wraps to, and vertical padding is part of each
+// panel's height, so both live here and are read by the render and the geometry
+// alike. When they were written twice they drifted and the pane clipped.
+export const PANEL_PADDING_X = 2;
+export const PANEL_PADDING_Y = 1;
+
+// Rows the transcript box spends on itself: both borders plus the vertical
+// padding. The scroll model's `viewportRows` is the content area, so the box
+// height is `viewportLines + TRANSCRIPT_CHROME_Y`.
+export const TRANSCRIPT_CHROME_Y = BORDER_ROWS + PANEL_PADDING_Y * 2;
 
 // Rows the pane keeps even when the terminal is too small to honour the
 // request. Below this the layout stops shrinking and lets the terminal scroll.
@@ -42,10 +55,11 @@ export const viewportRows = (rows: number, chrome: ChromeRows): number => {
 // not render details: the viewport height is what the scroll maths needs, so the
 // arithmetic lives next to it where it can be tested.
 export const STATUS_ROWS = 1;
-// Round border plus the single prompt line.
-export const INPUT_ROWS = 3;
-// Round border, title, subject, a blank row, the three choices and the hint.
-export const APPROVAL_ROWS = 9;
+// Round border, vertical padding and the single prompt line.
+export const INPUT_ROWS = BORDER_ROWS + PANEL_PADDING_Y * 2 + 1;
+// Round border, padding, title, subject, the blank row above the choices, the
+// choice row itself and the hint.
+export const APPROVAL_ROWS = BORDER_ROWS + PANEL_PADDING_Y * 2 + 5;
 // Single border of the spawn strip; its children add one row each.
 export const STRIP_BORDER_ROWS = 2;
 
@@ -59,7 +73,7 @@ export const chromeRows = ({
   stripRows: number;
   approval: boolean;
 }): ChromeRows => ({
-  inner: BORDER_ROWS,
+  inner: TRANSCRIPT_CHROME_Y,
   middle:
     (stripRows > 0 ? stripRows + STRIP_BORDER_ROWS : 0) +
     // The approval box and the input box never share the screen.
@@ -146,4 +160,38 @@ export const nextView = (
         : scrollToBottom();
 
   return clampView(moved, contentLines, viewportLines);
+};
+
+// Lines one wheel notch moves. Three is enough to feel continuous with a
+// trackpad (which sends many small notches) without making a mouse wheel jump a
+// whole entry per click.
+export const WHEEL_LINES = 3;
+
+// Turns SGR mouse reporting on and off. 1000 reports button presses — the wheel
+// is one — and 1006 is the extended coordinate encoding terminals need past
+// column 223. Ink 8 does not surface mouse events, so the TUI enables this and
+// reads the wheel itself.
+export const MOUSE_ENABLE = "\u001b[?1000h\u001b[?1006h";
+export const MOUSE_DISABLE = "\u001b[?1006l\u001b[?1000l";
+
+// SGR mouse reports look like `ESC [ < button ; column ; row M` (press) or `m`
+// (release). Only the wheel buttons mean anything here: 64 scrolls up and 65
+// down. Clicks and drags are ignored so they cannot move the transcript.
+// eslint-disable-next-line no-control-regex -- SGR mouse reports start with ESC.
+const SGR_MOUSE = /\u001b\[<(\d+);\d+;\d+[Mm]/g;
+
+// Scroll deltas, in lines, carried by one raw stdin chunk. Positive scrolls up,
+// matching `scrollBy`. A chunk can hold several notches when the terminal
+// batches them, so the caller applies them in order.
+export const wheelScrollLines = (input: string): number[] => {
+  const deltas: number[] = [];
+
+  for (const match of input.matchAll(SGR_MOUSE)) {
+    const button = Number(match[1]);
+
+    if (button === 64) deltas.push(WHEEL_LINES);
+    else if (button === 65) deltas.push(-WHEEL_LINES);
+  }
+
+  return deltas;
 };

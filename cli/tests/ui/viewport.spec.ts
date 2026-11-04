@@ -7,11 +7,11 @@ import { describe, expect, it } from "vitest";
 import { bottomView, scrollBy } from "../../src/ui/tui/scroll";
 import {
   APPROVAL_ROWS,
-  BORDER_ROWS,
   INPUT_ROWS,
   MIN_VIEWPORT,
   STATUS_ROWS,
   STRIP_BORDER_ROWS,
+  TRANSCRIPT_CHROME_Y,
   chromeRows,
   nextView,
   scrollActionForKey,
@@ -30,7 +30,11 @@ describe("chromeRows", () => {
   it("charges only the transcript border, the input box and the status bar when nothing else is up", () => {
     const chrome = chromeRows({ stripRows: 0, approval: false });
 
-    expect(chrome).toEqual({ inner: BORDER_ROWS, middle: INPUT_ROWS, status: STATUS_ROWS });
+    expect(chrome).toEqual({
+      inner: TRANSCRIPT_CHROME_Y,
+      middle: INPUT_ROWS,
+      status: STATUS_ROWS,
+    });
   });
 
   it("adds the spawn strip, its border and the older-runs counter when children are on screen", () => {
@@ -51,7 +55,7 @@ describe("viewportRows", () => {
   it("is the terminal minus everything stacked around the transcript", () => {
     const chrome = chromeRows({ stripRows: 0, approval: false });
 
-    expect(viewportRows(30, chrome)).toBe(30 - (BORDER_ROWS + INPUT_ROWS + STATUS_ROWS));
+    expect(viewportRows(30, chrome)).toBe(30 - (TRANSCRIPT_CHROME_Y + INPUT_ROWS + STATUS_ROWS));
   });
 
   it("never drops below the floor, so a tiny terminal still shows a scrolled transcript", () => {

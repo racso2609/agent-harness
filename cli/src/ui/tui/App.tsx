@@ -1,13 +1,31 @@
-import { Box, Text, useInput, useStdout, useWindowSize } from "ink";
-import { useEffect, useMemo, useState } from "react";
+import { Box, Text, useInput, useStdin, useStdout, useWindowSize } from "ink";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { UiStatus } from "../UiAdapter";
 import type { Block, InlineSpan, StreamDocument, TableBlock } from "./markdown";
 import { colorFor, elapsedFor, iconFor, type SpawnEntry, spawnStrip } from "./progress";
 import { GLYPH, resolveTheme, type Role, type Theme } from "./theme";
 import { collapse } from "./collapse";
 import { fitColumns, gapBefore, truncateCell, wrapText } from "./layout";
-import { bottomView, clampView, measureEntries, visibleWindow, type ScrollView } from "./scroll";
-import { chromeRows, nextView, viewportRows } from "./viewport";
+import {
+  bottomView,
+  clampView,
+  measureEntries,
+  scrollBy,
+  visibleWindow,
+  type ScrollView,
+} from "./scroll";
+import {
+  BORDER_ROWS,
+  chromeRows,
+  MOUSE_DISABLE,
+  MOUSE_ENABLE,
+  nextView,
+  PANEL_PADDING_X,
+  PANEL_PADDING_Y,
+  TRANSCRIPT_CHROME_Y,
+  viewportRows,
+  wheelScrollLines,
+} from "./viewport";
 
 // One rendered entry. `answer` and `reasoning` carry the live markdown
 // document; everything else is plain text.
@@ -53,7 +71,7 @@ interface AppProps {
 }
 
 // Columns reserved for the pane border and its horizontal padding.
-const PANEL_CHROME = 6;
+const PANEL_CHROME = BORDER_ROWS + PANEL_PADDING_X * 2;
 // Below this the layout stops shrinking and lets the terminal scroll.
 const MIN_WIDTH = 20;
 
@@ -91,9 +109,13 @@ onDraftChange,
   // Where the transcript is looking. `bottomView()` starts pinned to the bottom,
   // like a shell: the newest line is the first thing the user sees.
   const [view, setView] = useState<ScrollView>(() => bottomView());
+  // Latest scroll applier, kept in a ref so the mouse tap installed once can
+  // use the current viewport without being re-attached on every render.
+  const scrollRef = useRef<(lines: number) => void>(() => {});
   const approval = state.approval;
   const theme = state.theme;
   const { stdout } = useStdout();
+  const { stdin } = useStdin();
   // The transcript is a viewport, not "the last N entries": its height comes
   // from the terminal and is rebuilt on resize, which is also when the scroll
   // position has to be re-clamped.
@@ -260,19 +282,66 @@ MIN_WIDTH,
   // the bottom, which is exactly where the newest lines live.
   const visible = visibleWindow({ heights: measured.heights, viewportLines, view: effectiveView });
 
+  // What the mouse tap calls. Re-clamps against the current content, so a wheel
+  // event that lands between renders can never use a stale size.
+  scrollRef.current = (lines) => {
+    setView((current) => {
+      const effective = clampView(current, measured.total, viewportLines);
+      return clampView(scrollBy(effective, lines), measured.total, viewportLines);
+    });
+  };
+
+  // Mouse wheel and trackpad. Ink owns stdin and drops mouse sequences before
+  // `useInput` ever sees them, so the wheel is read by tapping the stream Ink
+  // reads from. Its `read` is wrapped instead of adding a `data` listener: a
+  // data listener flips stdin to flowing mode and starves Ink's paused reads.
+  useEffect(() => {
+    const stream = stdin as NodeJS.ReadStream & { isTTY?: boolean };
+
+    if (!stream?.isTTY || typeof stream.setRawMode !== "function") return;
+
+    const out = stdout as NodeJS.WriteStream | undefined;
+    const originalRead = stream.read.bind(stream) as (...args: unknown[]) => unknown;
+    const tap = (...args: unknown[]) => {
+      const chunk = originalRead(...args);
+
+      if (chunk) {
+        const text =
+          typeof chunk === "string" ? chunk : Buffer.from(chunk as Uint8Array).toString("utf8");
+        const deltas = wheelScrollLines(text);
+        if (deltas.length) scrollRef.current(deltas.reduce((sum, delta) => sum + delta, 0));
+      }
+
+      return chunk;
+    };
+
+    (stream as unknown as { read: unknown }).read = tap;
+    out?.write(MOUSE_ENABLE);
+
+    return () => {
+      (stream as unknown as { read: unknown }).read = originalRead;
+      out?.write(MOUSE_DISABLE);
+    };
+  }, [stdin, stdout]);
+
   return (
     <Box flexDirection="column" height="100%">
 <Box
 flexDirection="column"
-height={viewportLines}
+// The outer box owns the border and the padding, so the content never hugs
+// them. Its height is the content area plus both borders and both padding
+// rows; the scroll model only counts the content area.
+height={viewportLines + TRANSCRIPT_CHROME_Y}
 borderStyle="round"
-paddingX={1}
-// A row entering or leaving the viewport is painted whole, so for one
-// frame the content can be taller than the box. Clipping hides that
-// overflow instead of letting it push the panels below and make the
-// layout dance every time the scroll moves a single line.
-overflowY="hidden"
+paddingX={PANEL_PADDING_X}
+paddingY={PANEL_PADDING_Y}
 >
+{/* The real scroll viewport. Clipping lives here, inside the padding, so a
+    row cut by the scroll cannot paint over the border or the breathing room.
+    flexShrink 0 stops Yoga from shrinking the rows once the content
+    overflows; a shrunk row paints over its neighbour. */}
+<Box flexDirection="column" height={viewportLines} overflowY="hidden" flexShrink={0}>
+<Box flexDirection="column" flexShrink={0}>
 {Array.from({ length: visible.padTop }, (_, blank) => (
 <Text key={`pad-${blank}`}> </Text>
 ))}
@@ -283,9 +352,10 @@ overflowY="hidden"
 // scrolling, which is half of the "it jumps" bug.
 key={absolute}
 line={state.lines[absolute]!}
-// The air above an entry only survives while its top row is visible; a
-// row cut by the viewport must not reserve it again.
-gap={cutTop > 0 ? 0 : gapBefore(absolute)}
+// A negative gap lifts the first row of the window by `cutTop` lines,
+// so the pane clips its top instead of painting the entry from its
+// first line and pushing the newest one out of the viewport.
+gap={gapBefore(absolute) - cutTop}
 theme={theme}
 running={running}
 // `expanded` holds absolute transcript indexes (see toggleEntry in
@@ -295,10 +365,12 @@ expanded={state.expanded.has(absolute)}
 width={width}
 />
 ))}
+</Box>
+</Box>
       </Box>
 
       {strip.rows.length > 0 && (
-        <Box flexDirection="column" borderStyle="single" borderColor="cyan" paddingX={1}>
+        <Box flexDirection="column" borderStyle="single" borderColor="cyan" paddingX={PANEL_PADDING_X}>
           {strip.rows.map((spawn) => (
             <Text key={spawn.id} color={colorFor(spawn.status)} dimColor={spawn.restored}>
               {iconFor(spawn.status)} {spawn.agent} · {spawn.id} · {elapsedFor(spawn, now)}
@@ -309,7 +381,13 @@ width={width}
       )}
 
       {approval ? (
-        <Box flexDirection="column" borderStyle="round" borderColor="yellow" paddingX={1}>
+        <Box
+          flexDirection="column"
+          borderStyle="round"
+          borderColor="yellow"
+          paddingX={PANEL_PADDING_X}
+          paddingY={PANEL_PADDING_Y}
+        >
           <Text color="yellow">
             Allow {approval.tool} [{approval.kind}]
           </Text>
@@ -329,14 +407,14 @@ width={width}
           <Text dimColor>[y] allow · [a] always · [n] deny · ←/→ + enter</Text>
         </Box>
       ) : (
-        <Box borderStyle="round" paddingX={1}>
+        <Box borderStyle="round" paddingX={PANEL_PADDING_X} paddingY={PANEL_PADDING_Y}>
           <Text color="green">{"> "}</Text>
           <Text>{draft}</Text>
           <Text dimColor>{state.activity ? ` ${state.activity}` : ""}</Text>
         </Box>
       )}
 
-      <Box paddingX={1}>
+      <Box paddingX={PANEL_PADDING_X}>
         <Text dimColor>{statusLine(state.status)}</Text>
       </Box>
     </Box>
