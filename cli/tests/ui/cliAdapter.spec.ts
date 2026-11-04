@@ -13,7 +13,10 @@ vi.mock("../../src/terminal/stdin", () => ({
   printLogo: vi.fn(),
   printImage: vi.fn(),
   input: vi.fn(),
+askHidden: vi.fn(),
 }));
+
+const stdin = await import("../../src/terminal/stdin");
 
 const { CliUiAdapter } = await import("../../src/ui/CliUiAdapter");
 
@@ -306,5 +309,65 @@ expect(output).toBe("\x1Bc" + "conversation restored: 1 messages\n" + "you: hola
 it("leaves the screen alone when the session has nothing to show", () => {
 // A fresh session must not wipe the screen on boot.
 expect(printed(conversation([]))).toBe("");
+});
+});
+
+// The text and confirm questions used to be read by the flows themselves. They
+// go through the renderer now, so these cases pin what the line renderer asks
+// and what it hands back: a cancellation is `undefined`, never an empty answer.
+describe("the line renderer question", () => {
+afterEach(() => {
+vi.mocked(stdin.input).mockReset();
+vi.mocked(stdin.askHidden).mockReset();
+});
+
+it("reads a public answer as it was written", async () => {
+vi.mocked(stdin.input).mockResolvedValue("cheap");
+
+expect(await new CliUiAdapter().promptText({ message: "Provider id:" })).toBe("cheap");
+// Spaces are the flow's business: the renderer only shows the question.
+expect(vi.mocked(stdin.input).mock.calls[0]?.[0]).toBe("Provider id:");
+expect(stdin.askHidden).not.toHaveBeenCalled();
+});
+
+it("reads a secret through the hidden prompt", async () => {
+vi.mocked(stdin.askHidden).mockResolvedValue("sk-live");
+
+expect(await new CliUiAdapter().promptText({ message: "API key:", secret: true })).toBe("sk-live");
+expect(stdin.askHidden).toHaveBeenCalledWith("API key: ");
+expect(stdin.input).not.toHaveBeenCalled();
+});
+
+it("treats an empty answer as a cancellation", async () => {
+vi.mocked(stdin.input).mockResolvedValue("");
+
+expect(await new CliUiAdapter().promptText({ message: "Provider id:" })).toBeUndefined();
+});
+
+it("asks a yes/no with the key list of its default", async () => {
+const ui = new CliUiAdapter();
+
+vi.mocked(stdin.input).mockResolvedValue("y");
+expect(await ui.confirm({ message: "Use as default?", defaultAnswer: true })).toBe(true);
+expect(vi.mocked(stdin.input).mock.calls[0]?.[0]).toBe("Use as default? [Y/n] ");
+
+vi.mocked(stdin.input).mockResolvedValue("n");
+expect(await ui.confirm({ message: "Remove?", defaultAnswer: false })).toBe(false);
+expect(vi.mocked(stdin.input).mock.calls[1]?.[0]).toBe("Remove? [y/N] ");
+});
+
+it("takes the default on an empty answer", async () => {
+const ui = new CliUiAdapter();
+vi.mocked(stdin.input).mockResolvedValue(" ");
+
+expect(await ui.confirm({ message: "Use as default?", defaultAnswer: true })).toBe(true);
+expect(await ui.confirm({ message: "Remove?" })).toBe(false);
+});
+
+it("cancels on an unreadable answer instead of guessing", async () => {
+const ui = new CliUiAdapter();
+vi.mocked(stdin.input).mockResolvedValue("maybe");
+
+expect(await ui.confirm({ message: "Remove?", defaultAnswer: false })).toBeUndefined();
 });
 });

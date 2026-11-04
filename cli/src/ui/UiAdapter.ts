@@ -66,6 +66,28 @@ label: string;
 hint?: string;
 }
 
+// A question expecting one line of text back. `secret` asks the renderer to
+// hide what is typed: an API key must never reach the transcript, nor the
+// scrollback a line renderer leaves on screen.
+export interface TextRequest {
+message: string;
+// Explains what the answer is for, under the question. Optional because most
+// questions are self-explanatory and the panel is precious vertical space.
+hint?: string;
+secret?: boolean;
+}
+
+// A yes/no question. It is not a `select` of two options because a select has
+// no answer for a bare Enter, and the flows lean on that default to offer the
+// safe choice without a keystroke.
+export interface ConfirmRequest {
+message: string;
+hint?: string;
+// What Enter answers. False when absent: a destructive confirmation must
+// never be accepted by accident.
+defaultAnswer?: boolean;
+}
+
 // A question with a list of answers. Every "/" flow that used to ask "which
 // one?" goes through this asynchronously, so the same flow drives the ink
 // picker and the numeric list of the line renderer.
@@ -85,6 +107,15 @@ promptApproval(request: ApprovalRequest): Promise<"allow" | "deny" | "always">;
 // renderer owns the input stream: Ink pauses and consumes it, so a second
 // listener would starve the TUI and read keystrokes meant for the app.
 select(request: SelectionRequest): Promise<string | undefined>;
+// Asks for one line of text, resolving to it, or to `undefined` when the user
+// cancels. Same reason `select` lives here: the renderer owns the input
+// stream, so a flow that read stdin itself would fight Ink for the keystrokes
+// and paint its prompt outside the frame it draws.
+promptText(request: TextRequest): Promise<string | undefined>;
+// Asks a yes/no question, resolving to false for "no" and to `undefined` when
+// the user cancels. Cancelling is not "no": a flow aborts on `undefined`
+// instead of taking an answer the user never gave.
+confirm(request: ConfirmRequest): Promise<boolean | undefined>;
 // Renders a data-url image inline.
 renderImage(url: string): Promise<void>;
 // Restores the terminal before the process exits.

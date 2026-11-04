@@ -29,6 +29,7 @@ import {
   nextView,
   PANEL_PADDING_X,
   PANEL_PADDING_Y,
+  PROMPT_CHROME_Y,
   TRANSCRIPT_CHROME_Y,
   viewportRows,
   wheelScrollLines,
@@ -49,6 +50,13 @@ export interface TuiApproval {
 
 export type TuiSpawn = SpawnEntry;
 
+// A question of a flow waiting for the user. One shape for both kinds so the
+// panel and the geometry agree on what is on screen: the adapter never shows
+// two, because a flow asks one thing at a time.
+export type TuiPrompt =
+| { kind: "text"; message: string; hint?: string; secret?: boolean }
+| { kind: "confirm"; message: string; hint?: string; defaultAnswer?: boolean };
+
 export interface TuiState {
   lines: TuiLine[];
   status: UiStatus;
@@ -59,6 +67,8 @@ export interface TuiState {
   approval?: TuiApproval;
 // Open picker, if any: a "/" flow waiting for the user to choose one option.
 selection?: SelectionRequest;
+// Open question, if any: a "/" flow waiting for text or a yes/no.
+prompt?: TuiPrompt;
   theme: Theme;
   // A turn is in flight: reasoning and tool output preview their tail.
   running?: boolean;
@@ -77,6 +87,9 @@ interface AppProps {
 // Optional so a caller that never opens one (and the render tests) can leave
 // it out.
 onSelect?: (id: string | undefined) => void;
+// Answer of the open question: the text typed, the yes/no, or undefined when
+// it was cancelled. Optional for the same reason as onSelect.
+onPrompt?: (answer: string | boolean | undefined) => void;
   onToggle: (kind: "reasoning" | "tool", index: number) => void;
   onToggleAll: (kind: "reasoning" | "tool") => void;
   // Reports the text of the input box on every change, including the emptying
@@ -116,11 +129,15 @@ onSubmit,
 onExit,
 onDecision,
 onSelect,
+onPrompt,
 onToggle,
 onToggleAll,
 onDraftChange,
 }: AppProps) => {
 const [draft, setDraft] = useState("");
+// Text typed into the open question. It lives here and not in the owner for
+// the same reason as the draft: every keystroke must repaint the panel.
+const [answer, setAnswer] = useState("");
 const [choice, setChoice] = useState(0);
 // Index picked in the slash dropdown. The query is the draft itself, so only
 // the position has to survive between keystrokes.
@@ -131,6 +148,11 @@ const [menuDismissed, setMenuDismissed] = useState<string | null>(null);
 // Option highlighted in the picker. It is a separate index from the
 // dropdown's because the two lists hold different things.
 const [pickSelected, setPickSelected] = useState(0);
+// Every question opens empty: the answer of the previous one says nothing
+// about the one this flow is asking.
+useEffect(() => {
+setAnswer("");
+}, [state.prompt]);
 const [now, setNow] = useState(() => Date.now());
   // Where the transcript is looking. `bottomView()` starts pinned to the bottom,
   // like a shell: the newest line is the first thing the user sees.
@@ -146,11 +168,16 @@ setPickSelected(0);
   const scrollRef = useRef<(lines: number) => void>(() => {});
   const approval = state.approval;
 const selection = state.selection;
+const prompt = state.prompt;
 // Rows of the picker: the same model as the dropdown, over the options the
 // flow sent, so both lists move and clip the same way.
 const pickMenu = selection
 ? { items: selection.options, query: "", selected: pickSelected }
 : null;
+// The index is clamped where it is read, not only where it is painted: a
+// list can shrink under the arrows, and an index left over from a longer
+// one would select an option the user never walked to.
+const pickIndex = pickMenu ? Math.min(pickSelected, Math.max(0, pickMenu.items.length - 1)) : 0;
 const pickRows = pickMenu ? menuRows(pickMenu, MENU_VISIBLE_ROWS) : null;
   const theme = state.theme;
   const { stdout } = useStdout();
@@ -183,7 +210,7 @@ const pickRows = pickMenu ? menuRows(pickMenu, MENU_VISIBLE_ROWS) : null;
 const menuQuery = menuQueryFor(draft);
 // A picker owns the box, so its list is the only one on screen.
 const menu =
-selection || menuQuery === null || menuQuery === menuDismissed || !commands?.length
+selection || prompt || menuQuery === null || menuQuery === menuDismissed || !commands?.length
 ? null
 : menuView(commands, menuQuery, menuSelected);
 
@@ -239,7 +266,7 @@ return;
       effectiveView,
       measured.total,
       viewportLines,
-approval != null || selection != null,
+approval != null || selection != null || prompt != null,
     );
 
     if (scrolled) {
@@ -251,12 +278,12 @@ approval != null || selection != null,
 // mouse wheel is already gone by now, so the two never fight for a key.
 if (!approval && selection) {
 if (key.upArrow || key.downArrow) {
-setPickSelected(menuMove(pickMenu!, key.upArrow ? -1 : 1).selected);
+setPickSelected(menuMove({ ...pickMenu!, selected: pickIndex }, key.upArrow ? -1 : 1).selected);
 return;
 }
 
 if (key.return) {
-const option = selection.options[pickSelected];
+const option = selection.options[pickIndex];
 if (option) onSelect?.(option.id);
 return;
 }
@@ -269,6 +296,62 @@ return;
 return;
 }
 
+   // A question takes the whole keyboard. Confirmations answer on the key
+   // itself, like the approval box, so a destructive dialog costs one keystroke.
+   if (prompt) {
+   // Esc wipes a text question before it cancels it: a typo in an optional
+   // answer must not cost the values already typed into the flow, and pressing
+   // it again on an empty field is the cancel. A confirmation has no text to
+   // lose, so Esc cancels straight away. Ctrl-C is untouched: it still leaves
+   // the app, wherever the user is.
+   if (key.escape) {
+      if (prompt.kind === "text" && answer) {
+         setAnswer("");
+         return;
+      }
+
+      onPrompt?.(undefined);
+      return;
+   }
+   
+   if (prompt.kind === "confirm") {
+   if (key.return) {
+   onPrompt?.(prompt.defaultAnswer ?? false);
+   return;
+   }
+   
+   const pressed = input.toLowerCase();
+   
+   if (pressed === "y") {
+   onPrompt?.(true);
+   return;
+   }
+   
+   if (pressed === "n") {
+   onPrompt?.(false);
+   return;
+   }
+   
+   return;
+   }
+   
+   if (key.return) {
+   onPrompt?.(answer);
+   return;
+   }
+   
+  if (key.backspace || key.delete) {
+  setAnswer((current) => current.slice(0, -1));
+  return;
+  }
+   
+   if (!key.ctrl && !key.meta && input) {
+   setAnswer((current) => current + input);
+   }
+   
+   return;
+   }
+   
     if (approval) {
       if (key.leftArrow || key.upArrow) {
         setChoice((current) => (current + CHOICES.length - 1) % CHOICES.length);
@@ -321,6 +404,9 @@ setMenuDismissed(menu.state.query);
 setView(bottomView());
 setDraft("");
 setMenuSelected(0);
+// A sent command is history: the next "/" starts a fresh query, which must
+// reopen the dropdown even if it reads exactly like the dismissed one.
+setMenuDismissed(null);
 onSubmit(menuCommandLine(command));
 return;
 }
@@ -346,12 +432,21 @@ return;
       // turn) must leave the scroll where the user put it.
       setView(bottomView());
       setDraft("");
+     // Same after a plain prompt: an empty box opens the dropdown again on "/".
+     setMenuDismissed(null);
       onSubmit(value);
       return;
     }
 
     if (key.backspace || key.delete) {
-      setDraft((current) => current.slice(0, -1));
+      setDraft((current) => {
+      const next = current.slice(0, -1);
+      // The dismissed query only guards a list the user closed on purpose; once
+      // the box is empty the next "/" is a new question, and it has to open.
+      if (!next) setMenuDismissed(null);
+      
+      return next;
+      });
       return;
     }
 
@@ -379,7 +474,7 @@ const pickPanelRows = pickRows ? (pickRows.rows.length || 1) + SELECT_CHROME_Y :
 // The dropdown belongs to the input box, so it is only charged when the box
 // is the panel on screen.
 const menuPanelRows =
-menu && !approval && !pickPanelRows
+menu && !approval && !pickPanelRows && !prompt
 ? (menu.rows.rows.length || 1) + MENU_PANEL_CHROME_Y
 : 0;
 
@@ -394,6 +489,7 @@ stripRows,
 approval: approval != null,
 menuRows: menuPanelRows,
 selectionRows: pickPanelRows,
+promptRows: prompt ? PROMPT_CHROME_Y : 0,
 }),
 );
   const running = state.running ?? false;
@@ -547,7 +643,9 @@ inverse={index === choice}
 the picker and the input box are alternatives, and an approval hides the
 box. A picker under an approval stays on screen but inert, which is why
 both are painted there. */}
-{selection && pickRows ? (
+{prompt ? (
+<PromptPanel prompt={prompt} answer={answer} width={width} />
+) : selection && pickRows ? (
 <Box
 flexDirection="column"
 borderStyle="round"
@@ -558,7 +656,7 @@ paddingY={PANEL_PADDING_Y}
 <Text color="magenta">{selection.message}</Text>
 {pickRows.rows.length ? (
 pickRows.rows.map((option, index) => {
-const selected = pickRows.start + index === pickSelected;
+const selected = pickRows.start + index === pickIndex;
 
 return (
 <Text key={option.id} inverse={selected} color={selected ? "magenta" : undefined}>
@@ -573,7 +671,7 @@ return (
 <Text dimColor>
 {/* The range only means something when part of the list is out of sight. */}
 {pickRows.hiddenAbove || pickRows.hiddenBelow
-? `${pickSelected + 1}/${selection.options.length} · `
+? `${pickIndex + 1}/${selection.options.length} · `
 : ""}
 ↑/↓ choose · enter accept · esc cancel
 </Text>
@@ -601,6 +699,40 @@ const aliases = command.aliases?.length
 : "";
 
 return truncateCell(`/${command.name}${aliases} ${command.description}`, width);
+};
+
+// The question of a flow. It paints exactly the three rows PROMPT_CHROME_Y
+// charges, and cuts both free texts to the panel width: Ink wraps instead of
+// clipping, so an overlong line would push a fourth row into a box the
+// transcript is not expecting.
+const PromptPanel = ({
+prompt,
+answer,
+width,
+}: {
+prompt: TuiPrompt;
+answer: string;
+width: number;
+}) => {
+const room = Math.max(10, width - 2);
+// The help line spells out the two-step Esc of a text question: the first
+// one only clears the field, so the panel has to say why it stays open.
+const keys =
+prompt.kind === "confirm"
+? `[y] yes · [n] no · enter ${prompt.defaultAnswer ? "yes" : "no"} · esc cancel`
+: "[enter] accept · esc clear · esc again cancel";
+const typed = prompt.kind === "text" ? answer : "";
+// A secret is masked at the character count, never shown: the screen a
+// terminal leaves behind is a scrollback the user can copy.
+const shown = prompt.kind === "text" && prompt.secret ? "•".repeat(Array.from(typed).length) : typed;
+
+return (
+<Box flexDirection="column" borderStyle="round" borderColor="blue" paddingX={PANEL_PADDING_X} paddingY={PANEL_PADDING_Y}>
+<Text color="blue">{truncateCell(prompt.message, room)}</Text>
+<Text>{shown || " "}</Text>
+<Text dimColor>{truncateCell(prompt.hint ? `${prompt.hint} · ${keys}` : keys, room)}</Text>
+</Box>
+);
 };
 
 // The input box and the slash dropdown under it. They are one component

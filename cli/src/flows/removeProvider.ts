@@ -1,7 +1,6 @@
 import type { IHarness } from "@racso/core";
-// The confirmation stays on stdin: only the selection is a picker, and the
-// renderer that owns the input stream is what draws it.
-import { input } from "@/terminal/stdin";
+// Both questions go through the UI, for the same reason as addProvider: only
+// the renderer that owns the input stream may ask the user anything.
 import type { UiAdapter } from "@/ui/UiAdapter";
 
 // Interactive flow to drop a provider instance. Refuses to remove the last
@@ -37,10 +36,13 @@ if (!target) return undefined;
     throw new Error("Cannot remove the last configured provider");
   }
 
-  const answer = (await input(`Remove provider "${selected.id}"? This cannot be undone [y/N]: `))
-    .trim()
-    .toLowerCase();
-  if (answer !== "y" && answer !== "yes") return undefined;
+  // Deleting cannot be undone, so the default is "no": a stray Enter must not
+// choose it.
+const answer = await ui.confirm({
+message: `Remove provider "${selected.id}"? This cannot be undone.`,
+defaultAnswer: false,
+});
+if (answer !== true) return undefined;
 
-  return harness.removeProvider(selected.id) ? selected.id : undefined;
+return harness.removeProvider(selected.id) ? selected.id : undefined;
 };

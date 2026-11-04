@@ -1,8 +1,8 @@
 import type { IHarness } from "@racso/core";
-// The text prompts still read stdin: these flows run either from the line
-// renderer (which owns stdin anyway) or during first-run setup, before Ink is
-// mounted. Only the pickers go through the UI, so the TUI can show them.
-import { input } from "@/terminal/stdin";
+// Every question goes through the UI: the flow decides what to ask and how to
+// read the answer, the renderer decides how to ask it. None of them reads
+// stdin here, because the TUI owns that stream and a second reader would
+// starve Ink and paint a prompt outside the frame.
 import type { UiAdapter } from "@/ui/UiAdapter";
 
 // Narrow view of the harness the provider flows need, so first-run setup can
@@ -25,20 +25,24 @@ export const addProvider = async (
 ): Promise<{ id: string; changedDefault: boolean } | undefined> => {
   const available = types.length ? [...types] : ["openai"];
 
-  const id = (await input("Provider id (e.g. cheap, openrouter): "))
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, "-");
-  if (!id) throw new Error("Provider id is required");
+  // Every step aborts on a cancellation, and nothing reaches the harness until
+// the last answer is in: a half-configured provider would leave the next run
+// booting something nobody finished describing.
+const rawId = await ui.promptText({ message: "Provider id (e.g. cheap, openrouter):" });
+if (rawId === undefined) return undefined;
 
-  if (harness.listProviders().includes(id)) {
-    const overwrite = (await input(`Provider "${id}" exists. Overwrite? [y/N]: `))
-      .trim()
-      .toLowerCase();
-    if (overwrite !== "y" && overwrite !== "yes") return undefined;
-  }
+const id = rawId.trim().toLowerCase().replace(/\s+/g, "-");
+if (!id) throw new Error("Provider id is required");
 
-  const type =
+if (harness.listProviders().includes(id)) {
+const overwrite = await ui.confirm({
+message: `Provider "${id}" exists. Overwrite?`,
+defaultAnswer: false,
+});
+if (overwrite !== true) return undefined;
+}
+
+const type =
 available.length === 1
 ? available[0]
 : await ui.select({
@@ -47,18 +51,40 @@ options: available.map((option) => ({ id: option, label: option })),
 });
 if (!type) return undefined;
 
-  const url = (await input(`[${id}] Base URL: `)).trim();
-  if (!url) throw new Error("Base URL is required");
+  const rawUrl = await ui.promptText({ message: `[${id}] Base URL:` });
+if (rawUrl === undefined) return undefined;
 
-  const apikey = (await input(`[${id}] API key: `)).trim();
-  if (!apikey) throw new Error("API key is required");
+const url = rawUrl.trim();
+if (!url) throw new Error("Base URL is required");
 
-  const model = (await input(`[${id}] Preferred model (optional): `)).trim();
+// The key is secret: the renderer masks it, because the screen it paints is a
+// scrollback the user can copy.
+const rawKey = await ui.promptText({ message: `[${id}] API key:`, secret: true });
+if (rawKey === undefined) return undefined;
 
-  const makeDefault =
-    (await input("Use as default provider? [Y/n]: ")).trim().toLowerCase() !== "n";
+const apikey = rawKey.trim();
+if (!apikey) throw new Error("API key is required");
 
-  harness.configureProvider(
+// The model is the last answer that can be left empty, so the hint names
+// both ways out: enter on an empty field takes the provider default, and esc
+// on an empty field cancels the flow. Esc on a field that has text only
+// clears it, so a typo here costs one keystroke and never the id, the type,
+// the URL or the key already typed.
+const rawModel = await ui.promptText({
+message: `[${id}] Preferred model (optional):`,
+hint: "leave it empty for the provider default",
+});
+if (rawModel === undefined) return undefined;
+
+const model = rawModel.trim();
+
+const makeDefault = await ui.confirm({
+message: "Use as default provider?",
+defaultAnswer: true,
+});
+if (makeDefault === undefined) return undefined;
+
+harness.configureProvider(
     id,
     { type, url, apikey, ...(model ? { model } : {}) },
     { makeDefault },

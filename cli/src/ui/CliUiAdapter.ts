@@ -7,6 +7,7 @@ import type {
 } from "@racso/core";
 import { createLogger } from "@racso/core";
 import {
+askHidden,
 clearPrompt,
 input,
 printImage,
@@ -16,7 +17,7 @@ select,
 } from "@/terminal/stdin";
 import { formatSpawnOutcome, formatTurnOutcome } from "./outcome";
 import { formatStatusBar } from "./statusBar";
-import type { SelectionRequest, UiAdapter, UiEvent } from "./UiAdapter";
+import type { ConfirmRequest, SelectionRequest, TextRequest, UiAdapter, UiEvent } from "./UiAdapter";
 
 // Re-exported so the line renderer keeps its `formatStatusBar` import surface
 // while both renderers share the single formatter in statusBar.ts.
@@ -203,6 +204,31 @@ request.options.map((option) => option.label),
 const index = request.options.findIndex((option) => option.label === chosen);
 
 return index >= 0 ? request.options[index]!.id : undefined;
+}
+
+// Asks for one line in the scrollback. An empty answer is a cancellation and
+// not an empty value: no question here is meaningful when left blank. What to
+// do with surrounding spaces stays with the flow, which is the one that knows
+// whether they mean anything.
+async promptText(request: TextRequest): Promise<string | undefined> {
+const answer = request.secret ? await askHidden(`${request.message} `) : await input(request.message);
+
+return answer.length ? answer : undefined;
+}
+
+// Reads a yes/no in the scrollback, with the same shape promptApproval uses:
+// a bracketed key list, Enter taking the default, anything unrecognised
+// cancelling instead of guessing.
+async confirm(request: ConfirmRequest): Promise<boolean | undefined> {
+const fallback = request.defaultAnswer ?? false;
+const keys = fallback ? "[Y/n]" : "[y/N]";
+const answer = (await input(`${request.message} ${keys} `)).trim().toLowerCase();
+
+if (!answer) return fallback;
+if (/^y(es)?$/.test(answer)) return true;
+if (/^n(o)?$/.test(answer)) return false;
+
+return undefined;
 }
 
 // The line renderer leaves the terminal as the prompt owns it.

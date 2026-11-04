@@ -80,6 +80,11 @@ export const MENU_PANEL_CHROME_Y = BORDER_ROWS + 1;
 // one row each, which is why the caller charges the rows it really paints.
 export const SELECT_CHROME_Y = BORDER_ROWS + PANEL_PADDING_Y * 2 + 2;
 
+// The question panel of a flow: round border, both padding rows and the three
+// rows it always paints (message, answer, help). It is a fixed height like the
+// approval box, because its layout does not depend on what is asked.
+export const PROMPT_CHROME_Y = BORDER_ROWS + PANEL_PADDING_Y * 2 + 3;
+
 // Splits the terminal into the rows the transcript gets and the rows its
 // neighbours take, given what is on screen right now.
 export const chromeRows = ({
@@ -87,6 +92,7 @@ stripRows,
 approval,
 menuRows = 0,
 selectionRows = 0,
+promptRows = 0,
 }: {
 // Rows of the spawn strip, the "older" counter included; 0 when hidden.
 stripRows: number;
@@ -97,6 +103,9 @@ approval: boolean;
 menuRows?: number;
 // Rows the picker panel really paints, borders included; 0 when it is shut.
 selectionRows?: number;
+// Rows the question panel really paints, borders included; 0 when there is
+// none.
+promptRows?: number;
 }): ChromeRows => ({
 inner: TRANSCRIPT_CHROME_Y,
 middle:
@@ -104,9 +113,16 @@ middle:
 // An approval, a picker and the input box are charged for what is painted:
 // the box only when nothing else can take typing, since the panels above it
 // replace it. An approval and a picker can both be up (the approval keeps
-// the keys), so they are summed instead of swapped.
+// the keys), so they are summed instead of swapped. A question replaces the
+// box the same way a picker does.
 (approval ? APPROVAL_ROWS : 0) +
-(selectionRows > 0 ? selectionRows : approval ? 0 : INPUT_ROWS) +
+(selectionRows > 0
+? selectionRows
+: promptRows > 0
+? promptRows
+: approval
+? 0
+: INPUT_ROWS) +
 menuRows,
 status: STATUS_ROWS,
 });

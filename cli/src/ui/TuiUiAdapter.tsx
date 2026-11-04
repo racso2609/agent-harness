@@ -3,12 +3,12 @@ import type { ApprovalDecision, ApprovalRequest, ILogger, UiTheme } from "@racso
 import { createLogger } from "@racso/core";
 import { render } from "ink";
 import { formatSpawnOutcome, formatTurnOutcome } from "./outcome";
-import { App, type TuiApproval, type TuiLine, type TuiState } from "./tui/App";
+import { App, type TuiApproval, type TuiLine, type TuiPrompt, type TuiState } from "./tui/App";
 import { noAnchors, trimAnchored, writeAnchored, type RoleAnchors } from "./tui/entries";
 import { MarkdownStream } from "./tui/markdown";
 import { toSpawnEntry } from "./tui/progress";
 import { resolveTheme, type Theme } from "./tui/theme";
-import type { SelectionRequest, UiAdapter, UiEvent } from "./UiAdapter";
+import type { ConfirmRequest, SelectionRequest, TextRequest, UiAdapter, UiEvent } from "./UiAdapter";
 
 // Parses a restored message into a finished document, the same way
 // replaceStreamWith closes a streamed answer.
@@ -46,6 +46,12 @@ protected commands: CommandOption[] = [];
 // slot and not a queue: two flows never ask at once, and a stale answer would
 // resolve the wrong flow.
 protected pendingSelection: ((id: string | undefined) => void) | null = null;
+// Resolver for the question currently on screen, if any. Text and confirm
+// share the slot because they are never up at once, and a queue would hand a
+// flow the question of another.
+protected pendingPrompt:
+| { kind: "text" | "confirm"; resolve: (answer: string | boolean | undefined) => void }
+| null = null;
   // Markdown accumulators for the two streamed roles. Kept out of the state so
   // keystrokes never re-parse what already arrived.
   protected streams: Partial<Record<"answer" | "reasoning", MarkdownStream>> = {};
@@ -103,6 +109,7 @@ commands={this.commands}
         onExit={() => this.onExit()}
         onDecision={(decision) => this.resolveApproval(decision)}
 onSelect={(id) => this.resolveSelection(id)}
+onPrompt={(answer) => this.resolvePrompt(answer)}
         onToggle={(kind, index) => this.toggleEntry(kind, index)}
         onToggleAll={(kind) => this.toggleAll(kind)}
         onDraftChange={(draft) => this.reportDraft(draft)}
@@ -145,6 +152,15 @@ this.pendingSelection = null;
 this.state = { ...this.state, selection: undefined };
 this.mount();
 resolve?.(id);
+}
+
+// Resolves the question shown in the app and returns to the input box.
+protected resolvePrompt(answer: string | boolean | undefined) {
+const pending = this.pendingPrompt;
+this.pendingPrompt = null;
+this.state = { ...this.state, prompt: undefined };
+this.mount();
+pending?.resolve(answer);
 }
 
 // Expands or collapses one entry by index (its position in the transcript).
@@ -340,6 +356,16 @@ resolve?.(id);
         };
         break;
       case "conversation": {
+        // Anything a flow was waiting for was asked by the session we left, and that
+        // flow waits for the answer: an open dialog or question would keep it blocked
+        // on something nobody is answering anymore. This runs before the early return
+        // of an empty conversation, which still has to release them.
+        //
+        // An approval is denied instead of cancelled: that ends the old turn, the
+        // same way closing the app does.
+        if (this.pendingApproval) this.resolveApproval("deny");
+        if (this.pendingSelection) this.resolveSelection(undefined);
+        if (this.pendingPrompt) this.resolvePrompt(undefined);
         // A session with nothing to show must not clear the transcript a new
         // session already has on screen.
         if (!event.entries.length) return;
@@ -371,11 +397,6 @@ expanded: new Set<number>(),
 running: false,
 activity: undefined,
 };
-// An approval on screen was asked by the turn of the session we left, and
-// that turn waits for the answer: leaving the dialog open would keep it
-// blocked on a question nobody is answering anymore. Denying it ends the old
-// turn, the same way closing the app does.
-if (this.pendingApproval) this.resolveApproval("deny");
         break;
       }
       case "spawnSettled":
@@ -397,9 +418,13 @@ if (this.pendingApproval) this.resolveApproval("deny");
         };
         break;
       case "reset":
-        this.streams = {};
-        this.anchors = noAnchors();
-        this.state = { ...this.state, lines: [] };
+this.streams = {};
+this.anchors = noAnchors();
+this.state = { ...this.state, lines: [] };
+// The screen is wiped, so a question or a picker painted on it is gone too:
+// leaving them pending would keep a flow blocked on something invisible.
+if (this.pendingSelection) this.resolveSelection(undefined);
+if (this.pendingPrompt) this.resolvePrompt(undefined);
         break;
     }
 
@@ -469,13 +494,66 @@ this.pendingSelection = resolve;
 });
 }
 
+// Shows a panel that takes typed text. Ink owns stdin, so the flow cannot read
+// the line itself; cancelling resolves `undefined`, which every caller reads as
+// "nothing answered" and aborts on.
+promptText(request: TextRequest): Promise<string | undefined> {
+if (this.pendingPrompt) return Promise.resolve(undefined);
+
+const prompt: TuiPrompt = {
+kind: "text",
+message: request.message,
+...(request.hint ? { hint: request.hint } : {}),
+...(request.secret ? { secret: true } : {}),
+};
+
+this.state = { ...this.state, prompt };
+this.mount();
+
+return new Promise<string | undefined>((resolve) => {
+this.pendingPrompt = {
+kind: "text",
+resolve: (answer) => resolve(typeof answer === "string" ? answer : undefined),
+};
+});
+}
+
+// Shows a panel that answers on a single key. It is not a two-option picker:
+// Enter has to take a default, and a picker has no key that means "the one you
+// would have pressed".
+confirm(request: ConfirmRequest): Promise<boolean | undefined> {
+if (this.pendingPrompt) return Promise.resolve(undefined);
+
+const prompt: TuiPrompt = {
+kind: "confirm",
+message: request.message,
+...(request.hint ? { hint: request.hint } : {}),
+...(request.defaultAnswer !== undefined ? { defaultAnswer: request.defaultAnswer } : {}),
+};
+
+this.state = { ...this.state, prompt };
+this.mount();
+
+return new Promise<boolean | undefined>((resolve) => {
+this.pendingPrompt = {
+kind: "confirm",
+resolve: (answer) => resolve(typeof answer === "boolean" ? answer : undefined),
+};
+});
+}
+
 async renderImage(url: string) {
     this.pushLine({ role: "notice", text: `[image] ${url.slice(0, 32)}…` });
   }
 
   close() {
-    this.resolveApproval("deny");
-    this.instance?.unmount();
+// Every promise still waiting on the screen has to settle before the app goes
+// away: the flow that asked it would otherwise stay parked on a question
+// nobody can answer anymore, and its caller would never return.
+this.resolveApproval("deny");
+this.resolveSelection(undefined);
+this.resolvePrompt(undefined);
+this.instance?.unmount();
   }
 }
 
