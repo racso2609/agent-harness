@@ -334,7 +334,24 @@ class TuiUiAdapter implements UiAdapter {
         // `history` stays: the children of the session are the next event
         // (spawnHistory). The live strip belongs to the previous session, and
         // every entry of the old transcript was collapsed or expanded for it.
-        this.state = { ...this.state, lines, spawns: [], expanded: new Set<number>() };
+//
+// The renderer is left at rest: the turn that was running belonged to the
+// session we just left and nothing is in flight here, so `running` and
+// `activity` would keep the clock ticking and every tool/reasoning entry
+// previewing a tail for a turn that will never end.
+this.state = {
+...this.state,
+lines,
+spawns: [],
+expanded: new Set<number>(),
+running: false,
+activity: undefined,
+};
+// An approval on screen was asked by the turn of the session we left, and
+// that turn waits for the answer: leaving the dialog open would keep it
+// blocked on a question nobody is answering anymore. Denying it ends the old
+// turn, the same way closing the app does.
+if (this.pendingApproval) this.resolveApproval("deny");
         break;
       }
       case "spawnSettled":

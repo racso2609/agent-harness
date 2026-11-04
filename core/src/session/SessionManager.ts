@@ -352,9 +352,13 @@ this.undelivered = this.spawnHistory.filter(
     return matches.length === 1 ? matches[0].id : undefined;
   }
 
-  // Builds a short title from the first user message of a session.
+  // Builds a short title from the first user message of a session. Unprompted
+  // turns are skipped: nobody wrote them, so titling the session after an
+  // automatic continuation would not describe it.
   protected sessionTitle(history: History[]) {
-    const message = history.find((entry) => entry.role === "user" && entry.content.trim());
+    const message = history.find(
+      (entry) => entry.role === "user" && !entry.unprompted && entry.content.trim(),
+    );
     if (!message) return undefined;
 
     const text = message.content.replace(/\s+/g, " ").trim();
@@ -572,9 +576,13 @@ deliveredSpawns: deliveredSpawns.length ? deliveredSpawns : undefined,
   // Conversation as the UI reads it back, oldest first. Provider-only messages
   // (system persona, compaction memory, tool output) and assistant turns with
   // no text are filtered out here so every consumer sees the same thing.
+  // Unprompted user turns are dropped too: they stay in the history because
+  // the model must see them, but nobody typed them, so the UI hides them. The
+  // filter lives here, once, instead of exposing the flag to every renderer.
   conversation(): ConversationEntry[] {
     return this.history.flatMap((message) => {
       if (message.role !== "user" && message.role !== "assistant") return [];
+      if (message.role === "user" && message.unprompted) return [];
       const content = message.content.trim();
       if (!content) return [];
 
@@ -709,7 +717,11 @@ deliveredSpawns: deliveredSpawns.length ? deliveredSpawns : undefined,
   }
 
   // Classifies the prompt and dispatches it to text or image generation.
-  async ask(prompt: string, onEvent?: ChatEventListener) {
+  async ask(
+    prompt: string,
+    onEvent?: ChatEventListener,
+    options: { unprompted?: true } = {},
+  ) {
     if (!this.provider) throw new Error("Session not initialized");
 
     // Deliver before the turn reads history, so the parent starts the turn
@@ -720,8 +732,8 @@ deliveredSpawns: deliveredSpawns.length ? deliveredSpawns : undefined,
 
     const response =
       action === "imageGeneration"
-        ? await this.provider.generateImage(prompt)
-        : await this.runAgentLoop(prompt, onEvent);
+        ? await this.runImageTurn(prompt, options)
+        : await this.runAgentLoop(prompt, onEvent, options);
 
     this.recordUsage(response);
     this.save();
@@ -734,6 +746,7 @@ deliveredSpawns: deliveredSpawns.length ? deliveredSpawns : undefined,
   protected async runAgentLoop(
     prompt: string,
     onEvent?: ChatEventListener,
+    options: { unprompted?: true } = {},
   ): Promise<AgentResponse> {
     const provider = this.provider;
     if (!provider) throw new Error("Session not initialized");
@@ -745,7 +758,7 @@ deliveredSpawns: deliveredSpawns.length ? deliveredSpawns : undefined,
       : configuredMax;
     const specs = toolsConfig?.enabled === false ? [] : this.tools.specs();
 
-    this.history.push({ role: "user", content: prompt });
+    this.history.push(this.userMessage(prompt, options));
 
     const usage: TokenUsage = {
       promptTokens: 0,
@@ -858,6 +871,31 @@ deliveredSpawns: deliveredSpawns.length ? deliveredSpawns : undefined,
     }
 
     return result;
+  }
+
+  // The user turn as it enters the history. The flag travels with the message
+  // so conversation() can hide it without losing the turn the model needs.
+  protected userMessage(prompt: string, options: { unprompted?: true } = {}): History {
+    const message: Extract<History, { role: "user" }> = { role: "user", content: prompt };
+    if (options.unprompted) message.unprompted = true;
+
+    return message;
+  }
+
+  // Image turns go straight to the image endpoint, with no agent loop and no
+  // assistant message of their own: the images live in the response. The
+  // prompt still belongs in the history, in the same shape the text path
+  // pushes, so a resumed session shows the request next to its answer.
+  protected async runImageTurn(
+    prompt: string,
+    options: { unprompted?: true } = {},
+  ): Promise<AgentResponse> {
+    const provider = this.provider;
+    if (!provider) throw new Error("Session not initialized");
+
+    this.history.push(this.userMessage(prompt, options));
+
+    return provider.generateImage(prompt);
   }
 
   protected appendAssistant(text: string, toolCalls: ToolCall[]) {

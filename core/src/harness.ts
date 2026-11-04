@@ -22,7 +22,7 @@ class Harness implements IHarness {
   }
 
   ask(prompt: string, options: AskOptions = {}): Promise<AgentResponse> {
-    return this.session.ask(prompt, options.onEvent);
+    return this.session.ask(prompt, options.onEvent, { unprompted: options.unprompted });
   }
 
   status() {

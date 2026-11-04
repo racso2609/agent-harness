@@ -1754,3 +1754,129 @@ expect(session.history).toEqual([{ role: "user", content: "keep me" }]);
 expect(session.conversation()).toEqual([{ role: "user", content: "keep me" }]);
 });
 });
+
+// A turn the session started on its own (an automatic continuation after a
+// child settled) is kept in the history for the model but hidden from the UI,
+// and the same flag decides whether it can title the session.
+describe("SessionManager unprompted turns", () => {
+const makeSession = (withProvider = true) => {
+const session = new SessionManager(makeConfig({ autoCompact: false }), makeStore());
+if (withProvider) {
+session.provider = new OpenAiProvider("https://api.example.com", "key", "model");
+session.providerName = "openai";
+session.model = "model";
+vi.spyOn(session, "classifyAction").mockResolvedValue("textGeneration");
+}
+return session;
+};
+
+it("keeps an unprompted turn in the history but leaves it out of conversation()", () => {
+const session = makeSession(false);
+session.history = [
+{ role: "user", content: "fix the bug" },
+{ role: "assistant", content: "fixing it" },
+{ role: "user", content: "Continue with the work left by the children", unprompted: true },
+{ role: "assistant", content: "nothing left to do" },
+];
+
+// The model still sees the turn: dropping it would change the context.
+expect(session.history[2]).toEqual({
+role: "user",
+content: "Continue with the work left by the children",
+unprompted: true,
+});
+expect(session.conversation()).toEqual([
+{ role: "user", content: "fix the bug" },
+{ role: "assistant", content: "fixing it" },
+{ role: "assistant", content: "nothing left to do" },
+]);
+});
+
+it("shows a regular turn that follows an unprompted one", () => {
+const session = makeSession(false);
+session.history = [
+{ role: "user", content: "Continue with the work left by the children", unprompted: true },
+{ role: "assistant", content: "nothing left to do" },
+{ role: "user", content: "now write the report" },
+];
+
+expect(session.conversation()).toEqual([
+{ role: "assistant", content: "nothing left to do" },
+{ role: "user", content: "now write the report" },
+]);
+});
+
+it("marks the turn ask() runs with unprompted in the history", async () => {
+const session = makeSession();
+session.provider!.chat = vi.fn(async () => stopTurn("answer"));
+
+await session.ask("Continue with the work left by the children", undefined, {
+unprompted: true,
+});
+
+expect(session.history).toEqual([
+{
+role: "user",
+content: "Continue with the work left by the children",
+unprompted: true,
+},
+{ role: "assistant", content: "answer" },
+]);
+expect(session.conversation()).toEqual([{ role: "assistant", content: "answer" }]);
+});
+
+it("stores a regular ask() turn without the flag", async () => {
+const session = makeSession();
+session.provider!.chat = vi.fn(async () => stopTurn("answer"));
+
+await session.ask("what changed?");
+
+expect(session.history[0]).toEqual({ role: "user", content: "what changed?" });
+expect(session.conversation()).toEqual([
+{ role: "user", content: "what changed?" },
+{ role: "assistant", content: "answer" },
+]);
+});
+
+it("keeps the prompt of an image turn in the history and in conversation()", async () => {
+const session = makeSession();
+vi.spyOn(session, "classifyAction").mockResolvedValue("imageGeneration");
+session.provider!.generateImage = vi.fn(async () => ({
+text: "image ready",
+images: [{ url: "https://example.com/image.png" }],
+}));
+
+await session.ask("draw a cat");
+
+expect(session.history).toEqual([{ role: "user", content: "draw a cat" }]);
+expect(session.conversation()).toEqual([{ role: "user", content: "draw a cat" }]);
+});
+
+it("titles the session after the first real user turn, not the continuation", () => {
+const store = makeStore();
+store.list = vi.fn(() => [
+{
+id: "session-1",
+createdAt: "2024-01-01T00:00:00.000Z",
+updatedAt: "2024-01-02T00:00:00.000Z",
+provider: "openai",
+model: "model",
+history: [
+{
+role: "user" as const,
+content: "Continue with the work left by the children",
+unprompted: true as const,
+},
+{ role: "assistant" as const, content: "nothing left to do" },
+{ role: "user" as const, content: "real question" },
+],
+},
+]) as unknown as SessionStore["list"];
+const session = new SessionManager(makeConfig(), store);
+session.provider = new OpenAiProvider("https://api.example.com", "key", "model");
+session.providerName = "openai";
+session.model = "model";
+
+expect(session.listSessions()[0].title).toBe("real question");
+});
+});

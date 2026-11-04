@@ -75,6 +75,10 @@ export interface IHarness {
   // { type: "text" | "reasoning", delta }, { type: "toolCallStart" | "toolCallEnd", id, name }
   // y { type: "toolOutput", id, name, chunk } (salida viva de la tool, con throttle).
   // Omitirlo mantiene el comportamiento bloqueante de siempre.
+ // AskOptions.unprompted?: true marca el prompt que no escribió el usuario: la sesión
+ // arrancó el turno sola (una continuación automática tras asentarse un hijo). El turno
+ // se guarda igual en el historial, porque el modelo tiene que verlo, pero conversation()
+ // lo deja fuera y sessionTitle() lo ignora; su respuesta sí se muestra.
 
   // Snapshot de uso/coste/contexto y del agente/provider activos.
   status(): SessionStatus;
@@ -88,7 +92,8 @@ export interface IHarness {
   save(): void;
   // La conversación tal como la lee la UI, de la más antigua a la más reciente.
   // Solo user y assistant: se filtran system (persona, memoria de compactación),
-  // la salida de tools y los turnos assistant sin texto. Devuelve una copia.
+  // la salida de tools, los turnos assistant sin texto y los turnos user marcados
+ // `unprompted` (nadie los escribió; su respuesta sí se muestra). Devuelve una copia.
   conversation(): ConversationEntry[];
 
   // --- providers / modelos ---

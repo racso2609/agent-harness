@@ -48,6 +48,11 @@ export interface AskOptions {
   // Receives progress as the turn is produced (text, reasoning, tool calls).
   // Optional: omitting it keeps the existing blocking behaviour.
   onEvent?: ChatEventListener;
+  // The prompt was not written by the user: the session started the turn on
+  // its own (an automatic continuation after a child settled). It is kept in
+  // the history — the model must see it as a turn — but conversation() leaves
+  // it out, because nobody typed it.
+  unprompted?: true;
 }
 
 export interface SpawnOptions {

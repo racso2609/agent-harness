@@ -312,6 +312,11 @@ const { text, images, outcome } = await this.harness.ask(prompt, {
 onEvent: (event) => {
 for (const uiEvent of toUiEvents(event)) this.ui.render(uiEvent);
 },
+// Only a continuation is marked: core keeps the turn in the history but
+// leaves it out of conversation(), so /resume does not show the automatic
+// text as if the user had typed it. A turn the user sent never carries the
+// flag, even when children are still waiting for it.
+unprompted: turn.continuation ? true : undefined,
 });
 
 // The final text is authoritative: the stream may have been empty (no

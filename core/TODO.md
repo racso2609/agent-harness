@@ -21,7 +21,7 @@
 - [x] prompt classification text generation or image generation
 - [x] `/sessions` (alias `/session`) lista sesiones persistidas con título, provider/modelo y conteo de mensajes
 - [x] `/resume <id|prefijo|índice>` (alias `/switch`) cambia de sesión persistiendo la actual; sin argumento abre un `select` interactivo
-- [x] `conversation(): ConversationEntry[]` — la conversación como la lee la UI (solo `user`/`assistant`, sin persona, memoria de compactación ni salida de tools, en copia y del más antiguo al más reciente), para que la UI repinte una sesión reanudada. Dueña de la tarea: `cli/TODO.md` §P5 «`/resume` dejaba en pantalla la conversación de la sesión anterior».
+- [x] `conversation(): ConversationEntry[]` — la conversación como la lee la UI (solo `user`/`assistant`, sin persona, memoria de compactación, salida de tools ni turnos `unprompted` que nadie escribió, en copia y del más antiguo al más reciente), para que la UI repinte una sesión reanudada. Dueña de la tarea: `cli/TODO.md` §P5 «`/resume` dejaba en pantalla la conversación de la sesión anterior».
 
 3.1 agents
 

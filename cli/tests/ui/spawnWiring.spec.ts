@@ -65,8 +65,8 @@ describe("spawn wiring", () => {
 
 // A resumed session must not start with an empty strip: the children the
 // session launched before are persisted, and only childHistory() knows about
-// them. The first two cases drive the helper; the last two are wiring guards
-// (source-level) because MainLoop runs a stdin loop and cannot be mounted here.
+// them. The helper is driven here; when the loop calls it is behaviour,
+// covered by resumeWiring.spec.ts, which mounts the real MainLoop.
 describe("children of a resumed session", () => {
   const ui = () => {
     const events: UiEvent[] = [];
@@ -94,22 +94,17 @@ describe("children of a resumed session", () => {
 
     expect(renderer.events).toEqual([]);
   });
+it("ships every handle the session carries, not only the newest", () => {
+// /children lists them all; dropping any here would lose a child that is
+// still running when the session is opened again.
+const renderer = ui();
+const older = makeHandle({ spawnId: "spawn-1", status: "done" });
+const newer = makeHandle({ spawnId: "spawn-2" });
 
-  const mainLoop = readFileSync(new URL("../../src/MainLoop.ts", import.meta.url), "utf8");
+showChildHistory(harnessWith([older, newer]), renderer);
 
-  it("does not ship them before the session is initialized", () => {
-    const boot = mainLoop.indexOf("await this.harness.initialize(");
-    const history = mainLoop.indexOf("showChildHistory(this.harness, this.ui)");
-
-    expect(boot).toBeGreaterThan(-1);
-    expect(history).toBeGreaterThan(boot);
-  });
-
-  it("refreshes them when a command switched the session", () => {
-    // A command handler can load another session; the strip would otherwise
-    // keep showing the children of the session we just left.
-    expect(mainLoop).toContain("this.harness.status().sessionId !== before");
-  });
+expect(renderer.events).toEqual([{ type: "spawnHistory", handles: [older, newer] }]);
+});
 });
 
 // A child that settles with work left starts a turn on its own; the rule lives
@@ -245,60 +240,37 @@ expect(mainLoop).toContain("onDraftChange: () => this.maybeContinue({ fromDraft:
 });
 
 // /resume changes session but the screen kept the previous conversation. The
-// helper drives the renderer from what the core says the session carries; the
-// other two cases are the source-level guards for when the loop calls it, for
-// the same reason as the children: MainLoop cannot be mounted here.
+// helper drives the renderer from what the core says the session carries; when
+// the loop sends it is behaviour, covered by resumeWiring.spec.ts, which mounts
+// the real MainLoop.
 describe("conversation of the session now in charge", () => {
- const ui = () => {
-   const events: UiEvent[] = [];
+const ui = () => {
+const events: UiEvent[] = [];
 
-   return { events, render: (event: UiEvent) => events.push(event) };
- };
+return { events, render: (event: UiEvent) => events.push(event) };
+};
 
- const harnessWith = (entries: ConversationEntry[]) =>
-   ({ conversation: () => entries }) as unknown as IHarness;
+const harnessWith = (entries: ConversationEntry[]) =>
+({ conversation: () => entries }) as unknown as IHarness;
 
- it("sends the conversation the harness reports", () => {
-   const renderer = ui();
-   const entries: ConversationEntry[] = [
-     { role: "user", content: "hola" },
-     { role: "assistant", content: "buenas" },
-   ];
+it("sends the conversation the harness reports", () => {
+const renderer = ui();
+const entries: ConversationEntry[] = [
+{ role: "user", content: "hola" },
+{ role: "assistant", content: "buenas" },
+];
 
-   showConversation(harnessWith(entries), renderer);
+showConversation(harnessWith(entries), renderer);
 
-   expect(renderer.events).toEqual([{ type: "conversation", entries }]);
- });
+expect(renderer.events).toEqual([{ type: "conversation", entries }]);
+});
 
- it("stays silent when the session has nothing to show", () => {
-   // Otherwise every new session would wipe the screen on boot.
-   const renderer = ui();
+it("stays silent when the session has nothing to show", () => {
+// Otherwise every new session would wipe the screen on boot.
+const renderer = ui();
 
-   showConversation(harnessWith([]), renderer);
+showConversation(harnessWith([]), renderer);
 
-   expect(renderer.events).toEqual([]);
- });
-
- const mainLoop = readFileSync(new URL("../../src/MainLoop.ts", import.meta.url), "utf8");
-
- it("does not ship it before the session is initialized", () => {
-   const boot = mainLoop.indexOf("await this.harness.initialize(");
-   const conversation = mainLoop.indexOf("showConversation(this.harness, this.ui)");
-
-   expect(boot).toBeGreaterThan(-1);
-   expect(conversation).toBeGreaterThan(boot);
- });
-
- it("repaints it when a command switched the session", () => {
-   // The body of the session-change block: a command handler can load another
-   // session, and the messages on screen are still the ones we left.
-   const switchAt = mainLoop.indexOf("this.harness.status().sessionId !== before");
-   const repaint = mainLoop.indexOf("showConversation(this.harness, this.ui)", switchAt);
-   const children = mainLoop.indexOf("showChildHistory(this.harness, this.ui)", switchAt);
-
-   expect(switchAt).toBeGreaterThan(-1);
-   expect(repaint).toBeGreaterThan(switchAt);
-   // The conversation goes first: the strip belongs to the session it paints.
-   expect(children).toBeGreaterThan(repaint);
- });
+expect(renderer.events).toEqual([]);
+});
 });
