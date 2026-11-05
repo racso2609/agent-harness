@@ -1,5 +1,5 @@
-import type { Config } from "@racso/core";
-import { SUPPORTED_PROVIDERS } from "@racso/core";
+import type { Config } from "@racso2609/core";
+import { SUPPORTED_PROVIDERS } from "@racso2609/core";
 import { askHidden, input, select } from "@/terminal/stdin";
 import type { UiAdapter } from "@/ui/UiAdapter";
 import { addProvider } from "./addProvider";

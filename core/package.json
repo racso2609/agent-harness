@@ -1,5 +1,5 @@
 {
-  "name": "@racso/core",
+  "name": "@racso2609/core",
   "version": "1.0.0",
   "description": "",
   "main": "./dist/index.js",
@@ -13,6 +13,8 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
+"files": ["dist", "agents", "skills"],
+"engines": { "node": ">=20.11" },
   "devEngines": {
     "packageManager": {
       "name": "pnpm",
@@ -35,10 +37,8 @@
   "dependencies": {
     "dotenv": "^18.0.9",
     "pino": "^10.4.0",
-    "pino-pretty": "^13.2.0",
-    "terminal-image": "^5.0.1",
-    "tsconfig-paths": "^4.2.0"
-  },
+    "pino-pretty": "^13.2.0"
+          },
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {

@@ -5,7 +5,7 @@ import type {
   IHarness,
   SpawnHandle,
   SpawnEventListener,
-} from "@racso/core";
+} from "@racso2609/core";
 import type { TuiState } from "../../src/ui/tui/App";
 import type { UiEvent } from "../../src/ui/UiAdapter";
 
@@ -26,7 +26,7 @@ vi.mock("ink", () => ({
 }));
 
 const { MainLoop } = await import("../../src/MainLoop");
-const { Config, SUPPORTED_PROVIDERS } = await import("@racso/core");
+const { Config, SUPPORTED_PROVIDERS } = await import("@racso2609/core");
 const { TuiUiAdapter } = await import("../../src/ui/TuiUiAdapter");
 const { createFlows } = await import("../../src/flows");
 

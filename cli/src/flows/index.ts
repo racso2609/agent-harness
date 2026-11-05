@@ -1,4 +1,4 @@
-import type { IHarness } from "@racso/core";
+import type { IHarness } from "@racso2609/core";
 import type { UiAdapter } from "@/ui/UiAdapter";
 import { addProvider as addProviderFlow } from "./addProvider";
 import { removeProvider as removeProviderFlow } from "./removeProvider";

@@ -1,4 +1,4 @@
-import type { IHarness } from "@racso/core";
+import type { IHarness } from "@racso2609/core";
 // Both questions go through the UI, for the same reason as addProvider: only
 // the renderer that owns the input stream may ask the user anything.
 import type { UiAdapter } from "@/ui/UiAdapter";

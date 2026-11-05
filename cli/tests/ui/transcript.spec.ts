@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
-import type { SpawnHandle } from "@racso/core";
+import type { SpawnHandle } from "@racso2609/core";
 import type { TuiState } from "../../src/ui/tui/App";
 import { noAnchors, trimAnchored, writeAnchored } from "../../src/ui/tui/entries";
 import type { UiEvent } from "../../src/ui/UiAdapter";

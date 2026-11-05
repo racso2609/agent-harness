@@ -1,13 +1,14 @@
 {
-  "name": "@racso/cli",
+  "name": "@racso2609/cli",
   "version": "1.0.0",
-  "private": true,
-  "description": "Terminal client for the agent harness",
+    "description": "Terminal client for the agent harness",
   "type": "module",
   "bin": {
     "racso-harness": "./bin/run.mjs"
   },
   "main": "./dist/main.js",
+"files": ["dist", "bin", "racso-logo.txt"],
+"engines": { "node": ">=22" },
   "scripts": {
     "start": "node ./dist/main.js",
     "dev": "tsx ./src/main.ts",
@@ -18,7 +19,7 @@
     "format:check": "prettier --check ."
   },
   "dependencies": {
-    "@racso/core": "workspace:*",
+    "@racso2609/core": "workspace:^",
     "ink": "^8.0.0",
     "react": "^19.3.1",
     "terminal-image": "^5.0.1"

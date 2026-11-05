@@ -4,8 +4,8 @@ import type {
   ApprovalRequest,
   ILogger,
   LoggerSink,
-} from "@racso/core";
-import { createLogger } from "@racso/core";
+} from "@racso2609/core";
+import { createLogger } from "@racso2609/core";
 import {
   askHidden,
   clearPrompt,

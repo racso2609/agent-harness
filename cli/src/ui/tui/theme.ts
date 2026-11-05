@@ -1,4 +1,4 @@
-import type { UiRoleStyle, UiTheme } from "@racso/core";
+import type { UiRoleStyle, UiTheme } from "@racso2609/core";
 
 // Visual roles the TUI can style. One role per kind of content, so the user
 // can tell at a glance who said what.

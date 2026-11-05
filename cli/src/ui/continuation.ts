@@ -1,4 +1,4 @@
-import type { SpawnHandle } from "@racso/core";
+import type { SpawnHandle } from "@racso2609/core";
 
 // The decision a turn of this session can be started without the user: when a
 // child left work behind and nobody is holding the prompt loop. Kept pure and

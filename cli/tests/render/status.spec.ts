@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { SessionStatus } from "@racso/core";
+import type { SessionStatus } from "@racso2609/core";
 import { formatCost, formatSessionStatus, formatTokens } from "../../src/render/status";
 
 const status: SessionStatus = {

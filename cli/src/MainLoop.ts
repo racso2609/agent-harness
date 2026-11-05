@@ -4,11 +4,11 @@ import {
   type ApprovalRequest,
   type IHarness,
   SUPPORTED_PROVIDERS,
-} from "@racso/core";
+} from "@racso2609/core";
 import { CommandContext, CommandRepository } from "@/commands/CommandRepository";
 import { createFlows, type Flows } from "@/flows";
 import { startSetup } from "@/flows/startSetup";
-import { createLogger, type ILogger } from "@racso/core";
+import { createLogger, type ILogger } from "@racso2609/core";
 import { input } from "@/terminal/stdin";
 import { CliUiAdapter } from "@/ui/CliUiAdapter";
 import { TuiUiAdapter } from "@/ui/TuiUiAdapter";

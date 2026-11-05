@@ -1,4 +1,4 @@
-import type { ApprovalRequest, ConversationEntry, SpawnHandle, SpawnStatus } from "@racso/core";
+import type { ApprovalRequest, ConversationEntry, SpawnHandle, SpawnStatus } from "@racso2609/core";
 
 // Session snapshot rendered in the status bar. Kept as a plain shape so the
 // UI layer never imports the core session internals.

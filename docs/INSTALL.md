@@ -16,7 +16,9 @@ Se publica en **GitHub Packages** con scope `@racso2609` y, además, se adjuntan
   el dueño real del repo es `racso2609` (`git remote -v` → `git@github.com:racso2609/agent-harness.git`).
 - **GitHub Releases** es el canal sin fricción: los mismos `.tgz` colgados de un release se instalan
   con un `npm i https://github.com/.../racso2609-core-1.0.0.tgz` y **no requieren token**, ni `.npmrc`, ni
-  cuenta de GitHub. GitHub Packages **sí exige token incluso para un paquete de un repo público**
+  cuenta de GitHub. Los dos `.tgz` (core y cli) van en el **mismo** release y se instalan juntos: el del
+cli solo no instala (ver `## Instalación para el usuario`, apartado (a)). GitHub Packages **sí exige
+token incluso para un paquete de un repo público**
   (`curl -s -o /dev/null -w "%{http_code}" https://npm.pkg.github.com/@racso2609/core` → `404` sin
   auth; el repo es público: `gh api repos/racso2609/agent-harness --jq .private` → `false`).
 - El registry de GitHub Packages responde `404` hoy porque no hay nada publicado todavía: es lo
@@ -66,7 +68,8 @@ en GitHub Packages: el registry exige `@<dueño>/<paquete>` y el dueño del repo
 | `cli/package.json`                                | añadir `"files": ["dist", "bin", "racso-logo.txt"]`                                                                                                                                                                                            | Sin `files` el tarball son 123 ficheros (incluye `src/`, `tests/`, `TODO.md`, configs). `bin/run.mjs` es el entrypoint declarado en `bin`, y `racso-logo.txt` lo lee `cli/src/terminal/stdin.ts:265` con `path.join(import.meta.dirname, "..", "..", "racso-logo.txt")`, que desde `dist/terminal/stdin.js` cae en la raíz del paquete.                                                                                                                                                                               |
 | `cli/package.json`                                | añadir `"engines": { "node": ">=22" }`                                                                                                                                                                                                         | `ink@8` y `terminal-image@5` declaran `>=22`; el cli no puede prometer menos.                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `cli/package.json` | `"@racso2609/core": "workspace:^"` (hoy el core con scope `@racso` y `workspace:*`) | `pnpm pack` reescribe `workspace:^` a `^1.0.0`, así un bump del core no obliga a republicar el cli. |
-| `.npmrc` (raíz del repo, para publicar)           | `@racso2609:registry=https://npm.pkg.github.com`<br>`//npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}` | Sin registry por scope, `pnpm publish` va a `registry.npmjs.org` (`📦 @racso/cli@1.0.0 → https://registry.npmjs.org/`, salida real de `pnpm publish --dry-run`). El token va en variable de entorno, **nunca en claro** en el fichero: el `${GITHUB_TOKEN}` lo expande pnpm/npm desde el entorno.                                                                                                                                                                                                                     |
+| `.npmrc` (raíz del repo, para publicar) | `@racso2609:registry=https://npm.pkg.github.com` — **sólo esa línea** | Sin registry por scope, `pnpm publish` va a `registry.npmjs.org` (`📦 @racso/cli@1.0.0 → https://registry.npmjs.org/`, salida real de `pnpm publish --dry-run`). El token **no** va aquí: pnpm 11 **ignora** las credenciales que llegan de un `.npmrc` de proyecto (versionado), porque el fichero podría apuntar a un registry atacable y el secreto se filtraría — lo avisa con `[WARN] Ignored project-level auth setting "//npm.pkg.github.com/:_authToken"`. Dejar el token ahí es inerte y publicar daría `401`. |
+| `~/.npmrc` del usuario (fuera del repo, una vez por máquina, para publicar) | `pnpm config set "//npm.pkg.github.com/:_authToken" "$(gh auth token)"` (equivalente: `npm config set`, o escribir a mano `//npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}` en `~/.npmrc`) | Es el único sitio del que pnpm acepta la credencial: el `~/.npmrc` **no** está en el repo, así que el secreto no se filtra. Sin esto, `pnpm publish` autentica sin token y GitHub Packages responde `401`. Comprobación: `pnpm config get "//npm.pkg.github.com/:_authToken"` devuelve el token. |
 | `cli/src/**`, `cli/tests/**`, `cli/bin/**` (22 ficheros) | `@racso/core` → `@racso2609/core` en imports y mocks, y recompilar (hoy `cli/dist/main.js` emite `import { setLoggerLevel } from "@racso/core"`) | **Requisito del rename de scope**, no una opción: `grep -rln "@racso/core" cli/src cli/tests cli/bin` → 22 ficheros, y `tsc && tsc-alias -f` no reescribe imports de paquetes (sólo los alias `@/*`). Con el paquete llamado `@racso2609/core`, un `dist` sin recompilar importa un paquete que no existe y el canal de Releases queda roto: **el `dist` deja de ser válido hasta recompilar**. |
 | `.npmrc` del usuario (consumo de GitHub Packages) | `@racso2609:registry=https://npm.pkg.github.com`<br>`//npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}`                                                                                                                                         | GitHub Packages exige auth incluso para paquetes de un repo público; sin este `.npmrc` el `add` termina en 404. `GITHUB_TOKEN` debe ser un PAT con `read:packages` (`gh auth token` sirve el del `gh`).                                                                                                                                                                                                                                                                                                               |
 
@@ -135,7 +138,8 @@ Desde la raíz del repo. `npm` no funciona aquí (`EBADDEVENGINES`), todo con `p
 3. **Antes de publicar: `.npmrc` y rename de imports del cli.** Las dos cosas son requisitos del
 rename de scope, no opcionales (fila correspondiente en `## Cambios por fichero`):
 ```bash
-printf '@racso2609:registry=https://npm.pkg.github.com\n//npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}\n' > .npmrc
+# .npmrc del repo: SOLO el registry por scope; el token va fuera del repo (bloque siguiente)
+printf '@racso2609:registry=https://npm.pkg.github.com\n' > .npmrc
 grep -rl '@racso/core' cli/src cli/tests cli/bin | xargs sed -i '' 's|@racso/core|@racso2609/core|g'
 pnpm --filter @racso2609/cli build
 ```
@@ -143,15 +147,29 @@ Sin el rename + recompilación, el `dist` del cli sigue importando `@racso/core`
 `cli/dist/main.js` → `import { setLoggerLevel } from "@racso/core"`) y el canal de Releases queda roto.
 Tras este paso, el paso 2 debe mostrar `"@racso2609/core": "^1.0.0"` en el `package.json` del tarball
 del cli.
+El token **no** entra en ese `.npmrc`: pnpm 11 ignora las credenciales de un `.npmrc` versionado
+(`[WARN] Ignored project-level auth setting "//npm.pkg.github.com/:_authToken"`), porque el fichero
+podría apuntar a un registry atacable y el secreto se filtraría; con la línea ahí, publicar daría `401`.
+Se configura una vez por máquina, **fuera del repo**:
+```bash
+pnpm config set "//npm.pkg.github.com/:_authToken" "$(gh auth token)" # escribe en ~/.npmrc
+pnpm config get "//npm.pkg.github.com/:_authToken" # debe devolver el token
+```
+(Equivalente con npm: `npm config set "//npm.pkg.github.com/:_authToken" "$(gh auth token)"`.)
 4. **Publicar, en orden: primero el core, después el cli** (el cli depende de él).
    ```bash
-   export GITHUB_TOKEN=$(gh auth token)
+ pnpm config get "//npm.pkg.github.com/:_authToken" # vacío → falta el paso 3 (token en ~/.npmrc)
    cd core && pnpm publish --no-git-checks && cd ..
    cd cli  && pnpm publish --no-git-checks && cd ..
    ```
-   `pnpm publish` publica en `https://npm.pkg.github.com` gracias al `.npmrc` de la raíz
-   (`publishConfig.registry` también valdría, pero el `.npmrc` es lo que este plan propone).
-   Prueba en seco, útil la primera vez: `pnpm publish --dry-run --no-git-checks` en cada paquete.
+ `pnpm publish` publica en `https://npm.pkg.github.com` por dos piezas separadas: el **registry por
+ scope** del `.npmrc` de la raíz (`publishConfig.registry` también valdría, pero el `.npmrc` es lo que
+ este plan propone) y el **token del `~/.npmrc` del usuario**, puesto con `pnpm config set`, que es el
+ único sitio del que pnpm acepta credenciales. Con el token en el `.npmrc` del repo, pnpm lo ignora
+ (el fichero está versionado y podría apuntar a un registry atacable) y el publish acaba en `401`.
+ Prueba en seco, útil la primera vez: `pnpm publish --dry-run --no-git-checks` en cada paquete —
+ anuncia `📦 @racso2609/core@1.0.0 → https://npm.pkg.github.com/` y **no** debe emitir el
+ `[WARN] Ignored project-level auth setting`.
    Republicar la misma versión falla con `E409`/`Cannot publish over the previously published
 versions`; hay que subir `version` antes.
 4. **Crear el release con los `.tgz` adjuntos** (canal sin token):
@@ -166,6 +184,13 @@ versions`; hay que subir `version` antes.
    ```
    Tag y versión de los paquetes deben coincidir con lo que se publicó; si no, los `.tgz` del release
    y lo del registry divergen.
+
+ **Los dos `.tgz` van al mismo release, siempre.** El del core y el del cli se adjuntan en el mismo
+ `gh release create` (o con `gh release upload v1.0.0 ...` sobre el mismo tag). Un release con sólo el
+ `.tgz` del cli deja una instalación rota: el cli declara `@racso2609/core@^1.0.0`, ese paquete no está
+ en npmjs, y `npm i` del tarball del cli solo acaba en
+ `E404 ... GET https://registry.npmjs.org/@racso2609%2fcore`. No hay ningún caso en el que el `.tgz` del
+ cli baste por sí solo.
 
 ## Smoke test
 
@@ -239,7 +264,11 @@ npm install \
 ```
 
 Los dos tarballs van juntos: el cli declara `@racso2609/core@^1.0.0` como dependencia y el registry
-público no lo tiene. Descarga manual: `gh release download v1.0.0 --repo racso2609/agent-harness`
+público no lo tiene. Por eso los dos `.tgz` tienen que estar adjuntos **al mismo release** (paso 4 de
+`## Orden de publicación`): si el release sólo lleva el del cli, la instalación falla con
+`E404 ... GET https://registry.npmjs.org/@racso2609%2fcore` y el usuario no puede arreglarlo desde su
+lado. El `.tgz` del cli **no** sirve solo, ni con `-g` ni como dependencia local.
+Descarga manual: `gh release download v1.0.0 --repo racso2609/agent-harness`
 (o la página de Releases) y luego `npm i ./racso2609-core-1.0.0.tgz ./racso2609-cli-1.0.0.tgz`.
 
 ### (b) GitHub Packages (requiere token)
@@ -305,6 +334,18 @@ Lo que sí necesita decisión humana:
 
 Correcciones sobre los datos de partida, tras leer el repo y medir:
 
+- **El token en el `.npmrc` del repo estaba roto, medido**: con
+  `//npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}` en el `.npmrc` de la raíz, pnpm 11.28.10 emite, en
+  **cualquier** comando, `[WARN] Ignored project-level auth setting "//npm.pkg.github.com/:_authToken"
+  ... environment variables are not expanded in registry credentials that come from a project
+  .npmrc`. La línea es inerte ahí y publicar con ella daría `401`. Se quitó: el `.npmrc` del repo deja
+  **sólo** `@racso2609:registry=https://npm.pkg.github.com` (esa línea sí funciona) y el token se pone
+  una vez por máquina, fuera del repo, con
+  `pnpm config set "//npm.pkg.github.com/:_authToken" "$(gh auth token)"` (escribe en `~/.npmrc`),
+  que es donde pnpm sí lo usa. Cierre de la verificación, dos comprobaciones:
+  `pnpm publish --dry-run --no-git-checks` anuncia el destino correcto **sin** el `[WARN]`, y
+  `pnpm config get "//npm.pkg.github.com/:_authToken"` devuelve el token (vive en el `~/.npmrc`,
+  no en el repo).
 - **`cli/package.json` no es 117 ficheros**: `tar -tzf` de un `pnpm pack` real da **123** entradas
   (29 de ellas `.map`). El "117 → 32" del borrador no cuadra con ninguna medición posible de ese
   tarball; con el `files` propuesto salen **61 entradas (32 sin `.map`)**.

@@ -1,4 +1,4 @@
-import type { IHarness, SkillSummary, SpawnHandle } from "@racso/core";
+import type { IHarness, SkillSummary, SpawnHandle } from "@racso2609/core";
 import type { Flows } from "@/flows";
 import { formatSessionList, formatSessionStatus } from "@/render/status";
 

@@ -1,4 +1,4 @@
-import type { AgentResponse, ChatEvent, SessionUsage } from "@racso/core";
+import type { AgentResponse, ChatEvent, SessionUsage } from "@racso2609/core";
 import type { UiAdapter, UiEvent, UiStatus } from "@/ui/UiAdapter";
 
 // Shapes a core ChatEvent into the UI vocabulary. Kept pure so both renderers

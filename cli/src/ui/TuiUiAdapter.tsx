@@ -1,6 +1,6 @@
 import type { CommandOption } from "@/commands/CommandRepository";
-import type { ApprovalDecision, ApprovalRequest, ILogger, UiTheme } from "@racso/core";
-import { createLogger } from "@racso/core";
+import type { ApprovalDecision, ApprovalRequest, ILogger, UiTheme } from "@racso2609/core";
+import { createLogger } from "@racso2609/core";
 import { render } from "ink";
 import { formatSpawnOutcome, formatTurnOutcome } from "./outcome";
 import { App, type TuiApproval, type TuiLine, type TuiPrompt, type TuiState } from "./tui/App";

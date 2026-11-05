@@ -1,4 +1,4 @@
-import type { IHarness } from "@racso/core";
+import type { IHarness } from "@racso2609/core";
 // Every question goes through the UI: the flow decides what to ask and how to
 // read the answer, the renderer decides how to ask it. None of them reads
 // stdin here, because the TUI owns that stream and a second reader would

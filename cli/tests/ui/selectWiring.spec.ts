@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ConversationEntry, IHarness, SpawnEventListener, SpawnHandle } from "@racso/core";
+import type { ConversationEntry, IHarness, SpawnEventListener, SpawnHandle } from "@racso2609/core";
 import type { TuiState } from "../../src/ui/tui/App";
 import type { SelectionRequest, UiEvent } from "../../src/ui/UiAdapter";
 
@@ -37,7 +37,7 @@ const { CliUiAdapter } = await import("../../src/ui/CliUiAdapter");
 const { TuiUiAdapter } = await import("../../src/ui/TuiUiAdapter");
 const { createFlows } = await import("../../src/flows");
 const { MainLoop } = await import("../../src/MainLoop");
-const { Config, SUPPORTED_PROVIDERS } = await import("@racso/core");
+const { Config, SUPPORTED_PROVIDERS } = await import("@racso2609/core");
 
 const request: SelectionRequest = {
   message: "Select the model:",

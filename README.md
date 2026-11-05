@@ -6,6 +6,152 @@ Construido a mano, en TS, aprendiendo el esqueleto de los que ya existen.
 > Proyecto de aprendizaje + herramienta personal. Objetivo: entender _de verdad_ cómo
 > funciona un agente (loop, tools, contexto) construyendo el más mínimo que funcione.
 
+## Instalación
+
+El repo publica dos paquetes, `1.0.0` (la versión del tag del release): `@racso2609/cli`,
+el cliente de terminal, y `@racso2609/core`, el SDK que consume. Hay dos canales:
+**tarball de GitHub Releases** (sin token ni cuenta) y **GitHub Packages** (con token).
+
+### Requisitos
+
+- **CLI — Node `>=22`**: `ink@8` y `terminal-image@5` declaran ese mínimo.
+- **Core — Node `>=20.11`**: usa `import.meta.dirname` (siembra de `agents/` y `skills/`).
+
+Los dos `package.json` declaran `engines.node`, así que la instalación avisa si no se
+cumple: `npm` sigue adelante con un `EBADENGINE` y el fallo aparece después en runtime
+(por debajo de 20.11, `import.meta.dirname` es `undefined`), mientras que `pnpm` falla
+directamente. En la práctica: **Node 22 o superior** para todo.
+
+### Canal sin token: tarball de GitHub Releases
+
+No hace falta token, ni `.npmrc`, ni cuenta de GitHub. Se instalan **los dos tarballs en el
+mismo comando**, el del core y el del CLI:
+
+```sh
+npm i -g https://github.com/racso2609/agent-harness/releases/download/v1.0.0/racso2609-core-1.0.0.tgz https://github.com/racso2609/agent-harness/releases/download/v1.0.0/racso2609-cli-1.0.0.tgz
+racso-harness
+```
+
+Y como dependencia del proyecto, la misma línea sin `-g`:
+
+```sh
+npm i https://github.com/racso2609/agent-harness/releases/download/v1.0.0/racso2609-core-1.0.0.tgz https://github.com/racso2609/agent-harness/releases/download/v1.0.0/racso2609-cli-1.0.0.tgz
+```
+
+Hay que pasar **los dos**: el CLI declara `@racso2609/core@^1.0.0` como dependencia y
+ninguno de los dos está en el registry público de npm. Con el tarball del CLI solo, npm
+intenta resolver el core en npmjs y la instalación termina en
+`E404 ... GET https://registry.npmjs.org/@racso2609%2fcore`.
+
+> **El tarball del CLI no sirve solo.** `npm i -g .../racso2609-cli-1.0.0.tgz`, sin el del
+> core en el mismo comando, falla con ese `E404`: no es una alternativa a la línea de
+> arriba. El CLI se instala solo únicamente si el core está en GitHub Packages, y eso ya
+> es el otro canal: exige el `.npmrc` con token y el scope resuelto (sección siguiente).
+
+Los `.tgz` también se pueden descargar a mano desde la página de Releases (o con
+`gh release download v1.0.0 --repo racso2609/agent-harness`) y luego instalar en local con
+`npm i ./racso2609-core-1.0.0.tgz ./racso2609-cli-1.0.0.tgz`.
+
+### Canal GitHub Packages (requiere token)
+
+En tu `~/.npmrc` (es el sitio correcto: pnpm y npm lo leen de tu máquina y **sí** expanden
+`${GITHUB_TOKEN}` ahí; en un `.npmrc` versionado dentro de un repo pnpm ignora la credencial y el
+`npm i` acaba en `401`):
+
+```ini
+@racso2609:registry=https://npm.pkg.github.com
+//npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}
+```
+
+`GITHUB_TOKEN` tiene que ser un PAT de GitHub con el scope **`read:packages`** (`gh auth
+token` sirve el del `gh` ya logueado). Si prefieres no mantener la variable de entorno, el
+equivalente en una línea, también en tu `~/.npmrc`:
+`pnpm config set "//npm.pkg.github.com/:_authToken" "$(gh auth token)"`. Después:
+
+```sh
+npm i -g @racso2609/cli
+```
+
+GitHub Packages **exige token incluso cuando el repo es público**: sin ese `.npmrc` el
+`npm i` termina en `404 Not Found - GET https://npm.pkg.github.com/@racso2609%2fcli`.
+
+Nota para **publicar** desde el repo (no para instalar): el `.npmrc` versionado del repo lleva
+**sólo** `@racso2609:registry=https://npm.pkg.github.com`; el token no va ahí. pnpm 11 ignora las
+credenciales que vienen de un `.npmrc` de proyecto (lo avisa con `[WARN] Ignored project-level auth
+setting`), porque el fichero podría apuntar a un registry atacable y el secreto se filtraría; con la
+línea del token en el repo, `pnpm publish` daría `401`. El token va en tu `~/.npmrc`
+(`pnpm config set "//npm.pkg.github.com/:_authToken" "$(gh auth token)"`). Pasos completos en
+[`docs/INSTALL.md`](docs/INSTALL.md).
+
+### Uso del core como librería
+
+```sh
+npm i @racso2609/core
+```
+
+(o el tarball de Releases, `npm i ./racso2609-core-1.0.0.tgz`). Mínimo real:
+
+```ts
+import { createHarness } from "@racso2609/core";
+
+const harness = createHarness();
+await harness.initialize();
+```
+
+`createHarness` acepta un objeto opcional de dependencias (logger, handler de
+aprobaciones, `Config`, `SessionStore`); sin argumentos usa los valores por defecto. La
+superficie completa está en [`core/CONTRACT.md`](core/CONTRACT.md).
+
+### Primer arranque
+
+Arrancar el CLI crea `~/.racso-harness/` (`$HOME/.racso-harness`):
+
+- `config.json` — la configuración. En el primer arranque sin config, el CLI pide el
+  setup del provider (id, base URL, key y modelo) y escribe el fichero al terminar.
+- `agents/` — se siembra con los `.md` de `core/agents/` la primera vez; no toca un
+  directorio que ya tenga definiciones.
+- `skills/` — igual, desde `core/skills/`.
+- `sessions/` — se crea al persistir la primera sesión.
+
+Cada ubicación se puede relocalizar por entorno:
+
+| variable                          | efecto                 |
+| --------------------------------- | ---------------------- |
+| `RACSO_HARNESS_CONFIG_LOCATION`   | ruta del `config.json` |
+| `RACSO_HARNESS_SESSIONS_LOCATION` | directorio de sesiones |
+| `RACSO_HARNESS_AGENTS_LOCATION`   | directorio de agentes  |
+| `RACSO_HARNESS_SKILLS_LOCATION`   | directorio de skills   |
+
+### Verificar la instalación
+
+```sh
+racso-harness --version # imprime la versión del paquete, p. ej. 1.0.0
+```
+
+Si contribuyes al repo, el smoke test comprueba el artefacto empaquetado de punta a punta:
+empaqueta los dos paquetes, los instala con `npm` en un proyecto temporal y arranca el CLI
+y el SDK desde fuera del workspace. Corre con un `HOME` aislado, así que **no toca** tu
+`~/.racso-harness/` real:
+
+```sh
+node scripts/smoke-install.mjs
+```
+
+O en un contenedor limpio (Node 22, sin nada del host):
+
+```sh
+docker build -f docker/smoke.Dockerfile -t racso-smoke . && docker run --rm racso-smoke
+```
+
+### Las dos implementaciones
+
+`@racso2609/cli` es el **cliente de terminal**: dueño de la TUI, los slash commands, los
+flujos interactivos (provider/modelo/agente/sesión, setup, aprobaciones) y el render. El
+**gateway** (canales, cron, subagentes) será un paquete aparte que consume el mismo core,
+no una variante del CLI. Frontera e hitos en
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md); el plan de publicación (registry, tarballs,
+scopes y `.npmrc`) en [`docs/INSTALL.md`](docs/INSTALL.md).
+
 ## Qué es un "agent harness"
 
 Un agente no es magia: es un bucle que habla con un LLM, ejecuta herramientas cuando

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { SpawnHandle } from "@racso/core";
+import type { SpawnHandle } from "@racso2609/core";
 import {
   autoContinuationLimitNotice,
   batchKey,

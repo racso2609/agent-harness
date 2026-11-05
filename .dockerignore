@@ -1,0 +1,13 @@
+.git
+.gitignore
+node_modules
+**/node_modules
+dist
+**/dist
+*.tgz
+**/*.tgz
+.vitest
+**/.vitest
+*.tsbuildinfo
+**/*.tsbuildinfo
+.env

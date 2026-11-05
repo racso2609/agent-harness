@@ -1,4 +1,4 @@
-import type { SessionStatus, SessionSummary } from "@racso/core";
+import type { SessionStatus, SessionSummary } from "@racso2609/core";
 
 const numberFormat = new Intl.NumberFormat("en-US");
 

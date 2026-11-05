@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { IHarness } from "@racso/core";
+import type { IHarness } from "@racso2609/core";
 import { addProvider, type ProviderTarget } from "../../src/flows/addProvider";
 import { removeProvider } from "../../src/flows/removeProvider";
 import type {

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { SpawnHandle } from "@racso/core";
+import type { SpawnHandle } from "@racso2609/core";
 import type { UiEvent } from "../../src/ui/UiAdapter";
 
 // The line renderer writes straight to the terminal: every notice goes through

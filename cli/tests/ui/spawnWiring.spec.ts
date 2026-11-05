@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
-import type { ConversationEntry, IHarness, SpawnEvent, SpawnHandle } from "@racso/core";
+import type { ConversationEntry, IHarness, SpawnEvent, SpawnHandle } from "@racso2609/core";
 import { showChildHistory, showConversation } from "../../src/MainLoop";
 import { toUiEvents } from "../../src/ui/renderEvents";
 import type { UiEvent } from "../../src/ui/UiAdapter";

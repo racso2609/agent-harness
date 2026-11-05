@@ -5,6 +5,8 @@ export interface CliFlags {
   tui: boolean;
   // Turns on verbose core logging (info/debug/warn) for this run.
   debug: boolean;
+  // Asks for the package version and an immediate exit, nothing else.
+  version: boolean;
 }
 
 // Parses the few flags the CLI understands. There is no general parser yet, so
@@ -12,6 +14,9 @@ export interface CliFlags {
 // makes the flag behaviour testable without spawning a process.
 export const parseFlags = (argv: readonly string[]): CliFlags => ({
   tui: argv.includes("--tui"),
-  // `-v` is an alias, the usual shorthand for verbose/debug.
+  // `-v` is an alias, the usual shorthand for verbose/debug. It is therefore
+  // taken already: the version shorthand has to be the capital `-V`, since
+  // `-v` meaning two different things would be a silent trap.
   debug: argv.includes("--debug") || argv.includes("-v"),
+  version: argv.includes("--version") || argv.includes("-V"),
 });
