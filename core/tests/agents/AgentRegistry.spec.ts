@@ -59,3 +59,33 @@ describe("agent helpers", () => {
     expect(strictestApproval("deny", "ask")).toBe("deny");
   });
 });
+
+describe("composeSystemPrompt working directory", () => {
+  const agent = { id: "a", name: "A", personality: "Be helpful." };
+
+  it("announces the directory it was given", () => {
+    expect(composeSystemPrompt(agent, undefined, "/tmp/work")).toContain(
+      "Working directory: /tmp/work",
+    );
+  });
+
+  it("places the directory after the persona and before the skills block", () => {
+    const prompt = composeSystemPrompt(agent, "- a — First", "/tmp/work");
+    const persona = prompt.indexOf("Be helpful.");
+    const directory = prompt.indexOf("Working directory: /tmp/work");
+    const skills = prompt.indexOf("## Skills");
+
+    expect(persona).toBeGreaterThan(-1);
+    expect(directory).toBeGreaterThan(persona);
+    expect(skills).toBeGreaterThan(directory);
+  });
+
+  it("keeps the prompt identical without a directory", () => {
+    const plain = composeSystemPrompt(agent, undefined);
+
+    expect(composeSystemPrompt(agent, undefined, undefined)).toBe(plain);
+    expect(composeSystemPrompt(agent, undefined, "")).toBe(plain);
+    expect(composeSystemPrompt(agent, undefined, " ")).toBe(plain);
+    expect(plain).not.toContain("Working directory:");
+  });
+});

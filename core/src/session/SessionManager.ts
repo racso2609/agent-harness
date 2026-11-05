@@ -196,14 +196,14 @@ class SessionManagerImpl implements SessionManager {
   protected spawnHistory: SpawnHandle[] = [];
   // Children that already settled but whose result has not been handed to a
   // parent turn yet, in settlement order. The push into history is what marks
-// a child as delivered, so the queue never holds the same one twice.
- protected undelivered: SpawnHandle[] = [];
+  // a child as delivered, so the queue never holds the same one twice.
+  protected undelivered: SpawnHandle[] = [];
 
-// Ids of the children whose result already entered the history. Persisted so
-// a resume does not hand the parent the same result twice: the injected
-// message itself is not a reliable marker, since history compaction may
-// drop it while the child stays settled.
-protected delivered = new Set<string>();
+  // Ids of the children whose result already entered the history. Persisted so
+  // a resume does not hand the parent the same result twice: the injected
+  // message itself is not a reliable marker, since history compaction may
+  // drop it while the child stays settled.
+  protected delivered = new Set<string>();
 
   constructor(config = new Config(), store = new SessionStore()) {
     this.config = config;
@@ -283,20 +283,20 @@ protected delivered = new Set<string>();
     // reattached, and their status is whatever it was when persisted.
     this.spawnHistory = record.spawns ?? [];
 
-// A settled child whose result never entered a parent turn is still owed
-// to the parent: queue it so the next turn delivers it. Children already
-// delivered are skipped, or /resume would inject their result twice. A
-// child still "running" died with the previous process and has no result
-// to hand over (the CLI already renders it as interrupted), so it is not
-// queued. Records written before deliveredSpawns existed read as "nothing
-// delivered", which is why SESSION_VERSION does not need to change: no
-// stored field changes meaning, and the worst case is an older result
-// delivered once more.
-const deliveredIds = new Set(record.deliveredSpawns ?? []);
-this.delivered = deliveredIds;
-this.undelivered = this.spawnHistory.filter(
-(handle) => handle.status !== "running" && !deliveredIds.has(handle.spawnId),
-);
+    // A settled child whose result never entered a parent turn is still owed
+    // to the parent: queue it so the next turn delivers it. Children already
+    // delivered are skipped, or /resume would inject their result twice. A
+    // child still "running" died with the previous process and has no result
+    // to hand over (the CLI already renders it as interrupted), so it is not
+    // queued. Records written before deliveredSpawns existed read as "nothing
+    // delivered", which is why SESSION_VERSION does not need to change: no
+    // stored field changes meaning, and the worst case is an older result
+    // delivered once more.
+    const deliveredIds = new Set(record.deliveredSpawns ?? []);
+    this.delivered = deliveredIds;
+    this.undelivered = this.spawnHistory.filter(
+      (handle) => handle.status !== "running" && !deliveredIds.has(handle.spawnId),
+    );
     // Sessions persisted with an agent already start with its persona. Older
     // sessions keep their system messages (e.g. compacted memory) untouched.
     this.applySystemPrompt(Boolean(record.agentId));
@@ -369,12 +369,12 @@ this.undelivered = this.spawnHistory.filter(
   save() {
     if (!this.provider || !this.providerName || !this.model) return;
 
-// Only the children still in the transcript, so the list can never point at
-// a spawnId the record no longer carries. Empty means "nothing delivered",
-// which the next load reads the same as a missing field.
-const deliveredSpawns = this.spawnHistory
-.filter((handle) => this.delivered.has(handle.spawnId))
-.map((handle) => handle.spawnId);
+    // Only the children still in the transcript, so the list can never point at
+    // a spawnId the record no longer carries. Empty means "nothing delivered",
+    // which the next load reads the same as a missing field.
+    const deliveredSpawns = this.spawnHistory
+      .filter((handle) => this.delivered.has(handle.spawnId))
+      .map((handle) => handle.spawnId);
 
     const record: SessionRecord = {
       id: this.sessionId,
@@ -387,8 +387,8 @@ const deliveredSpawns = this.spawnHistory
       history: this.history,
       usage: this.usage,
       costUsd: this.costUsd,
-spawns: this.spawnHistory.length ? this.spawnHistory : undefined,
-deliveredSpawns: deliveredSpawns.length ? deliveredSpawns : undefined,
+      spawns: this.spawnHistory.length ? this.spawnHistory : undefined,
+      deliveredSpawns: deliveredSpawns.length ? deliveredSpawns : undefined,
     };
 
     this.store.save(record);
@@ -675,14 +675,14 @@ deliveredSpawns: deliveredSpawns.length ? deliveredSpawns : undefined,
         role: "system",
         content: this.formatSpawnResult(handle),
       });
-	this.delivered.add(handle.spawnId);
- }
- // Persist as soon as the results are delivered, not only at the end of the
- // turn: the queue is drained here, so a turn that throws after the flush
- // (provider error, abort, tool exception) would leave the message in memory
- // only, and a restart would lose the child result for good. One save for
- // the whole batch; the early return above keeps an empty queue from saving.
- this.save();
+      this.delivered.add(handle.spawnId);
+    }
+    // Persist as soon as the results are delivered, not only at the end of the
+    // turn: the queue is drained here, so a turn that throws after the flush
+    // (provider error, abort, tool exception) would leave the message in memory
+    // only, and a restart would lose the child result for good. One save for
+    // the whole batch; the early return above keeps an empty queue from saving.
+    this.save();
   }
 
   // Builds the compact system message injected into the parent's history once
@@ -717,11 +717,7 @@ deliveredSpawns: deliveredSpawns.length ? deliveredSpawns : undefined,
   }
 
   // Classifies the prompt and dispatches it to text or image generation.
-  async ask(
-    prompt: string,
-    onEvent?: ChatEventListener,
-    options: { unprompted?: true } = {},
-  ) {
+  async ask(prompt: string, onEvent?: ChatEventListener, options: { unprompted?: true } = {}) {
     if (!this.provider) throw new Error("Session not initialized");
 
     // Deliver before the turn reads history, so the parent starts the turn
@@ -908,9 +904,16 @@ deliveredSpawns: deliveredSpawns.length ? deliveredSpawns : undefined,
     this.history.push(message);
   }
 
+  // One source of truth for the directory the tools resolve against and the one
+  // announced in the system prompt: if they diverged, the model would believe it
+  // works somewhere while every file operation happens elsewhere.
+  protected workspaceRoot(): string {
+    return this.config.config.tools?.workspace ?? process.cwd();
+  }
+
   protected toolContext(call?: ToolCall, onEvent?: ChatEventListener): ToolContext {
     return {
-      cwd: this.config.config.tools?.workspace ?? process.cwd(),
+      cwd: this.workspaceRoot(),
       sessionId: this.sessionId,
       approve: (request) => this.approve(request),
       spawn: (agentId, prompt) => this.spawn(agentId, prompt),
@@ -1138,6 +1141,7 @@ deliveredSpawns: deliveredSpawns.length ? deliveredSpawns : undefined,
       content: composeSystemPrompt(
         agent,
         this.skillRegistry?.indexText(this.config.config.skills?.maxIndexChars),
+        this.workspaceRoot(),
       ),
     };
 
