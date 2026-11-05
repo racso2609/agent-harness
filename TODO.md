@@ -2,28 +2,36 @@
 
 ## Contexto
 
-Monorepo pnpm con dos paquetes: `core/` (`@racso/core`, SDK sin interacción, ver
-`core/CONTRACT.md`) y `cli/` (`@racso/cli`, cliente de terminal con renderer de
-líneas y TUI ink detrás de `--tui`). Este archivo es solo el índice: cada tarea
+Monorepo pnpm con dos paquetes publicados: `core/` (`@racso2609/core`, librería base
+sin interacción, ver `core/CONTRACT.md`) y `cli/` (`@racso2609/cli`, cliente de terminal
+con renderer de líneas y TUI ink detrás de `--tui`); el gateway (`@racso2609/gateway`)
+es un paquete nuevo y proceso aparte, aún sin crear. Diseño en `docs/ARCHITECTURE.md`
+y publicación en `docs/INSTALL.md`. Este archivo es solo el índice: cada tarea
 vive en el TODO del paquete que la posee, con su `Done when` y sus
 dependencias. Formato de cada lista: skill `core/skills/todo-format.md`.
 
 ## Tablero
 
-| Tema                                                       | Dónde vive                                      | Estado                                                       |
-| ---------------------------------------------------------- | ----------------------------------------------- | ------------------------------------------------------------ |
-| Split core/cli, tooling, agents, skills, session reporting | `core/TODO.md` §0–9                             | histórico + pendientes                                       |
-| Gateway persistente (cronjobs + webhooks)                  | `core/TODO.md` §10                              | nuevo, c3                                                    |
-| TUI de pantalla completa y feedback del turno              | `cli/TODO.md` §P0–P3                            | P0–P3 cerrados salvo las tareas nuevas abiertas en §P1 y §P3 |
-| Instalación y distribución                                 | `cli/TODO.md` §P4                               | nuevo, c3                                                    |
-| Continuación automática tras un hijo delegado              | `cli/TODO.md` §P6 + espejo en `core/TODO.md` §9 | nuevo, c3                                                    |
+| Tema                                                       | Dónde vive                                           | Estado                                                       |
+| ---------------------------------------------------------- | ---------------------------------------------------- | ------------------------------------------------------------ |
+| Documentación de arquitectura e instalación                | `docs/ARCHITECTURE.md`, `docs/INSTALL.md`            | escritos, pendiente de revisión                              |
+| Split core/cli, tooling, agents, skills, session reporting | `core/TODO.md` §0–9                                  | histórico + pendientes                                       |
+| Gateway como paquete nuevo y proceso aparte (F1–F5)        | `core/TODO.md` §10, diseño en `docs/ARCHITECTURE.md` | nuevo, c3                                                    |
+| TUI de pantalla completa y feedback del turno              | `cli/TODO.md` §P0–P3                                 | P0–P3 cerrados salvo las tareas nuevas abiertas en §P1 y §P3 |
+| Empaquetado y publicación (F0): GitHub Packages + Releases | `cli/TODO.md` §P4, plan en `docs/INSTALL.md`         | nuevo, c3                                                    |
+| Continuación automática tras un hijo delegado              | `cli/TODO.md` §P6 + espejo en `core/TODO.md` §9      | nuevo, c3                                                    |
 
 ## Origen de las tareas nuevas
 
 Los puntos y las notas sueltas que había en este archivo se cerraron así:
 
-- **easy install** → `cli/TODO.md` §P4 (4 tareas).
-- **core gateway persistente (cronjobs + webhooks)** → `core/TODO.md` §10 (12 tareas).
+- **easy install** → `cli/TODO.md` §P4 (fase F0: empaquetado y publicación en GitHub
+  Packages con scope `@racso2609` más los `.tgz` en GitHub Releases; el plan vive en
+  `docs/INSTALL.md` y no se duplica aquí).
+- **core gateway persistente (cronjobs + webhooks)** → `core/TODO.md` §10, reasignado a
+  las fases F1–F5 de `docs/ARCHITECTURE.md`: el gateway deja de ser un modo del core y
+  pasa a ser el paquete nuevo `@racso2609/gateway`, proceso aparte que consume la lib
+  publicada.
 - **analizar si vale la pena usar el gateway en el CLI** → no es tarea mientras el
   gateway no exista: queda como pregunta abierta en `cli/TODO.md`.
 

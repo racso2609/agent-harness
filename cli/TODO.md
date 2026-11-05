@@ -209,6 +209,18 @@ externo importa el core desde el registro, no desde el workspace.
       `@racso2609/core` y `@racso2609/cli`, y no queda ningún `"name": "@racso/`.
       Depends on: nada.
 
+- [ ] **Renombrar los imports de `@racso/core` a `@racso2609/core` en el cli**
+Es **requisito** del rename de scope, no una opción: `grep -rln "@racso/core"
+cli/src cli/tests cli/bin` devuelve 22 ficheros y `tsc && tsc-alias -f` no
+reescribe imports de paquetes (sólo los alias `@/*`), así que hoy `cli/dist/main.js`
+sigue emitiendo `import { setLoggerLevel } from "@racso/core"`. Con el paquete
+llamado `@racso2609/core`, un `dist` sin renombrar importa un paquete que no existe
+y el canal de Releases queda roto; hasta recompilar, el `dist` no es válido.
+Done when: `grep -rn "@racso/core" cli/src cli/tests cli/bin` no devuelve nada y,
+tras `pnpm --filter @racso2609/cli build`, `grep -c "@racso2609/core"
+cli/dist/main.js` devuelve `1` o más.
+Depends on: renombrar el scope a `@racso2609` en los dos `package.json`.
+
 - [ ] **Añadir `files` explícito a los dos paquetes**
       Sin `files` el tarball del core mete 205 ficheros / 182 KB y el del cli 123 / 207 KB
       (`src/`, `tests/`, `TODO.md`, configs y los `.map` innecesarios).
@@ -220,9 +232,9 @@ externo importa el core desde el registro, no desde el workspace.
 - [ ] **Quitar `private: true` del cli y pasar la dependencia del core a `workspace:^`**
       Con `private: true` `pnpm publish` aborta con `[EPRIVATE]`, y con `workspace:*` el
       tarball fija la versión exacta del core y obliga a republicar el cli en cada bump.
-      Done when: `cli/package.json` no contiene `"private"`, declara
-      `"@racso/core": "workspace:^"` y `pnpm --filter @racso2609/cli publish --dry-run
---no-git-checks` no aborta con `EPRIVATE`.
+Done when: (a) `grep -c '"private"' cli/package.json` devuelve `0`; (b) el
+`package.json` del tarball (`pnpm pack` y extraer) no contiene `"private"`; (c) ese
+mismo `package.json` deja `"@racso2609/core": "^1.0.0"` y ningún `workspace:`.
       Depends on: renombrar el scope a `@racso2609` en los dos `package.json`.
 
 - [ ] **Añadir `engines.node` a los dos paquetes**
@@ -242,24 +254,19 @@ externo importa el core desde el registro, no desde el workspace.
       Done when: `terminal-image` sale de `dependencies` del core (a `devDependencies` o
       fuera) y `tsconfig-paths` deja de estar en `dependencies`, de modo que
       `pnpm --filter @racso2609/core build && pnpm --filter @racso2609/core test` sigue en
-      verde y el `pnpm-lock.yaml` del core ya no trae `jimp`.
+      verde y el `pnpm-lock.yaml` deja de resolver `jimp` para el core.
       Depends on: nada.
 
-- [ ] **Publicar `@racso2609/core`**
-      Es la lib base de los otros dos paquetes: sin core en el registry no hay nada que
-      consuman el cli ni el gateway.
-      Done when: `pnpm publish --no-git-checks` en `core/` termina sin error y
-      `npm view @racso2609/core version --registry=https://npm.pkg.github.com` con
-      `GITHUB_TOKEN` en el entorno devuelve la versión publicada.
-      Depends on: añadir el `.npmrc` de publicación.
-
-- [ ] **Publicar `@racso2609/cli`**
-      Va después del core porque depende de él, y es el paquete que trae el binario
-      `racso-harness`.
-      Done when: `pnpm publish --no-git-checks` en `cli/` termina sin error y
-      `npm view @racso2609/cli version --registry=https://npm.pkg.github.com` con
-      `GITHUB_TOKEN` devuelve la versión publicada.
-      Depends on: publicar `@racso2609/core`.
+- [ ] **Construir y auditar los dos tarballs antes de publicar**
+      `dist` está en `.gitignore`, así que un tarball sin `pnpm -r build` sale vacío y el
+      fallo llega al usuario como `ERR_MODULE_NOT_FOUND`.
+      Done when: `pnpm -r build && pnpm pack --pack-destination /tmp/rel` en cada paquete
+      produce un `tar -tzf` con 135 entradas en el core (93 sin `.map`) y 61 en el cli, sin
+      `package/src/`, `package/tests/` ni `package/TODO.md`, y el `package.json` del tarball
+      del cli declara la dependencia del core con `^1.0.0` (no `workspace:*`) y sin `"private": true`.
+      Depends on: añadir `files` explícito a los dos paquetes, quitar `private: true` del
+ cli y pasar la dependencia del core a `workspace:^`, renombrar los imports de
+`@racso/core` a `@racso2609/core` en el cli.
 
 - [ ] **Añadir el `.npmrc` de publicación con el token por variable de entorno**
       Sin registry por scope, `pnpm publish` va a `registry.npmjs.org`; el token nunca
@@ -270,15 +277,22 @@ externo importa el core desde el registro, no desde el workspace.
 --no-git-checks` en `core/` anuncia el destino `https://npm.pkg.github.com`.
       Depends on: renombrar el scope a `@racso2609` en los dos `package.json`.
 
-- [ ] **Construir y auditar los dos tarballs antes de publicar**
-      `dist` está en `.gitignore`, así que un tarball sin `pnpm -r build` sale vacío y el
-      fallo llega al usuario como `ERR_MODULE_NOT_FOUND`.
-      Done when: `pnpm -r build && pnpm pack --pack-destination /tmp/rel` en cada paquete
-      produce un `tar -tzf` con 135 entradas en el core (93 sin `.map`) y 61 en el cli, sin
-      `package/src/`, `package/tests/` ni `package/TODO.md`, y el `package.json` del tarball
-      del cli muestra `"@racso/core": "^1.0.0"` sin `workspace:` ni `"private": true`.
-      Depends on: añadir `files` explícito a los dos paquetes, quitar `private: true` del
-      cli y pasar la dependencia del core a `workspace:^`.
+- [ ] **Publicar `@racso2609/core`**
+      Es la lib base de los otros dos paquetes: sin core en el registry no hay nada que
+      consuman el cli ni el gateway.
+      Done when: `pnpm publish --no-git-checks` en `core/` termina sin error y
+      `npm view @racso2609/core version --registry=https://npm.pkg.github.com` con
+      `GITHUB_TOKEN` en el entorno devuelve la versión publicada.
+ Depends on: añadir el `.npmrc` de publicación, construir y auditar los dos tarballs
+antes de publicar.
+
+- [ ] **Publicar `@racso2609/cli`**
+      Va después del core porque depende de él, y es el paquete que trae el binario
+      `racso-harness`.
+      Done when: `pnpm publish --no-git-checks` en `cli/` termina sin error y
+      `npm view @racso2609/cli version --registry=https://npm.pkg.github.com` con
+      `GITHUB_TOKEN` devuelve la versión publicada.
+      Depends on: publicar `@racso2609/core`.
 
 - [ ] **Crear el release con los `.tgz` adjuntos**
       Es el canal sin token: quien no quiera configurar `.npmrc` ni PAT instala desde el
@@ -658,3 +672,32 @@ Punto del usuario: «cuando un delegate termine si aun hay trabajo que hacer la 
   Sólo se reabre si el gateway existe (`core/TODO.md` §10) y aparece un caso real
   —varios terminales contra las mismas sesiones, o correr el CLI en otra máquina—.
   Para cerrarla hay que decidir qué se gana frente a ejecutar el core in-process.
+
+## P7 — deriva de agentes en runtime
+
+Los agentes se versionan como markdown con frontmatter en `core/agents/` y se cargan
+en runtime desde `~/.racso-harness/agents/`. `ensureAgentsDir` (`core/src/agents/seed.ts`)
+sólo siembra el directorio **cuando está vacío**: eso es deliberado (protege los
+agentes que el usuario ya personalizó), pero deja sin camino la **actualización** de un
+agente ya existente. Consecuencia: editar `core/agents/<id>.md` no cambia nada en
+runtime, y cualquier mejora del contrato de un agente se queda en el repo sin efecto.
+Por eso `core/agents/code-reviewer.md` se copió a mano a
+`~/.racso-harness/agents/code-reviewer.md` al cerrar los niveles de revisión.
+
+- [ ] **Detectar y mostrar la deriva entre `core/agents/` y `~/.racso-harness/agents/`**
+Hoy no hay forma de saber si el agente que corre es el del repo; hace falta un comando (p.ej. `/agents diff` o `/agents status`) que liste, por cada `.md` de `core/agents/`, si falta en runtime, si es idéntico o si diverge.
+Done when: con los 6 agentes sembrados y `coder.md` divergente (`approval: auto` en runtime, `ask` en el repo), el comando reporta 5 idénticos y `coder.md` como `modified`, y un test lo fija.
+Depends on: nada.
+
+- [ ] **Resincronizar un agente de runtime sin pisar personalizaciones**
+Falta el flujo explícito de actualización: `/agents sync <id>` (o `--all`) que muestre el diff y **sólo** sobrescriba tras confirmación explícita, marcando el fichero como personalizado cuando el usuario decida conservarlo.
+Done when: `/agents sync` sobre un `coder.md` divergente muestra el diff y no escribe nada sin confirmación; con confirmación deja `diff core/agents/coder.md ~/.racso-harness/agents/coder.md` vacío, y un test cubre ambos caminos.
+Depends on: detectar y mostrar la deriva.
+
+> Nota de deriva ya existente (no corregida): en esta máquina
+> `~/.racso-harness/agents/coder.md` declara `approval: auto` y
+> `core/agents/coder.md` declara `approval: ask`. Es una decisión del usuario sobre su
+> propia máquina; se resuelve con `/agents sync` o dejándolo como está, no editando el
+> repo a ciegas. Los otros cinco (`code-reviewer`, `reviewer`, `senior-architect`,
+> `default`, `shell-operator`) eran idénticos antes de este cambio; `code-reviewer` se
+> resincronizó a mano.
