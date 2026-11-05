@@ -4,10 +4,10 @@ import terminalImage from "terminal-image";
 import type { CommandOption } from "@/commands/CommandRepository";
 import { clampSelection, menuRows } from "./commandMenu";
 import {
-interpretMenuInput,
-menuRangeLabel,
-promptMenuState,
-type PromptMenuState,
+  interpretMenuInput,
+  menuRangeLabel,
+  promptMenuState,
+  type PromptMenuState,
 } from "./promptMenu";
 
 // State of the prompt currently waiting for input, kept so async output
@@ -37,7 +37,7 @@ const menuState = () => promptMenuState(typed, menu?.selected ?? null, activeCom
 
 // How many rows fit under the prompt without pushing the menu off screen.
 const maxVisibleRows = () =>
-Math.max(1, Math.min(MAX_VISIBLE_COMMANDS, (process.stdout.rows ?? 24) - 4));
+  Math.max(1, Math.min(MAX_VISIBLE_COMMANDS, (process.stdout.rows ?? 24) - 4));
 
 // Erases the menu lines and leaves the cursor at the start of the prompt line.
 const clearRenderedLines = () => {
@@ -53,39 +53,39 @@ const clearRenderedLines = () => {
 };
 
 const renderMenuLines = (): string[] => {
-if (!menu) return [];
+  if (!menu) return [];
 
-const state = menuState();
-// The stored index is clamped in place: the user's next arrow starts from
-// where the list actually is, not from where it was before the query shrank
-// it.
-state.selected = clampSelection(state.selected, state.items.length);
-menu = { selected: state.selected };
+  const state = menuState();
+  // The stored index is clamped in place: the user's next arrow starts from
+  // where the list actually is, not from where it was before the query shrank
+  // it.
+  state.selected = clampSelection(state.selected, state.items.length);
+  menu = { selected: state.selected };
 
-// The dropdown says so instead of vanishing: an empty list looks like the
-// menu broke, and enter still sends the draft.
-if (!state.items.length) return [" no matching commands"];
+  // The dropdown says so instead of vanishing: an empty list looks like the
+  // menu broke, and enter still sends the draft.
+  if (!state.items.length) return [" no matching commands"];
 
-const rows = menuRows(state, maxVisibleRows());
-const width = Math.max(20, (process.stdout.columns ?? 80) - 1);
-// The range only appears when part of the list is out of sight, so it does
-// not become noise on the usual short list.
-const rangeLabel = menuRangeLabel(state, rows);
-const range = rangeLabel ? ` ${rangeLabel}` : "";
+  const rows = menuRows(state, maxVisibleRows());
+  const width = Math.max(20, (process.stdout.columns ?? 80) - 1);
+  // The range only appears when part of the list is out of sight, so it does
+  // not become noise on the usual short list.
+  const rangeLabel = menuRangeLabel(state, rows);
+  const range = rangeLabel ? ` ${rangeLabel}` : "";
 
-const painted = rows.rows.map((command, index) => {
-const aliases = command.aliases?.length
-? ` (${command.aliases.map((alias) => `/${alias}`).join(", ")})`
-: "";
-const label = ` /${command.name}${aliases} ${command.description}${
-index === rows.rows.length - 1 ? range : ""
-}`;
-const text = label.length > width ? `${label.slice(0, Math.max(0, width - 1))}…` : label;
+  const painted = rows.rows.map((command, index) => {
+    const aliases = command.aliases?.length
+      ? ` (${command.aliases.map((alias) => `/${alias}`).join(", ")})`
+      : "";
+    const label = ` /${command.name}${aliases} ${command.description}${
+      index === rows.rows.length - 1 ? range : ""
+    }`;
+    const text = label.length > width ? `${label.slice(0, Math.max(0, width - 1))}…` : label;
 
-return rows.start + index === state.selected ? `\x1b[7m${text}\x1b[0m` : text;
-});
+    return rows.start + index === state.selected ? `\x1b[7m${text}\x1b[0m` : text;
+  });
 
-return painted;
+  return painted;
 };
 
 const render = () => {
@@ -121,49 +121,49 @@ export function input(message: string, options: InputOptions = {}): Promise<stri
     linesBelow = 0;
     render();
 
-   // What the prompt has read and not acted on yet. The keys themselves live in
-// the reducer, which is pure and tested on its own; this closure owns the
-// terminal and nothing else. The dropdown only exists on a terminal: with a
-// redirected stdin, "/" has to stay plain text as it always did.
-let read: PromptMenuState = {
-pending: "",
-draft: "",
-read: 0,
-selected: null,
-commands: activeCommands,
-enabled: process.stdin.isTTY && process.stdout.isTTY,
-};
+    // What the prompt has read and not acted on yet. The keys themselves live in
+    // the reducer, which is pure and tested on its own; this closure owns the
+    // terminal and nothing else. The dropdown only exists on a terminal: with a
+    // redirected stdin, "/" has to stay plain text as it always did.
+    let read: PromptMenuState = {
+      pending: "",
+      draft: "",
+      read: 0,
+      selected: null,
+      commands: activeCommands,
+      enabled: process.stdin.isTTY && process.stdout.isTTY,
+    };
 
-// The reducer decides and this applies: fold the chunk into the draft, then
-// paint, submit or leave as the action says. Following the reducer's `selected`
-// is what closes the dropdown the moment the text stops being a bare command.
-const onData = (buf: Buffer) => {
-// The tty flags are read per chunk: the dropdown is a thing only a terminal
-// can paint, and a redirected stdin must keep treating "/" as plain text.
-const result = interpretMenuInput(read, buf.toString("utf8"));
+    // The reducer decides and this applies: fold the chunk into the draft, then
+    // paint, submit or leave as the action says. Following the reducer's `selected`
+    // is what closes the dropdown the moment the text stops being a bare command.
+    const onData = (buf: Buffer) => {
+      // The tty flags are read per chunk: the dropdown is a thing only a terminal
+      // can paint, and a redirected stdin must keep treating "/" as plain text.
+      const result = interpretMenuInput(read, buf.toString("utf8"));
 
-read = { ...result.state, enabled: process.stdin.isTTY && process.stdout.isTTY };
-typed = read.draft;
-menu = read.selected === null ? null : { selected: read.selected };
+      read = { ...result.state, enabled: process.stdin.isTTY && process.stdout.isTTY };
+      typed = read.draft;
+      menu = read.selected === null ? null : { selected: read.selected };
 
-switch (result.action.kind) {
-case "render":
-render();
-return;
-case "submit":
-finish(result.action.value);
-return;
-case "exit":
-cleanup();
-process.stdout.write("\n");
-process.exit(130);
-return;
-default:
-return;
-}
-};
+      switch (result.action.kind) {
+        case "render":
+          render();
+          return;
+        case "submit":
+          finish(result.action.value);
+          return;
+        case "exit":
+          cleanup();
+          process.stdout.write("\n");
+          process.exit(130);
+          return;
+        default:
+          return;
+      }
+    };
 
-const finish = (answer: string) => {
+    const finish = (answer: string) => {
       clearRenderedLines();
       cleanup();
       process.stdout.write("\n");

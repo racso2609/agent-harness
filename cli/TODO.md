@@ -7,7 +7,8 @@ Dos renderers sobre un mismo contrato (`UiAdapter`/`UiEvent`), decidido en `P0`:
 escribe a stdout: solo emite eventos, así que la lógica del turno es idéntica en ambos.
 
 Hecho hasta hoy: `P0`, `P1`, `P2`, `P3` y `P4.5` cerrados y el core (§9.1) completo.
-Quedan la instalación (`P4`), la deuda del TUI (`P5`) y la continuación automática (`P6`).
+Quedan la publicación (`P4`, fase F0 de `docs/ARCHITECTURE.md`), la deuda del TUI (`P5`)
+y la continuación automática (`P6`).
 
 Formato de este archivo: ver la skill `todo-format`.
 
@@ -187,40 +188,124 @@ Formato de este archivo: ver la skill `todo-format`.
       final en modo líneas) y un test la fija.
       Depends on: nada.
 
-## P4 — Instalación y distribución
+## P4 — F0: empaquetado y publicación
 
-Contexto: los dos paquetes están en el repo y se usan sólo desde el workspace
-(`@racso/cli` depende de `@racso/core` con `workspace:*`), así que instalar hoy
-exige clonar y construir. Publicar es requisito para lo de `core/TODO.md` §10.
+Contexto: es la fase **F0** de `docs/ARCHITECTURE.md` y su plan completo vive en
+`docs/INSTALL.md` (decisiones de empaquetado, cambios por fichero, orden de
+publicación, tabla de roturas y notas de verificación): aquí solo van las tareas,
+no el contenido del plan. Hoy los dos paquetes se usan sólo desde el workspace
+(`@racso/cli` depende de `@racso/core` con `workspace:*`) y `cli/package.json`
+declara `private: true`, así que `@racso/cli` no se publica. Destino: **GitHub
+Packages con scope `@racso2609`** (la org `racso` no existe —`gh api orgs/racso` →
+404— y el dueño del repo es `racso2609`) **más los `.tgz` en GitHub Releases**
+como canal sin token; ya no es npm público `@racso`. F0 cierra cuando
+`pnpm -r build && pnpm -r lint && pnpm -r test` está en verde y un consumidor
+externo importa el core desde el registro, no desde el workspace.
 
-- [ ] **Publicar `@racso/core` en el registry**
-      Hoy `@racso/core` no tiene ni versión publicada ni `.npmignore`, así que nada
-      externo puede depender de él.
-      Done when: `npm view @racso/core version` devuelve una versión y una instalación
-      limpia en directorio temporal importa `createHarness` desde `@racso/core`.
+- [ ] **Renombrar el scope a `@racso2609` en los dos `package.json`**
+      GitHub Packages exige que el scope coincida con el dueño del paquete, y el dueño
+      del repo es `racso2609`, no la inexistente org `racso`.
+      Done when: `grep '"name"' core/package.json cli/package.json` devuelve
+      `@racso2609/core` y `@racso2609/cli`, y no queda ningún `"name": "@racso/`.
       Depends on: nada.
 
-- [ ] **Publicar `@racso/cli` con su binario**
-      `cli/package.json` tiene `private: true` y `@racso/core` como `workspace:*`, así
-      que el tarball no es instalable fuera del monorepo.
-      Done when: `npm pack` en `cli/` produce un tarball cuyo `bin.racso-harness`
-      resuelve `dist/main.js`, y `private` es `false` con `@racso/core` como versión
-      real, no `workspace:*`.
-      Depends on: publicar `@racso/core`.
+- [ ] **Añadir `files` explícito a los dos paquetes**
+      Sin `files` el tarball del core mete 205 ficheros / 182 KB y el del cli 123 / 207 KB
+      (`src/`, `tests/`, `TODO.md`, configs y los `.map` innecesarios).
+      Done when: `core/package.json` declara `files: ["dist", "agents", "skills"]` y
+      `cli/package.json` declara `files: ["dist", "bin", "racso-logo.txt"]`, con el logro
+      verificado en la tarea de auditar los tarballs.
+      Depends on: nada.
 
-- [ ] **Fijar un smoke test de instalación limpia**
-      Publicar sin probar el artefacto deja los fallos de empaquetado (alias `@/`,
-      assets, `dist` incompleto) para el usuario final.
-      Done when: un script del repo crea un directorio temporal, instala el tarball y
-      ejecuta `racso-harness --version` (y arranca el CLI) en CI, en verde.
-      Depends on: publicar `@racso/cli` con su binario.
+- [ ] **Quitar `private: true` del cli y pasar la dependencia del core a `workspace:^`**
+      Con `private: true` `pnpm publish` aborta con `[EPRIVATE]`, y con `workspace:*` el
+      tarball fija la versión exacta del core y obliga a republicar el cli en cada bump.
+      Done when: `cli/package.json` no contiene `"private"`, declara
+      `"@racso/core": "workspace:^"` y `pnpm --filter @racso2609/cli publish --dry-run
+--no-git-checks` no aborta con `EPRIVATE`.
+      Depends on: renombrar el scope a `@racso2609` en los dos `package.json`.
 
-- [ ] **Documentar la instalación en el README**
-      El README explica el diseño pero no cómo se instala ni qué hace el binario al
-      arrancar por primera vez (setup de config, seed de `agents/` y `skills/`).
-      Done when: el README tiene una sección de instalación con el comando exacto, la
-      versión de Node requerida y qué ficheros crea en `~/.racso-harness/`.
-      Depends on: fijar un smoke test de instalación limpia.
+- [ ] **Añadir `engines.node` a los dos paquetes**
+      Sin `engines` nada impide instalar en un Node que no soporta las dependencias, y el
+      fallo aparece en runtime en vez de en la instalación.
+      Done when: `core/package.json` declara `engines.node: ">=20.11"` (por
+      `import.meta.dirname`) y `cli/package.json` declara `">=22"` (por `ink@8` y
+      `terminal-image@5`), y `pnpm pack` de cada paquete deja ese campo en el
+      `package.json` del tarball.
+      Depends on: nada.
+
+- [ ] **Sacar `terminal-image` y `tsconfig-paths` de las dependencias de producción del core**
+      `grep -rn terminal-image core/src` no devuelve nada (sólo lo importa
+      `cli/src/terminal/stdin.ts`), y `tsconfig-paths` no se importa en ningún sitio del
+      core porque los alias `@/*` los resuelve `tsc-alias -f` en build-time; el SDK no
+      debe arrastrar `jimp` ni un loader de paths que no usa.
+      Done when: `terminal-image` sale de `dependencies` del core (a `devDependencies` o
+      fuera) y `tsconfig-paths` deja de estar en `dependencies`, de modo que
+      `pnpm --filter @racso2609/core build && pnpm --filter @racso2609/core test` sigue en
+      verde y el `pnpm-lock.yaml` del core ya no trae `jimp`.
+      Depends on: nada.
+
+- [ ] **Publicar `@racso2609/core`**
+      Es la lib base de los otros dos paquetes: sin core en el registry no hay nada que
+      consuman el cli ni el gateway.
+      Done when: `pnpm publish --no-git-checks` en `core/` termina sin error y
+      `npm view @racso2609/core version --registry=https://npm.pkg.github.com` con
+      `GITHUB_TOKEN` en el entorno devuelve la versión publicada.
+      Depends on: añadir el `.npmrc` de publicación.
+
+- [ ] **Publicar `@racso2609/cli`**
+      Va después del core porque depende de él, y es el paquete que trae el binario
+      `racso-harness`.
+      Done when: `pnpm publish --no-git-checks` en `cli/` termina sin error y
+      `npm view @racso2609/cli version --registry=https://npm.pkg.github.com` con
+      `GITHUB_TOKEN` devuelve la versión publicada.
+      Depends on: publicar `@racso2609/core`.
+
+- [ ] **Añadir el `.npmrc` de publicación con el token por variable de entorno**
+      Sin registry por scope, `pnpm publish` va a `registry.npmjs.org`; el token nunca
+      puede quedar en claro en el fichero.
+      Done when: `.npmrc` de la raíz declara
+      `@racso2609:registry=https://npm.pkg.github.com` y
+      `//npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}`, y `pnpm publish --dry-run
+--no-git-checks` en `core/` anuncia el destino `https://npm.pkg.github.com`.
+      Depends on: renombrar el scope a `@racso2609` en los dos `package.json`.
+
+- [ ] **Construir y auditar los dos tarballs antes de publicar**
+      `dist` está en `.gitignore`, así que un tarball sin `pnpm -r build` sale vacío y el
+      fallo llega al usuario como `ERR_MODULE_NOT_FOUND`.
+      Done when: `pnpm -r build && pnpm pack --pack-destination /tmp/rel` en cada paquete
+      produce un `tar -tzf` con 135 entradas en el core (93 sin `.map`) y 61 en el cli, sin
+      `package/src/`, `package/tests/` ni `package/TODO.md`, y el `package.json` del tarball
+      del cli muestra `"@racso/core": "^1.0.0"` sin `workspace:` ni `"private": true`.
+      Depends on: añadir `files` explícito a los dos paquetes, quitar `private: true` del
+      cli y pasar la dependencia del core a `workspace:^`.
+
+- [ ] **Crear el release con los `.tgz` adjuntos**
+      Es el canal sin token: quien no quiera configurar `.npmrc` ni PAT instala desde el
+      release con un `npm i https://github.com/...` y nada más.
+      Done when: `gh release view v<versión> --repo racso2609/agent-harness` lista
+      `racso2609-core-<versión>.tgz` y `racso2609-cli-<versión>.tgz`, y el tag coincide
+      con la `version` publicada de los dos paquetes.
+      Depends on: publicar `@racso2609/cli`.
+
+- [ ] **Convertir el guion de `docs/INSTALL.md` en un script de smoke test de instalación limpia**
+      Hoy no existe ningún script: el smoke test sólo está escrito como guion manual en
+      `docs/INSTALL.md`, así que nadie lo ejecuta antes de publicar.
+      Done when: existe `scripts/smoke-install.mjs` en la raíz que crea un directorio
+      temporal, instala los dos `.tgz`, verifica `typeof createHarness === "function"`,
+      que `node_modules/.bin/racso-harness` existe y que un primer arranque con `HOME`
+      propio siembra `agents/*.md` (6) y `skills/*.md` (2); el script termina en verde
+      contra los `.tgz` recién empaquetados.
+      Depends on: construir y auditar los dos tarballs antes de publicar.
+
+- [ ] **Documentar la instalación en el README con los dos canales**
+      El README explica el diseño pero no cómo se instala ni qué crea el primer arranque,
+      y hay dos formas de instalar con requisitos distintos (token o no).
+      Done when: el README tiene una sección de instalación con el canal de GitHub
+      Releases (sin token), el de GitHub Packages (`.npmrc` con `read:packages`), la
+      versión de Node requerida (`>=22` para el CLI, `>=20.11` para el SDK solo) y qué
+      ficheros crea en `~/.racso-harness/`.
+      Depends on: crear el release con los `.tgz` adjuntos.
 
 ## P4.5 — Scroll del transcript y ruido del logger
 
@@ -229,82 +314,82 @@ loco y me lleva muy arriba en el historial; si scrolleas mientras se genera pasa
 cosas raras" y "que los logger info y warn no aparezcan salvo con un modo debug".
 
 - [x] **Medir el transcript en líneas visuales, no en "las últimas 60 entradas"**
-hecho: `ui/tui/scroll.ts` (puro: `ScrollView{offset,follow}`, `bottomView`,
-`scrollBy`, `scrollToTop/Bottom`, `clampView`, `viewWithContent`, `measureEntries`,
-`visibleWindow` con `cutTop`/`cutBottom`/`padTop`) y `ui/tui/viewport.ts`
-(`chromeRows`, `viewportRows`, `scrollActionForKey`, `nextView`). La ventana se pide
-al alto real del terminal (`useWindowSize`), el gap viaja dentro de la altura de cada
-entrada (nunca se pinta un segundo `marginTop`) y el panel recibe `padTop` para medir
-exactamente el viewport: ink recorta por abajo, que es donde está la respuesta, y ese
-recorte era una de las causas del salto. Los trucos que se quitaron: clave de React
-por índice absoluto (antes usaba la posición en la ventana, así que al desplazarse
-React reutilizaba la entrada equivocada), `overflowY="hidden"` para que una fila que
-entra o sale no empuje los paneles, y ninguna altura `flexGrow` que deje rebosar.
-hecho (teclas): `pageUp`/`pageDown` = una página (viewport − 1, para conservar una
-línea de contexto), `ctrl+u`/`ctrl+d` = media página, flechas = una línea —antes las
-swallowaba el fallback que añade texto al borrador—, `home`/`end` = extremos. En el
-approval las flechas siguen eligiendo opción y el paging sigue scrolleando.
-hecho (estabilidad): contenido nuevo no mueve la vista si el usuario está scrolleado
-(`follow: false`), cada evento se re-clampa contra el tamaño actual (resize incluido),
-y volver al fondo re-engancha `follow`; al empezar un turno la vista vuelve al fondo.
-tests: 24 en `tests/ui/scroll.spec.ts` (ventana, clamp, relleno, alturas de entradas
-colapsadas/expandidas, trim) y 18 en `tests/ui/viewport.spec.ts` (geometría, teclas,
-clamp de un offset obsoleto).
-pendiente: verificado por tests de la lógica pura y por render real de `App` (ver el
-cierre de abajo); falta la prueba en un TTY real (ver "Probar la interacción real por
-teclado" en `P5`).
-Depends on: ninguno.
+      hecho: `ui/tui/scroll.ts` (puro: `ScrollView{offset,follow}`, `bottomView`,
+      `scrollBy`, `scrollToTop/Bottom`, `clampView`, `viewWithContent`, `measureEntries`,
+      `visibleWindow` con `cutTop`/`cutBottom`/`padTop`) y `ui/tui/viewport.ts`
+      (`chromeRows`, `viewportRows`, `scrollActionForKey`, `nextView`). La ventana se pide
+      al alto real del terminal (`useWindowSize`), el gap viaja dentro de la altura de cada
+      entrada (nunca se pinta un segundo `marginTop`) y el panel recibe `padTop` para medir
+      exactamente el viewport: ink recorta por abajo, que es donde está la respuesta, y ese
+      recorte era una de las causas del salto. Los trucos que se quitaron: clave de React
+      por índice absoluto (antes usaba la posición en la ventana, así que al desplazarse
+      React reutilizaba la entrada equivocada), `overflowY="hidden"` para que una fila que
+      entra o sale no empuje los paneles, y ninguna altura `flexGrow` que deje rebosar.
+      hecho (teclas): `pageUp`/`pageDown` = una página (viewport − 1, para conservar una
+      línea de contexto), `ctrl+u`/`ctrl+d` = media página, flechas = una línea —antes las
+      swallowaba el fallback que añade texto al borrador—, `home`/`end` = extremos. En el
+      approval las flechas siguen eligiendo opción y el paging sigue scrolleando.
+      hecho (estabilidad): contenido nuevo no mueve la vista si el usuario está scrolleado
+      (`follow: false`), cada evento se re-clampa contra el tamaño actual (resize incluido),
+      y volver al fondo re-engancha `follow`; al empezar un turno la vista vuelve al fondo.
+      tests: 24 en `tests/ui/scroll.spec.ts` (ventana, clamp, relleno, alturas de entradas
+      colapsadas/expandidas, trim) y 18 en `tests/ui/viewport.spec.ts` (geometría, teclas,
+      clamp de un offset obsoleto).
+      pendiente: verificado por tests de la lógica pura y por render real de `App` (ver el
+      cierre de abajo); falta la prueba en un TTY real (ver "Probar la interacción real por
+      teclado" en `P5`).
+      Depends on: ninguno.
 
 - [x] **Rueda del ratón y arreglo del recorte del transcript**
-Lo que el usuario reportó después: "el scroll ya no existe" y "quiero poder usar el
-mouse o el touchpad sin problema y que no se sienta tosco".
-hecho (rueda): ink 8 no reporta eventos de ratón, así que la TUI activa el modo SGR
-(`ui/tui/viewport.ts#MOUSE_ENABLE`, `1000h`+`1006h`) y lee las muescas de stdin
-espiando el `read` que ink consume —no un listener `data`, que pondría stdin en modo
-fluyente y dejaría sin datos a ink—. `wheelScrollLines` (puro) traduce
-`ESC[<64;…M`/`ESC[<65;…M` a ±`WHEEL_LINES` (3 líneas) e ignora clics y arrastres. La
-captura desactiva la selección nativa: para copiar hay que mantener `Shift`/`Option`.
-hecho (recorte): tres bugs de render medidos montando `App` en ink. (1) sin
-`flexShrink={0}` Yoga encogía las filas al desbordar la caja y dos entradas se pintaban
-en la misma fila (líneas que desaparecían); (2) `cutTop` se calculaba pero no se
-pintaba: la primera fila de la ventana se dibujaba desde su primer renglón, así que al
-entrar en una entrada alta se veía su principio y se perdía lo nuevo; ahora el `gap`
-es `gapBefore(absolute) - cutTop` (margen negativo) y el clip de la caja corta por
-arriba; (3) `height={viewportLines}` contaba el borde, así que el panel pintaba dos
-filas menos de las que el modelo de scroll creía —el fondo del historial se recortaba
-siempre—; ahora suma `BORDER_ROWS`.
-hecho (formato): padding y aire, con las medidas en un solo sitio. `PANEL_PADDING_X=2` y
-`PANEL_PADDING_Y=1` viven en `viewport.ts` y los leen tanto el render como la geometría;
-antes el borde se contaba dos veces en un sitio y cero en otro. `PANEL_CHROME` ahora es
-`BORDER_ROWS + 2*PANEL_PADDING_X` (antes 6 fijo, que dejaba 2 columnas sin usar), la
-caja del transcript usa `viewportLines + TRANSCRIPT_CHROME_Y` y su clip vive en una caja
-interna, dentro del padding, para que una fila cortada no pinte sobre el borde; la caja
-de input y la de approval también llevan `paddingY` y sus constantes (`INPUT_ROWS=5`,
-`APPROVAL_ROWS=9`) ahora cuadran con lo que se pinta.
-tests: 6 en `tests/ui/wheel.spec.ts` (muescas, lote, clics ignorados, par
-enable/disable) y 3 de render en `tests/ui/scrollRender.spec.tsx` (fondo de una entrada
-alta visible, sin solape al scrollear dentro de ella, tres líneas por muesca sin
-ensuciar el borrador).
-pendiente: en un TTY real, confirmar que la rueda llega (tmux y algunos emuladores
-interceptan el modo SGR) y elegir si la captura de ratón debería ser opcional.
-Depends on: ninguno.
+      Lo que el usuario reportó después: "el scroll ya no existe" y "quiero poder usar el
+      mouse o el touchpad sin problema y que no se sienta tosco".
+      hecho (rueda): ink 8 no reporta eventos de ratón, así que la TUI activa el modo SGR
+      (`ui/tui/viewport.ts#MOUSE_ENABLE`, `1000h`+`1006h`) y lee las muescas de stdin
+      espiando el `read` que ink consume —no un listener `data`, que pondría stdin en modo
+      fluyente y dejaría sin datos a ink—. `wheelScrollLines` (puro) traduce
+      `ESC[<64;…M`/`ESC[<65;…M` a ±`WHEEL_LINES` (3 líneas) e ignora clics y arrastres. La
+      captura desactiva la selección nativa: para copiar hay que mantener `Shift`/`Option`.
+      hecho (recorte): tres bugs de render medidos montando `App` en ink. (1) sin
+      `flexShrink={0}` Yoga encogía las filas al desbordar la caja y dos entradas se pintaban
+      en la misma fila (líneas que desaparecían); (2) `cutTop` se calculaba pero no se
+      pintaba: la primera fila de la ventana se dibujaba desde su primer renglón, así que al
+      entrar en una entrada alta se veía su principio y se perdía lo nuevo; ahora el `gap`
+      es `gapBefore(absolute) - cutTop` (margen negativo) y el clip de la caja corta por
+      arriba; (3) `height={viewportLines}` contaba el borde, así que el panel pintaba dos
+      filas menos de las que el modelo de scroll creía —el fondo del historial se recortaba
+      siempre—; ahora suma `BORDER_ROWS`.
+      hecho (formato): padding y aire, con las medidas en un solo sitio. `PANEL_PADDING_X=2` y
+      `PANEL_PADDING_Y=1` viven en `viewport.ts` y los leen tanto el render como la geometría;
+      antes el borde se contaba dos veces en un sitio y cero en otro. `PANEL_CHROME` ahora es
+      `BORDER_ROWS + 2*PANEL_PADDING_X` (antes 6 fijo, que dejaba 2 columnas sin usar), la
+      caja del transcript usa `viewportLines + TRANSCRIPT_CHROME_Y` y su clip vive en una caja
+      interna, dentro del padding, para que una fila cortada no pinte sobre el borde; la caja
+      de input y la de approval también llevan `paddingY` y sus constantes (`INPUT_ROWS=5`,
+      `APPROVAL_ROWS=9`) ahora cuadran con lo que se pinta.
+      tests: 6 en `tests/ui/wheel.spec.ts` (muescas, lote, clics ignorados, par
+      enable/disable) y 3 de render en `tests/ui/scrollRender.spec.tsx` (fondo de una entrada
+      alta visible, sin solape al scrollear dentro de ella, tres líneas por muesca sin
+      ensuciar el borrador).
+      pendiente: en un TTY real, confirmar que la rueda llega (tmux y algunos emuladores
+      interceptan el modo SGR) y elegir si la captura de ratón debería ser opcional.
+      Depends on: ninguno.
 
 - [x] **Silenciar `logger.info`/`warn` del core salvo en modo debug**
-El core emitía `logger.info`/`warn` en cada tool call, loader y cambio de agente, y
-los adapters los pintaban como `notice`: se leían como si fueran conversación.
-hecho: el nivel por defecto de `core/src/utils/logger.ts` pasa de `"info"` a
-`DEFAULT_LOG_LEVEL = "error"`, así que pino no formatea ni entrega a nadie los
-`info`/`warn`. Se añaden `setLoggerLevel`/`getLoggerLevel` y `createLogger(sink,
+      El core emitía `logger.info`/`warn` en cada tool call, loader y cambio de agente, y
+      los adapters los pintaban como `notice`: se leían como si fueran conversación.
+      hecho: el nivel por defecto de `core/src/utils/logger.ts` pasa de `"info"` a
+      `DEFAULT_LOG_LEVEL = "error"`, así que pino no formatea ni entrega a nadie los
+      `info`/`warn`. Se añaden `setLoggerLevel`/`getLoggerLevel` y `createLogger(sink,
 {level})` (retrocompatible), exportados desde `core/src/index.ts`. `cli/src/flags.ts`
-extrae `parseFlags(argv)` (`--tui`, `--debug`/`-v`) y `main.ts` fija el nivel `debug`
-**antes** de construir `MainLoop`: `env.ts` se evalúa en import-time, así que tocar
-`process.env` después del arranque no habría tenido efecto. En `--tui` el sink del
-adapter descarta: un log nunca puede pintarse dentro del transcript.
-tests: 6 en `core/tests/utils/logger.spec.ts` (nivel por defecto, `debug` por env y
-por setter, `silent`, contrato de orden) y 4 en `cli/tests/flags.spec.ts`.
-pendiente: decidir si en `--debug --tui` los logs deberían ir a un archivo en vez de
-descartarse; hoy el modo debug es útil en modo líneas.
-Depends on: ninguno.
+      extrae `parseFlags(argv)` (`--tui`, `--debug`/`-v`) y `main.ts` fija el nivel `debug`
+      **antes** de construir `MainLoop`: `env.ts` se evalúa en import-time, así que tocar
+      `process.env` después del arranque no habría tenido efecto. En `--tui` el sink del
+      adapter descarta: un log nunca puede pintarse dentro del transcript.
+      tests: 6 en `core/tests/utils/logger.spec.ts` (nivel por defecto, `debug` por env y
+      por setter, `silent`, contrato de orden) y 4 en `cli/tests/flags.spec.ts`.
+      pendiente: decidir si en `--debug --tui` los logs deberían ir a un archivo en vez de
+      descartarse; hoy el modo debug es útil en modo líneas.
+      Depends on: ninguno.
 
 ## P5 — Deuda conocida del TUI
 
@@ -406,41 +491,41 @@ formatSpawnOutcome(handle))`, es decir, comparaba la salida del adaptador contra
       conserva; y si se conserva, hay un test que fija que una entrada expandida en el
       turno N sigue expandida en el turno N+1, y una poda para que el set no crezca sin
       límite.
-Depends on: nada.
+      Depends on: nada.
 
 - [x] **`/resume` dejaba en pantalla la conversación de la sesión anterior**
-El core ya restauraba el historial (`SessionManager.load` → `this.history =
+      El core ya restauraba el historial (`SessionManager.load` → `this.history =
 record.history`), pero el CLI no tenía con qué leerlo ni evento para repintarlo, así que
-una sesión reanudada seguía mostrando los mensajes viejos hasta que el usuario los
-borraba y ponía los de la sesión cargada a mano.
-hecho (core): `conversation(): ConversationEntry[]` en `src/session/SessionManager.ts:582`
-filtra `system` (persona del agente, memoria de compactación) y `tool` (su resultado ya
-está resumido en la respuesta), descarta mensajes con `content` vacío tras `trim()`,
-respeta el orden más antiguo primero y devuelve copia (nunca la referencia interna
-`this.history`). Tipo `ConversationEntry` en `src/types/session.ts:36`, en `IHarness`
-(`src/contract.ts:83`) y delegado de una línea en `src/harness.ts:56`; documentado en
-`core/CONTRACT.md:97`.
-hecho (cli): evento `{ type: "conversation"; entries }` en `UiEvent`
-(`src/ui/UiAdapter.ts:55`), que **reemplaza** el transcript y no va con `reset`;
-`MainLoop#showConversation` (`src/MainLoop.ts:37`) no emite nada si la conversación está
-vacía (una sesión nueva no debe borrar la pantalla) y se llama tras `initialize()`
-(`src/MainLoop.ts:110`) y cuando un comando cambia de sesión (`src/MainLoop.ts:289`, antes
-de `showChildHistory`). La TUI (`src/ui/TuiUiAdapter.tsx:318`) sustituye `lines` (`user` →
-entrada `user`, `assistant` → `answer` pasado por `MarkdownStream` para que el histórico
-se pinte con el mismo markdown que una respuesta en vivo) y limpia `streams`, `anchors`,
-`spawns` (la franja viva era de la sesión anterior) y `expanded`; conserva `history` (los
-hijos restaurados llegan justo después) y `status`. El modo líneas
-(`src/ui/CliUiAdapter.ts:147`) limpia la pantalla y resume en vez de volcar al scrollback:
-`formatConversationSummary` (`src/ui/CliUiAdapter.ts:45`) compone
-`conversation restored: N messages`, `you: …` y `assistant: …` con el último intercambio,
-colapsando espacios y saltos y recortando a 200 con `…`.
-tests: 6 en `core/tests/session/SessionManager.spec.ts` (filtrado de system/tool, respuesta
-vacía, copia, historial vacío, orden), 5 en `tests/ui/cliAdapter.spec.ts` (limpia antes de
-resumir, solo el último intercambio, recorte a 200, sesión sin respuesta, conversación
-vacía sin tocar pantalla), 2 en `tests/ui/spawnWiring.spec.ts` (el helper emite lo que dice
-el harness, silencio si vacía) y 4 en `tests/ui/transcript.spec.ts` (reemplaza las
-entradas, vacía la franja viva y el set `expanded`, conserva los hijos restaurados, no
-limpia si está vacía).
+      una sesión reanudada seguía mostrando los mensajes viejos hasta que el usuario los
+      borraba y ponía los de la sesión cargada a mano.
+      hecho (core): `conversation(): ConversationEntry[]` en `src/session/SessionManager.ts:582`
+      filtra `system` (persona del agente, memoria de compactación) y `tool` (su resultado ya
+      está resumido en la respuesta), descarta mensajes con `content` vacío tras `trim()`,
+      respeta el orden más antiguo primero y devuelve copia (nunca la referencia interna
+      `this.history`). Tipo `ConversationEntry` en `src/types/session.ts:36`, en `IHarness`
+      (`src/contract.ts:83`) y delegado de una línea en `src/harness.ts:56`; documentado en
+      `core/CONTRACT.md:97`.
+      hecho (cli): evento `{ type: "conversation"; entries }` en `UiEvent`
+      (`src/ui/UiAdapter.ts:55`), que **reemplaza** el transcript y no va con `reset`;
+      `MainLoop#showConversation` (`src/MainLoop.ts:37`) no emite nada si la conversación está
+      vacía (una sesión nueva no debe borrar la pantalla) y se llama tras `initialize()`
+      (`src/MainLoop.ts:110`) y cuando un comando cambia de sesión (`src/MainLoop.ts:289`, antes
+      de `showChildHistory`). La TUI (`src/ui/TuiUiAdapter.tsx:318`) sustituye `lines` (`user` →
+      entrada `user`, `assistant` → `answer` pasado por `MarkdownStream` para que el histórico
+      se pinte con el mismo markdown que una respuesta en vivo) y limpia `streams`, `anchors`,
+      `spawns` (la franja viva era de la sesión anterior) y `expanded`; conserva `history` (los
+      hijos restaurados llegan justo después) y `status`. El modo líneas
+      (`src/ui/CliUiAdapter.ts:147`) limpia la pantalla y resume en vez de volcar al scrollback:
+      `formatConversationSummary` (`src/ui/CliUiAdapter.ts:45`) compone
+      `conversation restored: N messages`, `you: …` y `assistant: …` con el último intercambio,
+      colapsando espacios y saltos y recortando a 200 con `…`.
+      tests: 6 en `core/tests/session/SessionManager.spec.ts` (filtrado de system/tool, respuesta
+      vacía, copia, historial vacío, orden), 5 en `tests/ui/cliAdapter.spec.ts` (limpia antes de
+      resumir, solo el último intercambio, recorte a 200, sesión sin respuesta, conversación
+      vacía sin tocar pantalla), 2 en `tests/ui/spawnWiring.spec.ts` (el helper emite lo que dice
+      el harness, silencio si vacía) y 4 en `tests/ui/transcript.spec.ts` (reemplaza las
+      entradas, vacía la franja viva y el set `expanded`, conserva los hijos restaurados, no
+      limpia si está vacía).
 
 **Segunda tanda (revisión de la primera).** La primera tanda dejaba tres defectos: el turno
 automático se guardaba como `user` a secas y `/resume` lo pintaba como si lo hubiera escrito
@@ -492,6 +577,7 @@ verdad).
 Done when: tras `/resume` la pantalla muestra solo la conversación de la sesión reanudada,
 en los dos renderers y sin intervención manual.
 Depends on: nada.
+
 - [ ] **Un mensaje de commit afirma el estado del padre, y hay que medirlo en el padre**
       Los commits `eae796b` y `aa46e50` afirman cosas sobre el commit anterior («five
       mutations», «only one of them was covered») que resultaron falsas al medirlas: se
@@ -510,27 +596,27 @@ Depends on: nada.
 Punto del usuario: «cuando un delegate termine si aun hay trabajo que hacer la session debe seguir el trabajo que queda no esperar por mi». Hoy no lo hace: `SessionManager` inyecta el resultado del hijo asentado como mensaje `system` en el history del padre (`SessionManager.ts:592`), pero el turno del padre ya había terminado, así que `MainLoop` vuelve a `nextPrompt()` y la sesión se queda esperando input humano. El mecanismo para arrancar un turno sin usuario ya existe (`queue`/`pending` en `MainLoop`); falta decidir cuándo usarlo.
 
 - [ ] **Exponer si un hijo asentado dejó trabajo sin entregar**
-El CLI no puede decidir si continuar porque el core no dice si el resultado del hijo llegó antes o después del último turno del padre ni cuántos hijos quedaron sin entregar.
-Done when: una prueba en `core/tests/session/SessionManager.spec.ts` verifica que la API nueva devuelve los `spawnId` asentados cuyo resultado aún no ha entrado en un turno del padre, y vuelve a devolver lista vacía una vez entregados.
-Depends on: nada.
-Nota: el contrato vive como tarea espejo en `core/TODO.md` §9 («Exponer los hijos asentados con resultado sin entregar»).
+      El CLI no puede decidir si continuar porque el core no dice si el resultado del hijo llegó antes o después del último turno del padre ni cuántos hijos quedaron sin entregar.
+      Done when: una prueba en `core/tests/session/SessionManager.spec.ts` verifica que la API nueva devuelve los `spawnId` asentados cuyo resultado aún no ha entrado en un turno del padre, y vuelve a devolver lista vacía una vez entregados.
+      Depends on: nada.
+      Nota: el contrato vive como tarea espejo en `core/TODO.md` §9 («Exponer los hijos asentados con resultado sin entregar»).
 
 - [ ] **Arrancar un turno sin prompt cuando un hijo deja trabajo**
-`MainLoop` debe encolar un turno de continuación (mismo camino que `enqueue`) cuando un `spawnSettled` trae trabajo pendiente y el usuario no está escribiendo.
-Done when: existe un test (o, si el bucle no es montable en test, una guarda de fuente documentada igual que las de §P1) que fija que tras un `settled` con trabajo pendiente el CLI llama a `harness.ask` sin input del usuario y sin esperar a `nextPrompt`.
-Depends on: exponer si un hijo asentado dejó trabajo sin entregar.
-Decidir antes: si aplica solo con `--tui` o también en modo líneas, y si el turno automático pisa una línea que el usuario está escribiendo.
+      `MainLoop` debe encolar un turno de continuación (mismo camino que `enqueue`) cuando un `spawnSettled` trae trabajo pendiente y el usuario no está escribiendo.
+      Done when: existe un test (o, si el bucle no es montable en test, una guarda de fuente documentada igual que las de §P1) que fija que tras un `settled` con trabajo pendiente el CLI llama a `harness.ask` sin input del usuario y sin esperar a `nextPrompt`.
+      Depends on: exponer si un hijo asentado dejó trabajo sin entregar.
+      Decidir antes: si aplica solo con `--tui` o también en modo líneas, y si el turno automático pisa una línea que el usuario está escribiendo.
 
 - [ ] **Acotar las continuaciones automáticas**
-Sin tope, un hijo que deja trabajo cada vez encadena turnos infinitos y gasta tokens sin control.
-Done when: existe un límite configurable (en `config.sessions`) con default documentado y una prueba fija que al alcanzarlo no se arranca otro turno y se avisa al usuario.
-Depends on: arrancar un turno sin prompt cuando un hijo deja trabajo.
-Decidir antes: valor del default y si el contador se resetea con input del usuario.
+      Sin tope, un hijo que deja trabajo cada vez encadena turnos infinitos y gasta tokens sin control.
+      Done when: existe un límite configurable (en `config.sessions`) con default documentado y una prueba fija que al alcanzarlo no se arranca otro turno y se avisa al usuario.
+      Depends on: arrancar un turno sin prompt cuando un hijo deja trabajo.
+      Decidir antes: valor del default y si el contador se resetea con input del usuario.
 
 - [ ] **Contar el turno automático como continuación en el cierre del turno**
-El aviso de cierre (`formatTurnOutcome`) hoy describe el turno pasado; en una cadena automática debe indicar que la sesión sigue sola, para que el usuario no crea que el proceso quedó parado.
-Done when: un test de `cli/tests/ui/outcome.spec.ts` fija el texto de un turno encadenado y el silencio del turno final.
-Depends on: arrancar un turno sin prompt cuando un hijo deja trabajo.
+      El aviso de cierre (`formatTurnOutcome`) hoy describe el turno pasado; en una cadena automática debe indicar que la sesión sigue sola, para que el usuario no crea que el proceso quedó parado.
+      Done when: un test de `cli/tests/ui/outcome.spec.ts` fija el texto de un turno encadenado y el silencio del turno final.
+      Depends on: arrancar un turno sin prompt cuando un hijo deja trabajo.
 
 ## Deuda de proceso
 

@@ -199,14 +199,14 @@
       al asentar, `durationMs` derivado de `startedAt`/`finishedAt`) y `childHistory()`
       los devuelve al reanudar, con un test en `tests/session/SessionManager.spec.ts`
       que lo comprueba; el CLI pinta la duración desde `durationMs` sin recalcular.
-hecho: `SpawnHandle.summary?: string` y `durationMs?: number`. Ambos los fija `SpawnManager.settle()` (spawn.ts), el punto único al que desemboca el `finally` de `run()`, así que éxito, error, timeout y cancel pasan por ahí; `finishedAt` se fija en el mismo sitio. `durationMs` = `Date.parse(finishedAt) - Date.parse(startedAt)` (clamp a 0 si el reloj va hacia atrás) y `summary` se deriva del propio hijo — su `result` o su `error`, aplanado a una línea y capado a 120 chars — para no inventar una llamada extra al modelo; un hijo sin texto deja `summary` en `undefined`. `snapshot()` los copia, así que `poll`/`list`/`wait`/`collect` y el evento `settled` los llevan, y `save()` persiste `spawnHistory` (que el listener de `settled` actualiza) por lo que `childHistory()` los devuelve al reanudar. Sin subir `SESSION_VERSION` (sigue en 4): son campos opcionales y un record viejo simplemente no los trae (`undefined`, nunca `NaN` ni `""`), igual que un hijo sin asentar. 4 tests nuevos en `tests/session/SessionManager.spec.ts` (duración + resumen en éxito, duración en error, supervivencia al guardado/recarga, y record antiguo sin los campos); el test que fija la forma del hijo en `running` ahora comprueba que los dos campos aún no están. `formatSpawnResult` y el texto inyectado en el padre no cambian. 233 tests (core) + 188 (cli) + lint + prettier + tsc verdes.
+      hecho: `SpawnHandle.summary?: string` y `durationMs?: number`. Ambos los fija `SpawnManager.settle()` (spawn.ts), el punto único al que desemboca el `finally` de `run()`, así que éxito, error, timeout y cancel pasan por ahí; `finishedAt` se fija en el mismo sitio. `durationMs` = `Date.parse(finishedAt) - Date.parse(startedAt)` (clamp a 0 si el reloj va hacia atrás) y `summary` se deriva del propio hijo — su `result` o su `error`, aplanado a una línea y capado a 120 chars — para no inventar una llamada extra al modelo; un hijo sin texto deja `summary` en `undefined`. `snapshot()` los copia, así que `poll`/`list`/`wait`/`collect` y el evento `settled` los llevan, y `save()` persiste `spawnHistory` (que el listener de `settled` actualiza) por lo que `childHistory()` los devuelve al reanudar. Sin subir `SESSION_VERSION` (sigue en 4): son campos opcionales y un record viejo simplemente no los trae (`undefined`, nunca `NaN` ni `""`), igual que un hijo sin asentar. 4 tests nuevos en `tests/session/SessionManager.spec.ts` (duración + resumen en éxito, duración en error, supervivencia al guardado/recarga, y record antiguo sin los campos); el test que fija la forma del hijo en `running` ahora comprueba que los dos campos aún no están. `formatSpawnResult` y el texto inyectado en el padre no cambian. 233 tests (core) + 188 (cli) + lint + prettier + tsc verdes.
       Depends on: devolver estado consultable de los hijos.
 
 - [ ] **Exponer los hijos asentados con resultado sin entregar**
-Hoy el resultado del hijo se inyecta como mensaje `system` en el history del padre (`SessionManager.ts:592`) y desde fuera nadie puede saber si esa entrega ya ocurrió; el CLI necesita saberlo para continuar solo tras un `delegate`.
-Done when: una prueba en `core/tests/session/SessionManager.spec.ts` fija que un hijo asentado con el padre sin turno posterior sigue en la lista y solo desaparece cuando el padre ejecuta un turno que inyecta su resultado como mensaje system (el punto de inyección en SessionManager.ts), y que la lista vuelve vacía cuando ya no queda ningún hijo sin entregar.
-Consumidor: `cli/TODO.md` §P6, tarea «Arrancar un turno sin prompt cuando un hijo deja trabajo».
-Depends on: nada.
+      Hoy el resultado del hijo se inyecta como mensaje `system` en el history del padre (`SessionManager.ts:592`) y desde fuera nadie puede saber si esa entrega ya ocurrió; el CLI necesita saberlo para continuar solo tras un `delegate`.
+      Done when: una prueba en `core/tests/session/SessionManager.spec.ts` fija que un hijo asentado con el padre sin turno posterior sigue en la lista y solo desaparece cuando el padre ejecuta un turno que inyecta su resultado como mensaje system (el punto de inyección en SessionManager.ts), y que la lista vuelve vacía cuando ya no queda ningún hijo sin entregar.
+      Consumidor: `cli/TODO.md` §P6, tarea «Arrancar un turno sin prompt cuando un hijo deja trabajo».
+      Depends on: nada.
 
 ### 9.1 orden sugerido
 
@@ -220,128 +220,121 @@ Depends on: nada.
 
 Nota: los puntos 1–2 desbloquean `cli/TODO.md` §P1; el 3 desbloquea §P3; el 7 desbloquea §P6.
 
-10. gateway persistente (cronjobs + webhooks)
+10. gateway persistente (F1–F5): `@racso2609/gateway` como paquete nuevo
     Formato de esta sección: ver la skill `todo-format`. Las secciones 0–9 se dejan como están.
-    Contexto: hoy `createHarness()` vive dentro del proceso del CLI: el core no puede
-    correr nada sin una terminal abierta. Un gateway es un proceso `@racso/core` de
-    larga vida que expone `spawn` por HTTP y dispara trabajo por calendario o por
-    evento entrante. Reutiliza lo que ya existe: `SpawnManager` (concurrencia, timeout,
-    eventos `started`/`settled`) y `SessionStore` (hijos persistidos con `parentId`).
-    Bloquea: nada del CLI actual; `cli/TODO.md` §P4 (publicación) es requisito previo
-    para que un gateway instalable tenga sentido.
+    La referencia es `docs/ARCHITECTURE.md` (fases F0–F6, decisiones 1–7 y huecos 1–10): esta sección no repite el diseño, sólo lista las tareas con su `Done when`.
+    Contexto: `core` es la librería base; el **gateway** es un **paquete nuevo y proceso aparte** (`@racso2609/gateway`) que consume la **lib publicada** del core, y el CLI es otra implementación separada que consume esa misma lib. Los tres se publican. Hoy `createHarness()` sólo vive dentro del proceso del CLI, así que nada puede correr sin una terminal abierta. Reutiliza lo que ya existe: `SpawnManager`, `SessionStore` y `SessionManagerImpl`; `IHarness` no cambia (decisión 7).
+    Bloquea: nada del CLI actual; F0 (`cli/TODO.md` §P4) es requisito previo, porque el gateway consume el core del registro y no del workspace.
 
-- [ ] **Diseñar el contrato del gateway**
-      Sin contrato, cada pieza (HTTP, scheduler, webhooks) inventa su propio vocabulario
-      y el core se contamina de detalles de transporte.
-      Done when: un documento en `core/GATEWAY.md` fija las operaciones (`spawn`,
-      `status`, `collect`, `cancel`), el sobre de error y qué es sesión de gateway frente
-      a sesión de usuario, aprobado antes de escribir código.
+### F0 — prerrequisito: el paquete
+
+- [ ] **Crear el paquete `gateway/` en el workspace**
+      El gateway es un proceso de larga vida con su propio ciclo de release, así que no puede nacer dentro de `core/` ni de `cli/`.
+      Done when: existe `gateway/package.json` con `name: "@racso2609/gateway"`, `private: false` y `@racso2609/core` como dependencia con rango publicado (no `workspace:*`), está listado en `pnpm-workspace.yaml` y `pnpm -r build` lo incluye.
+      Depends on: publicar `@racso2609/core` (`cli/TODO.md` §P4).
+
+### F1 — `SessionRegistry` + `runTurn` (huecos 1–3)
+
+- [ ] **Añadir `SessionRegistry` al core**
+      Hoy sólo hay `Harness` con **una** sesión activa y `loadSession` la sustituye, así que no hay nada que sostenga N sesiones simultáneas ni que las enumere por estado.
+      Done when: un test en `core/tests/session/` crea dos sesiones vivas sobre un mismo `Config` y `SessionStore`, corre un turno en cada una y verifica que ambas persisten y que la segunda no ve el history de la primera; `pnpm --filter @racso2609/core test` en verde.
       Depends on: nada.
 
-- [ ] **Definir el almacenamiento de trabajos**
-      Un cronjob o un webhook no puede vivir en memoria: si el proceso se cae, la
-      definición y las ejecuciones pendientes deben sobrevivir.
-      Done when: está decidido y escrito si son ficheros JSON junto a `SessionStore` o
-      una base (sqlite), con el motivo, y `SessionStore` sigue siendo la única pieza que
-      toca disco para sesiones.
-      Depends on: diseñar el contrato del gateway.
+- [ ] **Mover el turno a `runTurn()` en `core/src/session/turn.ts` con `IHarness` intacta**
+      El turno (bucle de stdin + `harness.ask` + traducción `ChatEvent`→`UiEvent`) vive en `cli/src/MainLoop.ts`, así que el gateway no puede reutilizarlo; va como función libre para no añadir una entrada pública al contrato (decisión 6).
+      Done when: `runTurn()` exportado desde `core/src/session/turn.ts` ejecuta un turno con un prompt y devuelve los eventos sin leer stdin ni escribir en stdout, `core/src/contract.ts` (`IHarness`) no cambia y `pnpm -r test` sigue en verde.
+      Depends on: añadir `SessionRegistry` al core.
+
+- [ ] **Atravesar el turno con un `AbortSignal`**
+      Hoy el `signal` sólo lo recibe el runner de hijos (`SpawnRunner.signal`), así que un turno en curso no se puede abortar desde fuera.
+      Done when: `runTurn()` acepta un `AbortSignal`, un test en `core/tests/session/` aborta a mitad de turno y verifica que `ask` termina y que la sesión queda persistida sin el turno a medias.
+      Depends on: mover el turno a `runTurn()` en `core/src/session/turn.ts` con `IHarness` intacta.
+
+### F2 — servidor HTTP + SSE (huecos 4, 5, 8 y 10)
+
+- [ ] **Serializar las escrituras del `SessionStore` con lease `<id>.lock` y tmp+rename**
+      `save` hace hoy `fs.writeFileSync` sobre el fichero entero sin lock ni escritura atómica, así que dos escritores sobre la misma sesión se pisan y un corte a mitad deja un JSON inválido.
+      Done when: existe un test en `core/tests/session/SessionStore.spec.ts` con dos `save` concurrentes sobre el mismo id que fija que no se pierde ninguna escritura y que el fichero final siempre es JSON válido, y `sessions/<id>.lock` aparece y se libera en la prueba.
+      Depends on: nada.
 
 - [ ] **Añadir el bloque `gateway` a `Config`**
-      El gateway necesita puerto, token y límites como configuración, no como constantes.
-      Done when: `HarnessConfig.gateway` existe con `enabled` (default `false`), `host`,
-      `port`, `token` y `maxConcurrentJobs`, aplicado en `applyDefaults` y validado en
-      `validateConfig()`.
-      Depends on: diseñar el contrato del gateway.
+      El gateway necesita puerto, bind y política de aprobaciones por defecto como configuración, no como constantes.
+      Done when: `Config.gateway` existe con `enabled` (default `false`), `host`, `port` y la política de aprobaciones por defecto, aplicado en `applyDefaults` y validado en `validateConfig()`.
+      Depends on: nada.
 
-- [ ] **Exponer un servidor HTTP con `spawn` y `status`**
-      Es la única forma de lanzar trabajo sin una terminal, y hoy `IHarness.spawn()` ya
-      resuelve el caso de uso puertas adentro.
-      Done when: un `POST` a `/spawn` devuelve un `spawnId` y un `GET /spawn/:id`
-      devuelve el `SpawnHandle` de `listSpawns()`, cubierto por tests con `fetch` sobre
-      un puerto efímero.
-      Depends on: añadir el bloque `gateway` a `Config`.
+- [ ] **Añadir un `EventBuffer` circular por turno con sobre `{sessionId, turnId, seq}`**
+      `ChatEvent` no lleva `seq` ni `turnId` y `onSpawnEvent` es live-only, así que un cliente que se engancha a mitad de turno no puede reconstruir lo ya emitido (decisión 2).
+      Done when: un test en `gateway/tests/` arranca un turno, corta la conexión a mitad, reconecta con el último `seq` y recibe exactamente los eventos que faltaban, sin duplicados; el estado ya asentado se relee de `status()`/`conversation()`/`listSpawns()`.
+      Depends on: mover el turno a `runTurn()` en `core/src/session/turn.ts` con `IHarness` intacta.
 
-- [ ] **Proteger el gateway con token**
-      Un puerto abierto que ejecuta tools (`shell`) sin autenticación es ejecución
-      remota de código en la máquina del usuario.
-      Done when: toda ruta salvo `/health` exige el token de `config.gateway.token` y
-      una petición sin él devuelve `401`; testeado en ambas direcciones.
-      Depends on: exponer un servidor HTTP con `spawn` y `status`.
+- [ ] **Exponer el servidor del gateway con `node:http` y SSE, no WebSocket**
+      Hoy no hay ninguna referencia a `node:http` en `core/` ni en `cli/`: no existe servidor donde colgar el stream ni la SPA, y el flujo es unidireccional, así que SSE basta (decisión 2).
+      Done when: el proceso `gateway` sirve un endpoint SSE que emite cada evento envuelto en `{sessionId, turnId, seq}` y atiende las acciones del usuario como peticiones HTTP normales, con un test de integración sobre un puerto efímero.
+      Depends on: añadir un `EventBuffer` circular por turno con sobre `{sessionId, turnId, seq}`.
 
-- [ ] **Ejecutar cronjobs programados**
+### F4 — aprobaciones (huecos 6 y 7)
+
+- [ ] **Llevar `sessionId` en `ApprovalRequest`**
+      Hoy `approveWith` instala un único handler global y la petición no dice de qué sesión viene, así que con N sesiones un `ask` no se puede atribuir.
+      Done when: `ApprovalRequest` incluye `sessionId` y un test en `core/tests/session/` verifica que dos sesiones con una petición abierta cada una reciben el `sessionId` correcto.
+      Depends on: añadir `SessionRegistry` al core.
+
+- [ ] **Persistir `approvals[]` en `SpawnHandle` y `SessionRecord`**
+      Ninguno de los dos lo tiene, así que la decisión sobre una tool no queda registrada junto al trabajo al que pertenece.
+      Done when: una aprobación concedida o denegada queda escrita en `approvals[]` del `SpawnHandle` y sobrevive al guardado y recarga de `SessionRecord` sin subir `SESSION_VERSION` (campos opcionales); test en `core/tests/session/`.
+      Depends on: llevar `sessionId` en `ApprovalRequest`.
+
+- [ ] **Implementar la `ApprovalQueue` por sesión con TTL de 120 s y `deny` por defecto**
+      `SessionManager.approve` deniega sin handler, así que una tool sujeta a aprobación mata el trabajo en silencio en vez de dejarlo registrado y rechazado (decisión 3).
+      Done when: un test dispara una tool bajo política `ask`, no responde, avanza el reloj 120 s y comprueba que la tool quedó denegada con `ToolResult.isError` y registrada en `approvals[]`; otro test con dos sesiones verifica que la respuesta de la A no resuelve la petición de la B.
+      Depends on: persistir `approvals[]` en `SpawnHandle` y `SessionRecord`.
+
+### F5 — cronjobs y webhooks (hueco 9)
+
+- [ ] **Crear `jobs.json` en `~/.racso-harness/` como almacenamiento de trabajos**
+      No existe hoy ningún sitio donde persistir programaciones ni sus ejecuciones: `SessionStore` debe seguir siendo la única pieza que toca disco para sesiones.
+      Done when: `jobs.json` con sus tipos y su lectura/escritura existe en el gateway, con test que lo crea, lo relee y comprueba que `SessionStore` no lo toca.
+      Depends on: crear el paquete `gateway/` en el workspace.
+
+- [ ] **Ejecutar cronjobs programados sobre `runTurn`**
       Es la mitad del objetivo del gateway: trabajo recurrente sin usuario delante.
-      Done when: un trabajo con expresión cron registrado en el almacenamiento se
-      ejecuta solo en el intervalo esperado (test con reloj falso) y su resultado queda
-      persistido como hijo de la sesión dueña.
-      Depends on: definir el almacenamiento de trabajos.
+      Done when: un trabajo con expresión cron registrado en `jobs.json` se ejecuta en el intervalo esperado (test con reloj falso) llamando a `runTurn` sobre una sesión existente o nueva, y deja rastro en `sessions/<id>.json`.
+      Depends on: implementar la `ApprovalQueue` por sesión con TTL de 120 s y `deny` por defecto.
 
-- [ ] **Recibir webhooks como disparadores**
-      La otra mitad: reaccionar a un evento externo (un push, un mensaje) sin polling.
-      Done when: un `POST` a `/webhooks/:id` con el token dispara el `spawn` asociado y
-      devuelve `202` con el `spawnId`; un `id` desconocido devuelve `404`.
-      Depends on: proteger el gateway con token.
+- [ ] **Recibir webhooks como disparadores del mismo camino**
+      La otra mitad: reaccionar a un evento externo disparando el turno sin polling.
+      Done when: un test hace `POST` al endpoint de webhook con un `id` registrado en `jobs.json`, dispara `runTurn` sobre la sesión asociada y otro `id` desconocido devuelve `404`.
+      Depends on: ejecutar cronjobs programados sobre `runTurn`.
 
 - [ ] **Persistir el estado de los trabajos entre reinicios**
-      Un cronjob que se salta la ejecución perdida al reiniciar rompe la promesa de
-      "corre siempre", que es la razón de tener un proceso de larga vida.
-      Done when: matar el gateway a mitad de un trabajo y volver a arrancarlo restaura
-      las programaciones y deja el trabajo interrumpido marcado como `error` en el
-      histórico, sin duplicar ejecuciones.
-      Depends on: ejecutar cronjobs programados.
+      Un cronjob que se salta la ejecución perdida al reiniciar rompe la promesa de "corre siempre", que es la razón de tener un proceso de larga vida.
+      Done when: matar el gateway a mitad de un trabajo y volver a arrancarlo restaura las programaciones de `jobs.json` y deja el trabajo interrumpido marcado como `error` en el historial, sin duplicar ejecuciones.
+      Depends on: ejecutar cronjobs programados sobre `runTurn`.
 
 - [ ] **Documentar el gateway en `CONTRACT.md`**
-      `CONTRACT.md` es la fuente de verdad del SDK; un modo de ejecución nuevo que no
-      está ahí no existe para quien integra.
-      Done when: `CONTRACT.md` describe cómo arrancar el gateway, qué rutas expone y qué
-      API pública nueva añade (`createGateway(...)` o equivalente).
-      Depends on: recibir webhooks como disparadores.
-
-- [ ] **Extraer la ejecución de un turno fuera del bucle del CLI**
-`cli/src/MainLoop.ts` mezcla el bucle de stdin con la ejecución del turno
-(`harness.ask` + traducción de `ChatEvent` a `UiEvent`), así que hoy el core no
-puede completar un turno sin una terminal abierta y cada consumidor nuevo
-(gateway, web) reimplementaría el turno por su cuenta.
-Done when: existe una pieza que recibe un prompt y devuelve los eventos del turno
-sin leer stdin ni escribir en stdout, `MainLoop` la consume en lugar de ejecutarlo
-por dentro, y los tests existentes del CLI siguen en verde.
-Depends on: nada.
-Decidir antes: si esa pieza vive en `core` (y entonces `CONTRACT.md` gana una
-entrada en `IHarness`) o en `cli`, dado que el contrato ya prohíbe interacción
-dentro del core.
-
-- [ ] **Definir la política de aprobaciones de un trabajo sin usuario**
-Un trabajo de gateway no tiene a quién preguntar y hoy `SessionManager.approve`
-deniega cuando no hay handler instalado, así que una tool sujeta a aprobación
-(`shell`) mata el trabajo en silencio sin que el usuario se entere.
-Done when: está escrito por job `allow`/`deny`/`queue` y un test en
-`core/tests/session/` verifica que un trabajo con política `deny` no invoca el
-`approvalHandler` y que la decisión queda registrada en su `SpawnHandle`.
-Depends on: diseñar el contrato del gateway.
-Decidir antes: si la política vive en la definición del trabajo o en el bloque
-`gateway` de `Config`, y si `queue` puede esperar indefinidamente o expira.
-
-- [ ] **Serializar las escrituras del `SessionStore` entre turnos concurrentes**
-`SessionStore.save` reescribe el fichero entero sin lock ni escritura atómica, así
-que dos turnos concurrentes de la misma sesión se pisan (last-write-wins, con
-riesgo de fichero a medio escribir si el proceso cae), y un gateway necesita N
-sesiones con turnos que pueden solaparse.
-Done when: existe un test en `core/tests/session/SessionStore.spec.ts` que lanza
-dos escrituras concurrentes sobre el mismo id y fija que no se pierde ninguna y
-que el fichero final siempre es JSON válido.
-Depends on: definir el almacenamiento de trabajos.
-Decidir antes: si el lock es por fichero de sesión o por proceso/mutex en memoria,
-dado que el gateway puede correr en un solo proceso.
+      `CONTRACT.md` describe el SDK publicado; un paquete nuevo que consume la lib no existe para quien integra si no está ahí.
+      Done when: `CONTRACT.md` describe cómo arrancar `@racso2609/gateway`, qué rutas expone y qué importa del core más allá de `createHarness` (`runTurn`), dejando claro que `IHarness` no cambia.
+      Depends on: recibir webhooks como disparadores del mismo camino.
 
 ### 10.1 orden sugerido
 
-1. Contrato (`GATEWAY.md`) — sin él las otras piezas divergen.
-2. Extracción del turno fuera del `MainLoop` — sin ella el gateway no puede
-   completar un turno sin terminal y lo reimplementaría.
-3. Almacenamiento de trabajos + bloque `gateway` en `Config`.
-4. Servidor HTTP (`spawn`/`status`) + token.
-5. Política de aprobaciones por job — entra aquí, cuando ya hay trabajos que
-   pueden pedir una tool sujeta a aprobación sin nadie delante.
-6. Lock de escritura del `SessionStore` — antes de que cronjobs y webhooks
-   solapen turnos sobre la misma sesión.
-7. Cronjobs + webhooks.
-8. Persistencia entre reinicios y documentación en `CONTRACT.md`.
+La referencia del orden es `docs/ARCHITECTURE.md` (fases F0–F6); aquí sólo se lista qué tarea de arriba abre cada fase.
+
+1. F0 — el plan de publicación está cerrado en `docs/INSTALL.md` y sus tareas en `cli/TODO.md` §P4. El paquete `gateway/` necesita `@racso2609/core` publicado.
+2. F1 — `SessionRegistry`, `runTurn()` en `core/src/session/turn.ts` con `IHarness` intacta y el `AbortSignal` que atraviesa el turno.
+3. F2 — `SessionStore` con lease y tmp+rename, bloque `gateway` en `Config`, `EventBuffer` con sobre `{sessionId, turnId, seq}` y servidor `node:http` + SSE.
+4. F4 — `sessionId` en `ApprovalRequest`, `approvals[]` en `SpawnHandle`/`SessionRecord` y `ApprovalQueue` por sesión con TTL 120 s y `deny` por defecto. Va antes de los trabajos: un cronjob que dispara tools con efectos necesita una decisión que no dependa de una terminal abierta.
+5. F5 — `jobs.json`, cronjobs sobre `runTurn`, webhooks por el mismo camino, persistencia entre reinicios y `CONTRACT.md`.
+
+### Descartados de la sección 10
+
+- **«Diseñar el contrato del gateway» (`core/GATEWAY.md`)** — el diseño ya está cerrado en `docs/ARCHITECTURE.md` (decisiones 1–7 y huecos 1–10) → se sustituye por las tareas de F1, F2, F4 y F5, y lo que el consumidor necesita leer pasa a `CONTRACT.md` (tarea de F5).
+- **«Definir el almacenamiento de trabajos»** — el diseño decidió `jobs.json` junto a `SessionStore` (`docs/ARCHITECTURE.md`, `## Modelo de runtime`) → queda como tarea de implementación de F5.
+- **«Exponer un servidor HTTP con `spawn` y `status`»** — se reemplaza por el servidor `node:http` + SSE de F2, que sirve turnos y stream, no `spawn` suelto.
+- **«Proteger el gateway con token»** — ninguna fase de `docs/ARCHITECTURE.md` lo decide → pasa a `Preguntas abiertas` de esta sección en vez de quedar como tarea.
+- **«Definir la política de aprobaciones de un trabajo sin usuario»** — decidido: `ApprovalQueue` por sesión con TTL 120 s y `deny` por defecto (decisión 3) → queda como tarea de F4.
+
+## Preguntas abiertas de la sección 10
+
+- **¿Autentica el gateway las peticiones con un token?** Las fases F0–F6 de `docs/ARCHITECTURE.md` no lo deciden, y sin autenticación un puerto que ejecuta tools (`shell`) es ejecución remota en la máquina del usuario. No es tarea hasta que se decida: para cerrarla hay que fijar si el token vive en `config.gateway` y si toda ruta salvo `/health` lo exige.
+- **¿Los `.map` viajan en los tarballs?** Afecta al tamaño del paquete del gateway igual que al de los dos actuales; queda abierto en `docs/INSTALL.md` (`Preguntas abiertas`, punto 3) y se cierra con la misma decisión.

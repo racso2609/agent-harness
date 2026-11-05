@@ -1,15 +1,15 @@
 import { describe, expect, it } from "vitest";
 import type { CommandOption } from "../../src/commands/CommandRepository";
 import {
-COMMAND_KEYS,
-clampSelection,
-filterCommands,
-menuItems,
-menuMove,
-menuRows,
-menuSelectAt,
-moveSelection,
-visibleCommands,
+  COMMAND_KEYS,
+  clampSelection,
+  filterCommands,
+  menuItems,
+  menuMove,
+  menuRows,
+  menuSelectAt,
+  moveSelection,
+  visibleCommands,
 } from "../../src/terminal/commandMenu";
 
 const commands: CommandOption[] = [
@@ -91,118 +91,121 @@ describe("commandMenu", () => {
     });
   });
 
-describe("menuItems", () => {
-it("returns the list itself for an empty query, not a copy", () => {
-// A renderer may compare by identity to tell "nothing typed" from
-// "filtered", and a cleared query must not allocate on every keystroke.
-expect(menuItems("", commands, COMMAND_KEYS)).toBe(commands);
-});
+  describe("menuItems", () => {
+    it("returns the list itself for an empty query, not a copy", () => {
+      // A renderer may compare by identity to tell "nothing typed" from
+      // "filtered", and a cleared query must not allocate on every keystroke.
+      expect(menuItems("", commands, COMMAND_KEYS)).toBe(commands);
+    });
 
-it("filters commands by name or alias prefix", () => {
-expect(menuItems("mo", commands, COMMAND_KEYS).map((c) => c.name)).toEqual(["model"]);
-expect(menuItems("?", commands, COMMAND_KEYS).map((c) => c.name)).toEqual(["help"]);
-});
+    it("filters commands by name or alias prefix", () => {
+      expect(menuItems("mo", commands, COMMAND_KEYS).map((c) => c.name)).toEqual(["model"]);
+      expect(menuItems("?", commands, COMMAND_KEYS).map((c) => c.name)).toEqual(["help"]);
+    });
 
-it("is case-insensitive and ignores surrounding spaces", () => {
-expect(menuItems("  PRO ", commands, COMMAND_KEYS).map((c) => c.name)).toEqual(["provider"]);
-});
+    it("is case-insensitive and ignores surrounding spaces", () => {
+      expect(menuItems("  PRO ", commands, COMMAND_KEYS).map((c) => c.name)).toEqual(["provider"]);
+    });
 
-it("filters any item type through its keys", () => {
-const sessions = [{ id: "a", title: "alpha" }, { id: "b", title: "beta" }];
+    it("filters any item type through its keys", () => {
+      const sessions = [
+        { id: "a", title: "alpha" },
+        { id: "b", title: "beta" },
+      ];
 
-expect(menuItems("be", sessions, (s) => [s.id, s.title])).toEqual([sessions[1]]);
-});
-});
+      expect(menuItems("be", sessions, (s) => [s.id, s.title])).toEqual([sessions[1]]);
+    });
+  });
 
-describe("menuMove", () => {
-const state = { items: commands, query: "", selected: 1 };
+  describe("menuMove", () => {
+    const state = { items: commands, query: "", selected: 1 };
 
-it("moves the selection one step in either direction", () => {
-expect(menuMove(state, 1).selected).toBe(2);
-expect(menuMove(state, -1).selected).toBe(0);
-});
+    it("moves the selection one step in either direction", () => {
+      expect(menuMove(state, 1).selected).toBe(2);
+      expect(menuMove(state, -1).selected).toBe(0);
+    });
 
-it("wraps around both ends", () => {
-expect(menuMove({ ...state, selected: 3 }, 1).selected).toBe(0);
-expect(menuMove({ ...state, selected: 0 }, -1).selected).toBe(3);
-});
+    it("wraps around both ends", () => {
+      expect(menuMove({ ...state, selected: 3 }, 1).selected).toBe(0);
+      expect(menuMove({ ...state, selected: 0 }, -1).selected).toBe(3);
+    });
 
-it("stays at zero on an empty list", () => {
-expect(menuMove({ items: [], query: "zzz", selected: 0 }, 1).selected).toBe(0);
-});
+    it("stays at zero on an empty list", () => {
+      expect(menuMove({ items: [], query: "zzz", selected: 0 }, 1).selected).toBe(0);
+    });
 
-it("leaves the items and the query alone", () => {
-const moved = menuMove(state, 1);
+    it("leaves the items and the query alone", () => {
+      const moved = menuMove(state, 1);
 
-expect(moved.items).toBe(commands);
-expect(moved.query).toBe("");
-});
-});
+      expect(moved.items).toBe(commands);
+      expect(moved.query).toBe("");
+    });
+  });
 
-describe("menuSelectAt", () => {
-it("keeps an index that is inside the list", () => {
-expect(menuSelectAt({ items: commands, query: "", selected: 0 }, 2).selected).toBe(2);
-});
+  describe("menuSelectAt", () => {
+    it("keeps an index that is inside the list", () => {
+      expect(menuSelectAt({ items: commands, query: "", selected: 0 }, 2).selected).toBe(2);
+    });
 
-it("clamps an index past either end", () => {
-expect(menuSelectAt({ items: commands, query: "", selected: 0 }, 9).selected).toBe(3);
-expect(menuSelectAt({ items: commands, query: "", selected: 0 }, -2).selected).toBe(0);
-});
+    it("clamps an index past either end", () => {
+      expect(menuSelectAt({ items: commands, query: "", selected: 0 }, 9).selected).toBe(3);
+      expect(menuSelectAt({ items: commands, query: "", selected: 0 }, -2).selected).toBe(0);
+    });
 
-it("falls back to zero when the filter emptied the list", () => {
-expect(menuSelectAt({ items: [], query: "zzz", selected: 2 }, 2).selected).toBe(0);
-});
-});
+    it("falls back to zero when the filter emptied the list", () => {
+      expect(menuSelectAt({ items: [], query: "zzz", selected: 2 }, 2).selected).toBe(0);
+    });
+  });
 
-describe("menuRows", () => {
-it("shows every row when the list fits", () => {
-const rows = menuRows({ items: commands, query: "", selected: 0 }, 8);
+  describe("menuRows", () => {
+    it("shows every row when the list fits", () => {
+      const rows = menuRows({ items: commands, query: "", selected: 0 }, 8);
 
-expect(rows.rows).toBe(commands);
-expect(rows.start).toBe(0);
-expect(rows.hiddenAbove).toBe(0);
-expect(rows.hiddenBelow).toBe(0);
-});
+      expect(rows.rows).toBe(commands);
+      expect(rows.start).toBe(0);
+      expect(rows.hiddenAbove).toBe(0);
+      expect(rows.hiddenBelow).toBe(0);
+    });
 
-it("keeps the selection inside a window and reports what stays hidden", () => {
-const rows = menuRows({ items: commands, query: "", selected: 3 }, 2);
+    it("keeps the selection inside a window and reports what stays hidden", () => {
+      const rows = menuRows({ items: commands, query: "", selected: 3 }, 2);
 
-expect(rows.rows.map((c) => c.name)).toEqual(["provider", "compact"]);
-expect(rows.start).toBe(2);
-expect(rows.hiddenAbove).toBe(2);
-expect(rows.hiddenBelow).toBe(0);
-});
+      expect(rows.rows.map((c) => c.name)).toEqual(["provider", "compact"]);
+      expect(rows.start).toBe(2);
+      expect(rows.hiddenAbove).toBe(2);
+      expect(rows.hiddenBelow).toBe(0);
+    });
 
-it("centres the window as far as the ends allow", () => {
-// Two rows and a selection on the second one: half a window fits above it, so
-// the slice starts at the top instead of centring perfectly.
-const rows = menuRows({ items: commands, query: "", selected: 2 }, 2);
+    it("centres the window as far as the ends allow", () => {
+      // Two rows and a selection on the second one: half a window fits above it, so
+      // the slice starts at the top instead of centring perfectly.
+      const rows = menuRows({ items: commands, query: "", selected: 2 }, 2);
 
-expect(rows.rows.map((c) => c.name)).toEqual(["model", "provider"]);
-expect(rows.hiddenAbove).toBe(1);
-expect(rows.hiddenBelow).toBe(1);
-});
+      expect(rows.rows.map((c) => c.name)).toEqual(["model", "provider"]);
+      expect(rows.hiddenAbove).toBe(1);
+      expect(rows.hiddenBelow).toBe(1);
+    });
 
-it("reports an empty list without pretending something is hidden", () => {
-expect(menuRows({ items: [], query: "zzz", selected: 0 }, 4)).toEqual({
-start: 0,
-rows: [],
-hiddenAbove: 0,
-hiddenBelow: 0,
-});
-});
+    it("reports an empty list without pretending something is hidden", () => {
+      expect(menuRows({ items: [], query: "zzz", selected: 0 }, 4)).toEqual({
+        start: 0,
+        rows: [],
+        hiddenAbove: 0,
+        hiddenBelow: 0,
+      });
+    });
 
-it("never paints more rows than asked, even when the list is huge", () => {
-const many = Array.from({ length: 20 }, (_, index) => ({
-name: `c${index}`,
-description: "",
-}));
+    it("never paints more rows than asked, even when the list is huge", () => {
+      const many = Array.from({ length: 20 }, (_, index) => ({
+        name: `c${index}`,
+        description: "",
+      }));
 
-expect(menuRows({ items: many, query: "", selected: 10 }, 4).rows).toHaveLength(4);
-});
+      expect(menuRows({ items: many, query: "", selected: 10 }, 4).rows).toHaveLength(4);
+    });
 
-it("survives a maxVisible of zero instead of returning nothing", () => {
-expect(menuRows({ items: commands, query: "", selected: 0 }, 0).rows).toHaveLength(1);
-});
-});
+    it("survives a maxVisible of zero instead of returning nothing", () => {
+      expect(menuRows({ items: commands, query: "", selected: 0 }, 0).rows).toHaveLength(1);
+    });
+  });
 });

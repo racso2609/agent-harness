@@ -13,7 +13,7 @@ vi.mock("../../src/terminal/stdin", () => ({
   printLogo: vi.fn(),
   printImage: vi.fn(),
   input: vi.fn(),
-askHidden: vi.fn(),
+  askHidden: vi.fn(),
 }));
 
 const stdin = await import("../../src/terminal/stdin");
@@ -208,34 +208,32 @@ describe("the line renderer", () => {
 });
 
 describe("the status bar", () => {
-// Both renderers share one formatter: the line renderer must print exactly the
-// shared line, and must stay silent rather than open a blank line when the
-// snapshot has nothing to show.
-it("prints the shared one-line status", () => {
-const output = printed([
-{
-type: "status",
-status: {
-sessionId: "session-c2ba4fa1-d2fe-4a7b-9c3d-001122334455",
-provider: "openai",
-model: "gpt-test",
-tokens: 15900,
-costUsd: 0.0042,
-contextTokens: 51200,
-contextWindow: 128000,
-contextUsage: 0.4,
-},
-},
-]);
+  // Both renderers share one formatter: the line renderer must print exactly the
+  // shared line, and must stay silent rather than open a blank line when the
+  // snapshot has nothing to show.
+  it("prints the shared one-line status", () => {
+    const output = printed([
+      {
+        type: "status",
+        status: {
+          sessionId: "session-c2ba4fa1-d2fe-4a7b-9c3d-001122334455",
+          provider: "openai",
+          model: "gpt-test",
+          tokens: 15900,
+          costUsd: 0.0042,
+          contextTokens: 51200,
+          contextWindow: 128000,
+          contextUsage: 0.4,
+        },
+      },
+    ]);
 
-expect(output).toBe(
-"ses c2ba4fa1 · openai/gpt-test · 16k tok · $0.0042 · ctx 40% 51k/128k\n",
-);
-});
+    expect(output).toBe("ses c2ba4fa1 · openai/gpt-test · 16k tok · $0.0042 · ctx 40% 51k/128k\n");
+  });
 
-it("prints nothing for an empty snapshot", () => {
-expect(printed([{ type: "status", status: {} }])).toBe("");
-});
+  it("prints nothing for an empty snapshot", () => {
+    expect(printed([{ type: "status", status: {} }])).toBe("");
+  });
 });
 
 // /resume changes session but the screen kept the previous conversation. The
@@ -246,128 +244,130 @@ expect(printed([{ type: "status", status: {} }])).toBe("");
 // that follows it goes through the stubbed printLogo, so it prints nothing —
 // and every line ends in the newline notify adds.
 describe("a session that replaced the transcript", () => {
-const conversation = (entries: { role: "user" | "assistant"; content: string }[]) => [
-{ type: "conversation" as const, entries },
-];
+  const conversation = (entries: { role: "user" | "assistant"; content: string }[]) => [
+    { type: "conversation" as const, entries },
+  ];
 
-it("clears the screen before printing the summary", () => {
-const output = printed(
-conversation([
-{ role: "user", content: "hola" },
-{ role: "assistant", content: "buenas" },
-]),
-);
+  it("clears the screen before printing the summary", () => {
+    const output = printed(
+      conversation([
+        { role: "user", content: "hola" },
+        { role: "assistant", content: "buenas" },
+      ]),
+    );
 
-expect(output).toBe(
-"\x1Bc" + "conversation restored: 2 messages\n" + "you: hola\n" + "assistant: buenas\n",
-);
-});
+    expect(output).toBe(
+      "\x1Bc" + "conversation restored: 2 messages\n" + "you: hola\n" + "assistant: buenas\n",
+    );
+  });
 
-it("summarises the last exchange instead of dumping the transcript", () => {
-const output = printed(
-conversation([
-{ role: "user", content: "primera pregunta" },
-{ role: "assistant", content: "primera respuesta" },
-{ role: "user", content: "segunda pregunta" },
-{ role: "assistant", content: "segunda respuesta" },
-]),
-);
+  it("summarises the last exchange instead of dumping the transcript", () => {
+    const output = printed(
+      conversation([
+        { role: "user", content: "primera pregunta" },
+        { role: "assistant", content: "primera respuesta" },
+        { role: "user", content: "segunda pregunta" },
+        { role: "assistant", content: "segunda respuesta" },
+      ]),
+    );
 
-// The older turns are not repeated on the scrollback: the whole output is
-// exactly the reset plus the two newest messages.
-expect(output).toBe(
-"\x1Bc" +
-"conversation restored: 4 messages\n" +
-"you: segunda pregunta\n" +
-"assistant: segunda respuesta\n",
-);
-});
+    // The older turns are not repeated on the scrollback: the whole output is
+    // exactly the reset plus the two newest messages.
+    expect(output).toBe(
+      "\x1Bc" +
+        "conversation restored: 4 messages\n" +
+        "you: segunda pregunta\n" +
+        "assistant: segunda respuesta\n",
+    );
+  });
 
-it("cuts a long message down to a readable excerpt", () => {
-const long = "a".repeat(500);
-const output = printed(
-conversation([
-{ role: "user", content: long },
-{ role: "assistant", content: long },
-]),
-);
+  it("cuts a long message down to a readable excerpt", () => {
+    const long = "a".repeat(500);
+    const output = printed(
+      conversation([
+        { role: "user", content: long },
+        { role: "assistant", content: long },
+      ]),
+    );
 
-expect(output).toBe(
-"\x1Bc" +
-"conversation restored: 2 messages\n" +
-`you: ${"a".repeat(200)}…\n` +
-`assistant: ${"a".repeat(200)}…\n`,
-);
-});
+    expect(output).toBe(
+      "\x1Bc" +
+        "conversation restored: 2 messages\n" +
+        `you: ${"a".repeat(200)}…\n` +
+        `assistant: ${"a".repeat(200)}…\n`,
+    );
+  });
 
-it("prints only the message when the session has no answer yet", () => {
-const output = printed(conversation([{ role: "user", content: "hola" }]));
+  it("prints only the message when the session has no answer yet", () => {
+    const output = printed(conversation([{ role: "user", content: "hola" }]));
 
-expect(output).toBe("\x1Bc" + "conversation restored: 1 messages\n" + "you: hola\n");
-});
+    expect(output).toBe("\x1Bc" + "conversation restored: 1 messages\n" + "you: hola\n");
+  });
 
-it("leaves the screen alone when the session has nothing to show", () => {
-// A fresh session must not wipe the screen on boot.
-expect(printed(conversation([]))).toBe("");
-});
+  it("leaves the screen alone when the session has nothing to show", () => {
+    // A fresh session must not wipe the screen on boot.
+    expect(printed(conversation([]))).toBe("");
+  });
 });
 
 // The text and confirm questions used to be read by the flows themselves. They
 // go through the renderer now, so these cases pin what the line renderer asks
 // and what it hands back: a cancellation is `undefined`, never an empty answer.
 describe("the line renderer question", () => {
-afterEach(() => {
-vi.mocked(stdin.input).mockReset();
-vi.mocked(stdin.askHidden).mockReset();
-});
+  afterEach(() => {
+    vi.mocked(stdin.input).mockReset();
+    vi.mocked(stdin.askHidden).mockReset();
+  });
 
-it("reads a public answer as it was written", async () => {
-vi.mocked(stdin.input).mockResolvedValue("cheap");
+  it("reads a public answer as it was written", async () => {
+    vi.mocked(stdin.input).mockResolvedValue("cheap");
 
-expect(await new CliUiAdapter().promptText({ message: "Provider id:" })).toBe("cheap");
-// Spaces are the flow's business: the renderer only shows the question.
-expect(vi.mocked(stdin.input).mock.calls[0]?.[0]).toBe("Provider id:");
-expect(stdin.askHidden).not.toHaveBeenCalled();
-});
+    expect(await new CliUiAdapter().promptText({ message: "Provider id:" })).toBe("cheap");
+    // Spaces are the flow's business: the renderer only shows the question.
+    expect(vi.mocked(stdin.input).mock.calls[0]?.[0]).toBe("Provider id:");
+    expect(stdin.askHidden).not.toHaveBeenCalled();
+  });
 
-it("reads a secret through the hidden prompt", async () => {
-vi.mocked(stdin.askHidden).mockResolvedValue("sk-live");
+  it("reads a secret through the hidden prompt", async () => {
+    vi.mocked(stdin.askHidden).mockResolvedValue("sk-live");
 
-expect(await new CliUiAdapter().promptText({ message: "API key:", secret: true })).toBe("sk-live");
-expect(stdin.askHidden).toHaveBeenCalledWith("API key: ");
-expect(stdin.input).not.toHaveBeenCalled();
-});
+    expect(await new CliUiAdapter().promptText({ message: "API key:", secret: true })).toBe(
+      "sk-live",
+    );
+    expect(stdin.askHidden).toHaveBeenCalledWith("API key: ");
+    expect(stdin.input).not.toHaveBeenCalled();
+  });
 
-it("treats an empty answer as a cancellation", async () => {
-vi.mocked(stdin.input).mockResolvedValue("");
+  it("treats an empty answer as a cancellation", async () => {
+    vi.mocked(stdin.input).mockResolvedValue("");
 
-expect(await new CliUiAdapter().promptText({ message: "Provider id:" })).toBeUndefined();
-});
+    expect(await new CliUiAdapter().promptText({ message: "Provider id:" })).toBeUndefined();
+  });
 
-it("asks a yes/no with the key list of its default", async () => {
-const ui = new CliUiAdapter();
+  it("asks a yes/no with the key list of its default", async () => {
+    const ui = new CliUiAdapter();
 
-vi.mocked(stdin.input).mockResolvedValue("y");
-expect(await ui.confirm({ message: "Use as default?", defaultAnswer: true })).toBe(true);
-expect(vi.mocked(stdin.input).mock.calls[0]?.[0]).toBe("Use as default? [Y/n] ");
+    vi.mocked(stdin.input).mockResolvedValue("y");
+    expect(await ui.confirm({ message: "Use as default?", defaultAnswer: true })).toBe(true);
+    expect(vi.mocked(stdin.input).mock.calls[0]?.[0]).toBe("Use as default? [Y/n] ");
 
-vi.mocked(stdin.input).mockResolvedValue("n");
-expect(await ui.confirm({ message: "Remove?", defaultAnswer: false })).toBe(false);
-expect(vi.mocked(stdin.input).mock.calls[1]?.[0]).toBe("Remove? [y/N] ");
-});
+    vi.mocked(stdin.input).mockResolvedValue("n");
+    expect(await ui.confirm({ message: "Remove?", defaultAnswer: false })).toBe(false);
+    expect(vi.mocked(stdin.input).mock.calls[1]?.[0]).toBe("Remove? [y/N] ");
+  });
 
-it("takes the default on an empty answer", async () => {
-const ui = new CliUiAdapter();
-vi.mocked(stdin.input).mockResolvedValue(" ");
+  it("takes the default on an empty answer", async () => {
+    const ui = new CliUiAdapter();
+    vi.mocked(stdin.input).mockResolvedValue(" ");
 
-expect(await ui.confirm({ message: "Use as default?", defaultAnswer: true })).toBe(true);
-expect(await ui.confirm({ message: "Remove?" })).toBe(false);
-});
+    expect(await ui.confirm({ message: "Use as default?", defaultAnswer: true })).toBe(true);
+    expect(await ui.confirm({ message: "Remove?" })).toBe(false);
+  });
 
-it("cancels on an unreadable answer instead of guessing", async () => {
-const ui = new CliUiAdapter();
-vi.mocked(stdin.input).mockResolvedValue("maybe");
+  it("cancels on an unreadable answer instead of guessing", async () => {
+    const ui = new CliUiAdapter();
+    vi.mocked(stdin.input).mockResolvedValue("maybe");
 
-expect(await ui.confirm({ message: "Remove?", defaultAnswer: false })).toBeUndefined();
-});
+    expect(await ui.confirm({ message: "Remove?", defaultAnswer: false })).toBeUndefined();
+  });
 });

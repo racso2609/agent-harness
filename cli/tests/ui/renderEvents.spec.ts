@@ -64,26 +64,26 @@ describe("toStatusEvent", () => {
   });
 
   // Core reports token counts as `usage`, never as a flat `tokens`: the mapping
-// read the field core does not send, so the bar showed no count in production.
-it("renders the token count core actually sends", () => {
-const event = toStatusEvent({
-sessionId: "session-c2ba4fa1-d2fe-4a7b-9c3d-001122334455",
-provider: "openai",
-model: "gpt-test",
-agent: "default",
-usage: { inputTokens: 12_000, outputTokens: 3_900, totalTokens: 15_900 },
-costUsd: 0.5,
-contextTokens: 51_200,
-contextWindow: 128_000,
-contextUsage: 0.4,
-autoCompact: true,
-autoCompactThreshold: 60,
-});
+  // read the field core does not send, so the bar showed no count in production.
+  it("renders the token count core actually sends", () => {
+    const event = toStatusEvent({
+      sessionId: "session-c2ba4fa1-d2fe-4a7b-9c3d-001122334455",
+      provider: "openai",
+      model: "gpt-test",
+      agent: "default",
+      usage: { inputTokens: 12_000, outputTokens: 3_900, totalTokens: 15_900 },
+      costUsd: 0.5,
+      contextTokens: 51_200,
+      contextWindow: 128_000,
+      contextUsage: 0.4,
+      autoCompact: true,
+      autoCompactThreshold: 60,
+    });
 
-expect(formatStatusBar(event.status)).toContain("16k tok");
-});
+    expect(formatStatusBar(event.status)).toContain("16k tok");
+  });
 
-it("keeps missing fields undefined", () => {
+  it("keeps missing fields undefined", () => {
     const event = toStatusEvent({});
 
     expect(event.type).toBe("status");
@@ -93,41 +93,46 @@ it("keeps missing fields undefined", () => {
 });
 
 describe("statusFromSession", () => {
-// The single place that says which core field becomes which UI field, so a
-// renamed or absent source field fails here instead of silently leaving its
-// optional property undefined in the bar.
-it("maps a full core SessionStatus onto a UiStatus", () => {
-expect(
-statusFromSession({
-sessionId: "session-c2ba4fa1-d2fe-4a7b-9c3d-001122334455",
-agent: "default",
-provider: "openai",
-model: "gpt-5",
-usage: { inputTokens: 12_000, outputTokens: 3_900, totalTokens: 15_900 },
-costUsd: 0.5,
-contextTokens: 51_200,
-contextWindow: 128_000,
-contextUsage: 0.4,
-autoCompact: true,
-autoCompactThreshold: 60,
-}),
-).toEqual({
-sessionId: "session-c2ba4fa1-d2fe-4a7b-9c3d-001122334455",
-agent: "default",
-provider: "openai",
-model: "gpt-5",
-tokens: 15_900,
-costUsd: 0.5,
-contextTokens: 51_200,
-contextWindow: 128_000,
-contextUsage: 0.4,
-autoCompact: true,
-autoCompactThreshold: 60,
-});
-});
+  // The single place that says which core field becomes which UI field, so a
+  // renamed or absent source field fails here instead of silently leaving its
+  // optional property undefined in the bar.
+  it("maps a full core SessionStatus onto a UiStatus", () => {
+    expect(
+      statusFromSession({
+        sessionId: "session-c2ba4fa1-d2fe-4a7b-9c3d-001122334455",
+        agent: "default",
+        provider: "openai",
+        model: "gpt-5",
+        usage: { inputTokens: 12_000, outputTokens: 3_900, totalTokens: 15_900 },
+        costUsd: 0.5,
+        contextTokens: 51_200,
+        contextWindow: 128_000,
+        contextUsage: 0.4,
+        autoCompact: true,
+        autoCompactThreshold: 60,
+      }),
+    ).toEqual({
+      sessionId: "session-c2ba4fa1-d2fe-4a7b-9c3d-001122334455",
+      agent: "default",
+      provider: "openai",
+      model: "gpt-5",
+      tokens: 15_900,
+      costUsd: 0.5,
+      contextTokens: 51_200,
+      contextWindow: 128_000,
+      contextUsage: 0.4,
+      autoCompact: true,
+      autoCompactThreshold: 60,
+    });
+  });
 
-// The flat field is kept for compatibility; when present it wins.
-it("prefers a flat tokens field when one is passed", () => {
-expect(statusFromSession({ tokens: 42, usage: { inputTokens: 12_000, outputTokens: 3_900, totalTokens: 15_900 } }).tokens).toBe(42);
-});
+  // The flat field is kept for compatibility; when present it wins.
+  it("prefers a flat tokens field when one is passed", () => {
+    expect(
+      statusFromSession({
+        tokens: 42,
+        usage: { inputTokens: 12_000, outputTokens: 3_900, totalTokens: 15_900 },
+      }).tokens,
+    ).toBe(42);
+  });
 });

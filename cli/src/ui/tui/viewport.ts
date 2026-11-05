@@ -88,43 +88,37 @@ export const PROMPT_CHROME_Y = BORDER_ROWS + PANEL_PADDING_Y * 2 + 3;
 // Splits the terminal into the rows the transcript gets and the rows its
 // neighbours take, given what is on screen right now.
 export const chromeRows = ({
-stripRows,
-approval,
-menuRows = 0,
-selectionRows = 0,
-promptRows = 0,
+  stripRows,
+  approval,
+  menuRows = 0,
+  selectionRows = 0,
+  promptRows = 0,
 }: {
-// Rows of the spawn strip, the "older" counter included; 0 when hidden.
-stripRows: number;
-approval: boolean;
-// Rows the dropdown under the input box really paints. Only the menu needs
-// this: the other panels have a fixed height, while a list of four commands
-// must not charge the transcript for a fifth row it never draws.
-menuRows?: number;
-// Rows the picker panel really paints, borders included; 0 when it is shut.
-selectionRows?: number;
-// Rows the question panel really paints, borders included; 0 when there is
-// none.
-promptRows?: number;
+  // Rows of the spawn strip, the "older" counter included; 0 when hidden.
+  stripRows: number;
+  approval: boolean;
+  // Rows the dropdown under the input box really paints. Only the menu needs
+  // this: the other panels have a fixed height, while a list of four commands
+  // must not charge the transcript for a fifth row it never draws.
+  menuRows?: number;
+  // Rows the picker panel really paints, borders included; 0 when it is shut.
+  selectionRows?: number;
+  // Rows the question panel really paints, borders included; 0 when there is
+  // none.
+  promptRows?: number;
 }): ChromeRows => ({
-inner: TRANSCRIPT_CHROME_Y,
-middle:
-(stripRows > 0 ? stripRows + STRIP_BORDER_ROWS : 0) +
-// An approval, a picker and the input box are charged for what is painted:
-// the box only when nothing else can take typing, since the panels above it
-// replace it. An approval and a picker can both be up (the approval keeps
-// the keys), so they are summed instead of swapped. A question replaces the
-// box the same way a picker does.
-(approval ? APPROVAL_ROWS : 0) +
-(selectionRows > 0
-? selectionRows
-: promptRows > 0
-? promptRows
-: approval
-? 0
-: INPUT_ROWS) +
-menuRows,
-status: STATUS_ROWS,
+  inner: TRANSCRIPT_CHROME_Y,
+  middle:
+    (stripRows > 0 ? stripRows + STRIP_BORDER_ROWS : 0) +
+    // An approval, a picker and the input box are charged for what is painted:
+    // the box only when nothing else can take typing, since the panels above it
+    // replace it. An approval and a picker can both be up (the approval keeps
+    // the keys), so they are summed instead of swapped. A question replaces the
+    // box the same way a picker does.
+    (approval ? APPROVAL_ROWS : 0) +
+    (selectionRows > 0 ? selectionRows : promptRows > 0 ? promptRows : approval ? 0 : INPUT_ROWS) +
+    menuRows,
+  status: STATUS_ROWS,
 });
 
 // What a keystroke asks the transcript to do. `null` means "not a scroll key":

@@ -31,10 +31,10 @@ export interface SessionRecord {
   // Background children this session launched, in launch order. Restored as
   // read-only history: a resumed session cannot reattach to them.
   spawns?: SpawnHandle[];
-// Ids of the children above whose result already entered a parent turn.
-// A settled child missing from this list is still owed to the parent and
-// is queued again on resume; one listed here is never delivered twice.
-deliveredSpawns?: string[];
+  // Ids of the children above whose result already entered a parent turn.
+  // A settled child missing from this list is still owed to the parent and
+  // is queued again on resume; one listed here is never delivered twice.
+  deliveredSpawns?: string[];
 }
 
 const DEFAULT_SESSIONS_DIR = path.join(harnessHome(), "sessions");
@@ -75,12 +75,12 @@ class SessionStore {
       // The spawn summary and durationMs are optional additions over v4: a record
       // written before them simply lacks the keys, which is the same shape as a
       // child that has not settled, so no version bump or migration is needed.
-// deliveredSpawns is additive in the same way: an older record only
-// carries the child result inside history, so it reads as "nothing
-// delivered" and a settled child without a matching system message is
-// queued again.
+      // deliveredSpawns is additive in the same way: an older record only
+      // carries the child result inside history, so it reads as "nothing
+      // delivered" and a settled child without a matching system message is
+      // queued again.
       record.spawns ??= [];
-record.deliveredSpawns ??= [];
+      record.deliveredSpawns ??= [];
 
       return record;
     } catch {

@@ -7,17 +7,23 @@ import type {
 } from "@racso/core";
 import { createLogger } from "@racso/core";
 import {
-askHidden,
-clearPrompt,
-input,
-printImage,
-printLogo,
-restorePrompt,
-select,
+  askHidden,
+  clearPrompt,
+  input,
+  printImage,
+  printLogo,
+  restorePrompt,
+  select,
 } from "@/terminal/stdin";
 import { formatSpawnOutcome, formatTurnOutcome } from "./outcome";
 import { formatStatusBar } from "./statusBar";
-import type { ConfirmRequest, SelectionRequest, TextRequest, UiAdapter, UiEvent } from "./UiAdapter";
+import type {
+  ConfirmRequest,
+  SelectionRequest,
+  TextRequest,
+  UiAdapter,
+  UiEvent,
+} from "./UiAdapter";
 
 // Re-exported so the line renderer keeps its `formatStatusBar` import surface
 // while both renderers share the single formatter in statusBar.ts.
@@ -192,46 +198,48 @@ class CliUiAdapter implements UiAdapter {
   }
 
   // Shows the numeric list the CLI always had. The picker of stdin answers with
-// the label it printed, so the id is recovered by position: two options that
-// share a label are otherwise indistinguishable to the user too.
-async select(request: SelectionRequest): Promise<string | undefined> {
-if (!request.options.length) return undefined;
+  // the label it printed, so the id is recovered by position: two options that
+  // share a label are otherwise indistinguishable to the user too.
+  async select(request: SelectionRequest): Promise<string | undefined> {
+    if (!request.options.length) return undefined;
 
-const chosen = await select(
-request.message,
-request.options.map((option) => option.label),
-);
-const index = request.options.findIndex((option) => option.label === chosen);
+    const chosen = await select(
+      request.message,
+      request.options.map((option) => option.label),
+    );
+    const index = request.options.findIndex((option) => option.label === chosen);
 
-return index >= 0 ? request.options[index]!.id : undefined;
-}
+    return index >= 0 ? request.options[index]!.id : undefined;
+  }
 
-// Asks for one line in the scrollback. An empty answer is a cancellation and
-// not an empty value: no question here is meaningful when left blank. What to
-// do with surrounding spaces stays with the flow, which is the one that knows
-// whether they mean anything.
-async promptText(request: TextRequest): Promise<string | undefined> {
-const answer = request.secret ? await askHidden(`${request.message} `) : await input(request.message);
+  // Asks for one line in the scrollback. An empty answer is a cancellation and
+  // not an empty value: no question here is meaningful when left blank. What to
+  // do with surrounding spaces stays with the flow, which is the one that knows
+  // whether they mean anything.
+  async promptText(request: TextRequest): Promise<string | undefined> {
+    const answer = request.secret
+      ? await askHidden(`${request.message} `)
+      : await input(request.message);
 
-return answer.length ? answer : undefined;
-}
+    return answer.length ? answer : undefined;
+  }
 
-// Reads a yes/no in the scrollback, with the same shape promptApproval uses:
-// a bracketed key list, Enter taking the default, anything unrecognised
-// cancelling instead of guessing.
-async confirm(request: ConfirmRequest): Promise<boolean | undefined> {
-const fallback = request.defaultAnswer ?? false;
-const keys = fallback ? "[Y/n]" : "[y/N]";
-const answer = (await input(`${request.message} ${keys} `)).trim().toLowerCase();
+  // Reads a yes/no in the scrollback, with the same shape promptApproval uses:
+  // a bracketed key list, Enter taking the default, anything unrecognised
+  // cancelling instead of guessing.
+  async confirm(request: ConfirmRequest): Promise<boolean | undefined> {
+    const fallback = request.defaultAnswer ?? false;
+    const keys = fallback ? "[Y/n]" : "[y/N]";
+    const answer = (await input(`${request.message} ${keys} `)).trim().toLowerCase();
 
-if (!answer) return fallback;
-if (/^y(es)?$/.test(answer)) return true;
-if (/^n(o)?$/.test(answer)) return false;
+    if (!answer) return fallback;
+    if (/^y(es)?$/.test(answer)) return true;
+    if (/^n(o)?$/.test(answer)) return false;
 
-return undefined;
-}
+    return undefined;
+  }
 
-// The line renderer leaves the terminal as the prompt owns it.
+  // The line renderer leaves the terminal as the prompt owns it.
   close() {
     if (process.stdin.isTTY) process.stdin.setRawMode(false);
   }

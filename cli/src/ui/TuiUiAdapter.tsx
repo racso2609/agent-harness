@@ -8,7 +8,13 @@ import { noAnchors, trimAnchored, writeAnchored, type RoleAnchors } from "./tui/
 import { MarkdownStream } from "./tui/markdown";
 import { toSpawnEntry } from "./tui/progress";
 import { resolveTheme, type Theme } from "./tui/theme";
-import type { ConfirmRequest, SelectionRequest, TextRequest, UiAdapter, UiEvent } from "./UiAdapter";
+import type {
+  ConfirmRequest,
+  SelectionRequest,
+  TextRequest,
+  UiAdapter,
+  UiEvent,
+} from "./UiAdapter";
 
 // Parses a restored message into a finished document, the same way
 // replaceStreamWith closes a streamed answer.
@@ -37,21 +43,22 @@ class TuiUiAdapter implements UiAdapter {
   protected draft = "";
   // Receives that text, when the owner asked to be told about it.
   protected onDraftChange: ((draft: string) => void) | null = null;
-// Slash commands the dropdown offers. The app filters them on every
-// keystroke, so the adapter only carries the catalog.
-protected commands: CommandOption[] = [];
+  // Slash commands the dropdown offers. The app filters them on every
+  // keystroke, so the adapter only carries the catalog.
+  protected commands: CommandOption[] = [];
   // Resolver for the approval currently on screen, if any.
   protected pendingApproval: ((decision: ApprovalDecision) => void) | null = null;
-// Resolver for the picker currently on screen, if any. It is a separate modal
-// slot and not a queue: two flows never ask at once, and a stale answer would
-// resolve the wrong flow.
-protected pendingSelection: ((id: string | undefined) => void) | null = null;
-// Resolver for the question currently on screen, if any. Text and confirm
-// share the slot because they are never up at once, and a queue would hand a
-// flow the question of another.
-protected pendingPrompt:
-| { kind: "text" | "confirm"; resolve: (answer: string | boolean | undefined) => void }
-| null = null;
+  // Resolver for the picker currently on screen, if any. It is a separate modal
+  // slot and not a queue: two flows never ask at once, and a stale answer would
+  // resolve the wrong flow.
+  protected pendingSelection: ((id: string | undefined) => void) | null = null;
+  // Resolver for the question currently on screen, if any. Text and confirm
+  // share the slot because they are never up at once, and a queue would hand a
+  // flow the question of another.
+  protected pendingPrompt: {
+    kind: "text" | "confirm";
+    resolve: (answer: string | boolean | undefined) => void;
+  } | null = null;
   // Markdown accumulators for the two streamed roles. Kept out of the state so
   // keystrokes never re-parse what already arrived.
   protected streams: Partial<Record<"answer" | "reasoning", MarkdownStream>> = {};
@@ -73,19 +80,19 @@ protected pendingPrompt:
 
   // Registers the callbacks the app needs and mounts Ink. onDraftChange is
   // optional: without it the adapter simply reports an empty draft.
-start(options: {
-onSubmit: (prompt: string) => void;
-onExit: () => void;
-onDraftChange?: (draft: string) => void;
-// Slash commands the input box offers in its dropdown. Ink owns stdin, so
-// the catalog has to travel through the adapter: the app cannot ask stdin
-// for the inline menu the line renderer uses.
-commands?: CommandOption[];
-}) {
+  start(options: {
+    onSubmit: (prompt: string) => void;
+    onExit: () => void;
+    onDraftChange?: (draft: string) => void;
+    // Slash commands the input box offers in its dropdown. Ink owns stdin, so
+    // the catalog has to travel through the adapter: the app cannot ask stdin
+    // for the inline menu the line renderer uses.
+    commands?: CommandOption[];
+  }) {
     this.onSubmit = options.onSubmit;
     this.onExit = options.onExit;
     this.onDraftChange = options.onDraftChange ?? null;
-this.commands = options.commands ?? [];
+    this.commands = options.commands ?? [];
     this.mount();
   }
 
@@ -103,13 +110,13 @@ this.commands = options.commands ?? [];
   protected element() {
     return (
       <App
-commands={this.commands}
+        commands={this.commands}
         state={this.state}
         onSubmit={(prompt) => this.onSubmit(prompt)}
         onExit={() => this.onExit()}
         onDecision={(decision) => this.resolveApproval(decision)}
-onSelect={(id) => this.resolveSelection(id)}
-onPrompt={(answer) => this.resolvePrompt(answer)}
+        onSelect={(id) => this.resolveSelection(id)}
+        onPrompt={(answer) => this.resolvePrompt(answer)}
         onToggle={(kind, index) => this.toggleEntry(kind, index)}
         onToggleAll={(kind) => this.toggleAll(kind)}
         onDraftChange={(draft) => this.reportDraft(draft)}
@@ -146,24 +153,24 @@ onPrompt={(answer) => this.resolvePrompt(answer)}
   }
 
   // Resolves the picker shown in the app and returns to the input box.
-protected resolveSelection(id: string | undefined) {
-const resolve = this.pendingSelection;
-this.pendingSelection = null;
-this.state = { ...this.state, selection: undefined };
-this.mount();
-resolve?.(id);
-}
+  protected resolveSelection(id: string | undefined) {
+    const resolve = this.pendingSelection;
+    this.pendingSelection = null;
+    this.state = { ...this.state, selection: undefined };
+    this.mount();
+    resolve?.(id);
+  }
 
-// Resolves the question shown in the app and returns to the input box.
-protected resolvePrompt(answer: string | boolean | undefined) {
-const pending = this.pendingPrompt;
-this.pendingPrompt = null;
-this.state = { ...this.state, prompt: undefined };
-this.mount();
-pending?.resolve(answer);
-}
+  // Resolves the question shown in the app and returns to the input box.
+  protected resolvePrompt(answer: string | boolean | undefined) {
+    const pending = this.pendingPrompt;
+    this.pendingPrompt = null;
+    this.state = { ...this.state, prompt: undefined };
+    this.mount();
+    pending?.resolve(answer);
+  }
 
-// Expands or collapses one entry by index (its position in the transcript).
+  // Expands or collapses one entry by index (its position in the transcript).
   protected toggleEntry(kind: "reasoning" | "tool", index: number) {
     const expanded = new Set(this.state.expanded);
 
@@ -384,19 +391,19 @@ pending?.resolve(answer);
         // `history` stays: the children of the session are the next event
         // (spawnHistory). The live strip belongs to the previous session, and
         // every entry of the old transcript was collapsed or expanded for it.
-//
-// The renderer is left at rest: the turn that was running belonged to the
-// session we just left and nothing is in flight here, so `running` and
-// `activity` would keep the clock ticking and every tool/reasoning entry
-// previewing a tail for a turn that will never end.
-this.state = {
-...this.state,
-lines,
-spawns: [],
-expanded: new Set<number>(),
-running: false,
-activity: undefined,
-};
+        //
+        // The renderer is left at rest: the turn that was running belonged to the
+        // session we just left and nothing is in flight here, so `running` and
+        // `activity` would keep the clock ticking and every tool/reasoning entry
+        // previewing a tail for a turn that will never end.
+        this.state = {
+          ...this.state,
+          lines,
+          spawns: [],
+          expanded: new Set<number>(),
+          running: false,
+          activity: undefined,
+        };
         break;
       }
       case "spawnSettled":
@@ -418,13 +425,13 @@ activity: undefined,
         };
         break;
       case "reset":
-this.streams = {};
-this.anchors = noAnchors();
-this.state = { ...this.state, lines: [] };
-// The screen is wiped, so a question or a picker painted on it is gone too:
-// leaving them pending would keep a flow blocked on something invisible.
-if (this.pendingSelection) this.resolveSelection(undefined);
-if (this.pendingPrompt) this.resolvePrompt(undefined);
+        this.streams = {};
+        this.anchors = noAnchors();
+        this.state = { ...this.state, lines: [] };
+        // The screen is wiped, so a question or a picker painted on it is gone too:
+        // leaving them pending would keep a flow blocked on something invisible.
+        if (this.pendingSelection) this.resolveSelection(undefined);
+        if (this.pendingPrompt) this.resolvePrompt(undefined);
         break;
     }
 
@@ -481,79 +488,79 @@ if (this.pendingPrompt) this.resolvePrompt(undefined);
   }
 
   // Shows the options as a list the arrows walk through. Ink owns stdin, so the
-// flow cannot read the answer itself; cancelling resolves `undefined`, which
-// every caller treats as "nothing chosen".
-select(request: SelectionRequest): Promise<string | undefined> {
-if (this.pendingSelection) return Promise.resolve(undefined);
+  // flow cannot read the answer itself; cancelling resolves `undefined`, which
+  // every caller treats as "nothing chosen".
+  select(request: SelectionRequest): Promise<string | undefined> {
+    if (this.pendingSelection) return Promise.resolve(undefined);
 
-this.state = { ...this.state, selection: request };
-this.mount();
+    this.state = { ...this.state, selection: request };
+    this.mount();
 
-return new Promise<string | undefined>((resolve) => {
-this.pendingSelection = resolve;
-});
-}
+    return new Promise<string | undefined>((resolve) => {
+      this.pendingSelection = resolve;
+    });
+  }
 
-// Shows a panel that takes typed text. Ink owns stdin, so the flow cannot read
-// the line itself; cancelling resolves `undefined`, which every caller reads as
-// "nothing answered" and aborts on.
-promptText(request: TextRequest): Promise<string | undefined> {
-if (this.pendingPrompt) return Promise.resolve(undefined);
+  // Shows a panel that takes typed text. Ink owns stdin, so the flow cannot read
+  // the line itself; cancelling resolves `undefined`, which every caller reads as
+  // "nothing answered" and aborts on.
+  promptText(request: TextRequest): Promise<string | undefined> {
+    if (this.pendingPrompt) return Promise.resolve(undefined);
 
-const prompt: TuiPrompt = {
-kind: "text",
-message: request.message,
-...(request.hint ? { hint: request.hint } : {}),
-...(request.secret ? { secret: true } : {}),
-};
+    const prompt: TuiPrompt = {
+      kind: "text",
+      message: request.message,
+      ...(request.hint ? { hint: request.hint } : {}),
+      ...(request.secret ? { secret: true } : {}),
+    };
 
-this.state = { ...this.state, prompt };
-this.mount();
+    this.state = { ...this.state, prompt };
+    this.mount();
 
-return new Promise<string | undefined>((resolve) => {
-this.pendingPrompt = {
-kind: "text",
-resolve: (answer) => resolve(typeof answer === "string" ? answer : undefined),
-};
-});
-}
+    return new Promise<string | undefined>((resolve) => {
+      this.pendingPrompt = {
+        kind: "text",
+        resolve: (answer) => resolve(typeof answer === "string" ? answer : undefined),
+      };
+    });
+  }
 
-// Shows a panel that answers on a single key. It is not a two-option picker:
-// Enter has to take a default, and a picker has no key that means "the one you
-// would have pressed".
-confirm(request: ConfirmRequest): Promise<boolean | undefined> {
-if (this.pendingPrompt) return Promise.resolve(undefined);
+  // Shows a panel that answers on a single key. It is not a two-option picker:
+  // Enter has to take a default, and a picker has no key that means "the one you
+  // would have pressed".
+  confirm(request: ConfirmRequest): Promise<boolean | undefined> {
+    if (this.pendingPrompt) return Promise.resolve(undefined);
 
-const prompt: TuiPrompt = {
-kind: "confirm",
-message: request.message,
-...(request.hint ? { hint: request.hint } : {}),
-...(request.defaultAnswer !== undefined ? { defaultAnswer: request.defaultAnswer } : {}),
-};
+    const prompt: TuiPrompt = {
+      kind: "confirm",
+      message: request.message,
+      ...(request.hint ? { hint: request.hint } : {}),
+      ...(request.defaultAnswer !== undefined ? { defaultAnswer: request.defaultAnswer } : {}),
+    };
 
-this.state = { ...this.state, prompt };
-this.mount();
+    this.state = { ...this.state, prompt };
+    this.mount();
 
-return new Promise<boolean | undefined>((resolve) => {
-this.pendingPrompt = {
-kind: "confirm",
-resolve: (answer) => resolve(typeof answer === "boolean" ? answer : undefined),
-};
-});
-}
+    return new Promise<boolean | undefined>((resolve) => {
+      this.pendingPrompt = {
+        kind: "confirm",
+        resolve: (answer) => resolve(typeof answer === "boolean" ? answer : undefined),
+      };
+    });
+  }
 
-async renderImage(url: string) {
+  async renderImage(url: string) {
     this.pushLine({ role: "notice", text: `[image] ${url.slice(0, 32)}…` });
   }
 
   close() {
-// Every promise still waiting on the screen has to settle before the app goes
-// away: the flow that asked it would otherwise stay parked on a question
-// nobody can answer anymore, and its caller would never return.
-this.resolveApproval("deny");
-this.resolveSelection(undefined);
-this.resolvePrompt(undefined);
-this.instance?.unmount();
+    // Every promise still waiting on the screen has to settle before the app goes
+    // away: the flow that asked it would otherwise stay parked on a question
+    // nobody can answer anymore, and its caller would never return.
+    this.resolveApproval("deny");
+    this.resolveSelection(undefined);
+    this.resolvePrompt(undefined);
+    this.instance?.unmount();
   }
 }
 

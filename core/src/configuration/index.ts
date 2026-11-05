@@ -69,9 +69,9 @@ interface SessionsConfig {
   childTimeoutMs?: number;
   // Cap on the child result injected back into the parent history.
   childResultMaxChars?: number;
-	// Turns a parent may start on its own after a child leaves work behind.
-	// `0` and `false` mean disabled: no automatic continuation ever starts.
-	maxAutoContinuations?: number | false;
+  // Turns a parent may start on its own after a child leaves work behind.
+  // `0` and `false` mean disabled: no automatic continuation ever starts.
+  maxAutoContinuations?: number | false;
 }
 
 // One visual role. `color` is a colour name understood by the CLI; `dim`
@@ -142,7 +142,7 @@ const applyDefaults = (config: HarnessConfig): HarnessConfig => {
   config.sessions.maxChildren ??= 4;
   config.sessions.childTimeoutMs ??= 300_000;
   config.sessions.childResultMaxChars ??= 2000;
-	config.sessions.maxAutoContinuations ??= 5;
+  config.sessions.maxAutoContinuations ??= 5;
   config.skills ??= {};
   config.skills.enabled ??= true;
   config.skills.dirs ??= [skillsHome()];

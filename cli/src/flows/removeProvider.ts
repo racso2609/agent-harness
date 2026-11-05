@@ -6,7 +6,7 @@ import type { UiAdapter } from "@/ui/UiAdapter";
 // Interactive flow to drop a provider instance. Refuses to remove the last
 // remaining one so the harness always has something to boot from.
 export const removeProvider = async (
- ui: UiAdapter,
+  ui: UiAdapter,
   harness: IHarness,
   id?: string,
 ): Promise<string | undefined> => {
@@ -17,15 +17,15 @@ export const removeProvider = async (
     `${provider.id} (${provider.type})${provider.isDefault ? " *default" : ""}`;
 
   const labels = details.map(label);
-// The option id is the provider id, so the label is only what the user reads
-// and an id typed on the command line is accepted as is.
-const target =
-id?.trim() ||
-(await ui.select({
-message: "Select the provider to remove:",
-options: details.map((provider) => ({ id: provider.id, label: label(provider) })),
-}));
-if (!target) return undefined;
+  // The option id is the provider id, so the label is only what the user reads
+  // and an id typed on the command line is accepted as is.
+  const target =
+    id?.trim() ||
+    (await ui.select({
+      message: "Select the provider to remove:",
+      options: details.map((provider) => ({ id: provider.id, label: label(provider) })),
+    }));
+  if (!target) return undefined;
 
   // Accept either the raw id or the labelled menu entry.
   const selected =
@@ -37,12 +37,12 @@ if (!target) return undefined;
   }
 
   // Deleting cannot be undone, so the default is "no": a stray Enter must not
-// choose it.
-const answer = await ui.confirm({
-message: `Remove provider "${selected.id}"? This cannot be undone.`,
-defaultAnswer: false,
-});
-if (answer !== true) return undefined;
+  // choose it.
+  const answer = await ui.confirm({
+    message: `Remove provider "${selected.id}"? This cannot be undone.`,
+    defaultAnswer: false,
+  });
+  if (answer !== true) return undefined;
 
-return harness.removeProvider(selected.id) ? selected.id : undefined;
+  return harness.removeProvider(selected.id) ? selected.id : undefined;
 };

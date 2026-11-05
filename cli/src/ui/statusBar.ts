@@ -17,30 +17,30 @@ const SHORT_ID = 8;
 const SESSION_PREFIX = "session-";
 
 const abbreviateSession = (sessionId: string): string => {
-const bare = sessionId.startsWith(SESSION_PREFIX)
-? sessionId.slice(SESSION_PREFIX.length)
-: sessionId;
+  const bare = sessionId.startsWith(SESSION_PREFIX)
+    ? sessionId.slice(SESSION_PREFIX.length)
+    : sessionId;
 
-return bare.slice(0, SHORT_ID);
+  return bare.slice(0, SHORT_ID);
 };
 
 // Compact token counts: the bar has one row, so "12345" is noise and "12.3k" is
 // the same information. A tenth is only kept when it is not a zero one, so
 // whole thousands stay "12k" instead of "12.0k".
 const formatCompactTokens = (value: number): string => {
-const tokens = Math.max(0, Math.round(value));
+  const tokens = Math.max(0, Math.round(value));
 
-if (tokens < 1_000) return String(tokens);
+  if (tokens < 1_000) return String(tokens);
 
-const scaled = tokens / 1_000;
-if (scaled < 10) return `${trimZero(scaled)}k`;
-if (scaled < 1_000) return `${Math.round(scaled)}k`;
+  const scaled = tokens / 1_000;
+  if (scaled < 10) return `${trimZero(scaled)}k`;
+  if (scaled < 1_000) return `${Math.round(scaled)}k`;
 
-return `${trimZero(scaled / 1_000)}M`;
+  return `${trimZero(scaled / 1_000)}M`;
 };
 
 const trimZero = (value: number): string =>
-(value >= 10 ? String(Math.round(value)) : value.toFixed(1)).replace(/\.0$/, "");
+  (value >= 10 ? String(Math.round(value)) : value.toFixed(1)).replace(/\.0$/, "");
 
 // The context part is the reason this module exists: the percentage is only
 // meaningful against a known window, so without one the whole part is dropped
@@ -48,16 +48,16 @@ const trimZero = (value: number): string =>
 // when the provider publishes no window, so the guard has to be the window:
 // checking only `contextUsage` still painted `ctx 0%` for every such session.
 const contextPart = (status: UiStatus): string | null => {
-if (status.contextWindow == null || status.contextUsage == null) return null;
+  if (status.contextWindow == null || status.contextUsage == null) return null;
 
-const percent = Math.round(Math.max(0, Math.min(1, status.contextUsage)) * 100);
-const occupancy =
-status.contextTokens != null
-? ` ${formatCompactTokens(status.contextTokens)}/${formatCompactTokens(status.contextWindow)}`
-: "";
-const autoCompact = autoCompactMark(status);
+  const percent = Math.round(Math.max(0, Math.min(1, status.contextUsage)) * 100);
+  const occupancy =
+    status.contextTokens != null
+      ? ` ${formatCompactTokens(status.contextTokens)}/${formatCompactTokens(status.contextWindow)}`
+      : "";
+  const autoCompact = autoCompactMark(status);
 
-return `ctx ${percent}%${occupancy}${autoCompact}`;
+  return `ctx ${percent}%${occupancy}${autoCompact}`;
 };
 
 // Auto-compact is already automatic, so the bar only warns once the threshold
@@ -66,13 +66,13 @@ return `ctx ${percent}%${occupancy}${autoCompact}`;
 // so it only applies when that part is shown at all, i.e. with a known window;
 // `contextUsage` still has to be checked for the percent it reads.
 const autoCompactMark = (status: UiStatus): string => {
-if (!status.autoCompact || status.autoCompactThreshold == null) return "";
-if (status.contextWindow == null || status.contextUsage == null) return "";
+  if (!status.autoCompact || status.autoCompactThreshold == null) return "";
+  if (status.contextWindow == null || status.contextUsage == null) return "";
 
-const percent = status.contextUsage * 100;
-if (percent < status.autoCompactThreshold) return "";
+  const percent = status.contextUsage * 100;
+  if (percent < status.autoCompactThreshold) return "";
 
-return ` auto-compact @${status.autoCompactThreshold}%`;
+  return ` auto-compact @${status.autoCompactThreshold}%`;
 };
 
 // Builds the single line. Every part is optional and skipped when absent, so a
@@ -80,21 +80,21 @@ return ` auto-compact @${status.autoCompactThreshold}%`;
 // Empty means "nothing to say": the TUI falls back to "ready" and the line
 // renderer stays silent instead of printing a decorative blank line.
 const formatStatusBar = (status: UiStatus): string => {
-const parts: string[] = [];
+  const parts: string[] = [];
 
-if (status.sessionId) parts.push(`ses ${abbreviateSession(status.sessionId)}`);
+  if (status.sessionId) parts.push(`ses ${abbreviateSession(status.sessionId)}`);
 
-const model = [status.provider, status.model].filter(Boolean).join("/");
-if (model) parts.push(model);
+  const model = [status.provider, status.model].filter(Boolean).join("/");
+  if (model) parts.push(model);
 
-if (status.agent) parts.push(status.agent);
-if (status.tokens != null) parts.push(`${formatCompactTokens(status.tokens)} tok`);
-if (status.costUsd != null) parts.push(`$${status.costUsd.toFixed(4)}`);
+  if (status.agent) parts.push(status.agent);
+  if (status.tokens != null) parts.push(`${formatCompactTokens(status.tokens)} tok`);
+  if (status.costUsd != null) parts.push(`$${status.costUsd.toFixed(4)}`);
 
-const context = contextPart(status);
-if (context) parts.push(context);
+  const context = contextPart(status);
+  if (context) parts.push(context);
 
-return parts.join(" · ");
+  return parts.join(" · ");
 };
 
 export { abbreviateSession, formatCompactTokens, formatStatusBar };
