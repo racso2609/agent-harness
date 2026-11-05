@@ -54,6 +54,11 @@ Los `.tgz` también se pueden descargar a mano desde la página de Releases (o c
 
 ### Canal GitHub Packages (requiere token)
 
+Instalar por este canal exige **dos ajustes** en el `~/.npmrc` de tu máquina, y **los dos** son
+necesarios: el **mapeo de scope** (le dice a pnpm que `@racso2609` vive en GitHub Packages y no en
+npmjs) y el **token** (GitHub Packages exige autenticación incluso para un repo público). El primero
+no es sólo para publicar: sin él, instalar también falla.
+
 En tu `~/.npmrc` (es el sitio correcto: pnpm y npm lo leen de tu máquina y **sí** expanden
 `${GITHUB_TOKEN}` ahí; en un `.npmrc` versionado dentro de un repo pnpm ignora la credencial y el
 `npm i` acaba en `401`):
@@ -64,16 +69,49 @@ En tu `~/.npmrc` (es el sitio correcto: pnpm y npm lo leen de tu máquina y **s�
 ```
 
 `GITHUB_TOKEN` tiene que ser un PAT de GitHub con el scope **`read:packages`** (`gh auth
-token` sirve el del `gh` ya logueado). Si prefieres no mantener la variable de entorno, el
-equivalente en una línea, también en tu `~/.npmrc`:
-`pnpm config set "//npm.pkg.github.com/:_authToken" "$(gh auth token)"`. Después:
+token` sirve el del `gh` ya logueado). Los equivalentes en una línea, también en tu `~/.npmrc`, uno
+por ajuste:
+
+```sh
+pnpm config set @racso2609:registry https://npm.pkg.github.com
+pnpm config set "//npm.pkg.github.com/:_authToken" "$(gh auth token)"
+```
+
+Y después:
 
 ```sh
 npm i -g @racso2609/cli
 ```
 
-GitHub Packages **exige token incluso cuando el repo es público**: sin ese `.npmrc` el
-`npm i` termina en `404 Not Found - GET https://npm.pkg.github.com/@racso2609%2fcli`.
+GitHub Packages **exige token incluso cuando el repo es público**: con el mapeo puesto pero sin
+token, el `add` termina en `401 Unauthorized - GET https://npm.pkg.github.com/@racso2609%2fcli`
+(`authentication token not provided`).
+
+#### Si falla: los dos `404` no son el mismo `404`
+
+El síntoma se parece (un `404`) pero la causa y el arreglo son distintos. Lo que hay que mirar es
+**contra qué host** fue la petición, en el mensaje de error:
+
+| mensaje                                                                                                                                                           | causa                                                                                        | arreglo                                                                                                            |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `404 ... GET https://registry.npmjs.org/@racso2609%2fcli` (`ERR_PNPM_FETCH_404`, `is not in the npm registry`)                                                    | **falta el mapeo de scope**: pnpm está buscando el paquete en npmjs público, donde no existe | `pnpm config set @racso2609:registry https://npm.pkg.github.com`                                                   |
+| `404 ... GET https://npm.pkg.github.com/@racso2609%2fcli` (`npm package "cli" does not exist under owner "racso2609"`)                                            | el paquete no está publicado con ese nombre: falta el publish o el scope es otro             | revisar que `cli/package.json` diga `@racso2609/cli` y que `pnpm publish` haya ido a GitHub Packages               |
+| `401 ... GET https://npm.pkg.github.com/@racso2609%2fcli` (`authentication token not provided`, o `pnpm` avisa `No authorization header was set for the request`) | **falta el token** en el `~/.npmrc`                                                          | `pnpm config set "//npm.pkg.github.com/:_authToken" "$(gh auth token)"`                                            |
+| `401 ... cannot be authenticated with the token provided`                                                                                                         | el token está, pero es inválido o **no tiene `read:packages`**                               | genera un PAT con `read:packages` (`gh auth refresh -s read:packages`) y vuelve a ponerlo con el comando de arriba |
+
+Comprobación rápida de cuál de los dos ajustes falta, **desde fuera del repo**:
+
+```sh
+pnpm config get @racso2609:registry    # undefined ⇒ falta el mapeo
+pnpm config get "//npm.pkg.github.com/:_authToken"   # undefined ⇒ falta el token
+```
+
+> **El `.npmrc` del repo no sirve para instalar globalmente.** Sólo aplica cuando ejecutas dentro del
+> repo: `pnpm` lee el `.npmrc` del proyecto en el que estás, no el de un repo que tengas en otra
+> carpeta. Por eso `pnpm i -g @racso2609/cli` desde `~` o `/tmp` puede dar el `404` de npmjs aunque
+> dentro del repo `pnpm config get @racso2609:registry` devuelva GitHub Packages: fuera del repo ese
+> valor no lo aporta el proyecto y sale `undefined` (salvo que ya lo tengas en tu config de
+> usuario). Lo que arregla la instalación global es tener los dos ajustes en **tu** `~/.npmrc`.
 
 Nota para **publicar** desde el repo (no para instalar): el `.npmrc` versionado del repo lleva
 **sólo** `@racso2609:registry=https://npm.pkg.github.com`; el token no va ahí. pnpm 11 ignora las
