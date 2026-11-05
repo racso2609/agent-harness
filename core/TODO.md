@@ -208,6 +208,13 @@
       Consumidor: `cli/TODO.md` §P6, tarea «Arrancar un turno sin prompt cuando un hijo deja trabajo».
       Depends on: nada.
 
+- [ ] **Devolver los informes largos de un hijo como artefacto, no como mensaje**
+`formatSpawnResult` (`SessionManager.ts:690`) trunca el resultado del hijo antes de inyectarlo en el history del padre con `truncateText` (`SessionManager.ts:75`), que corta a `sessions.childResultMaxChars` (default 2000) y añade `…`; medido en una sesión real, un hijo devolvió **4360 caracteres** y el padre recibió **2000**, así que los informes de agentes revisores (hallazgos con severidad y `fichero:línea`) no caben y el padre decide sobre un texto cortado a mitad de frase.
+El texto íntegro **no se pierde**: se persiste en `~/.racso-harness/sessions/<id>.json` → `spawns[].result`, pero el padre no lo ve.
+Done when: un hijo cuyo resultado supere `childResultMaxChars` deja el texto íntegro en un fichero (bajo el directorio de la sesión o en la ruta que el propio hijo declare; el padre la conoce), el mensaje `system` inyectado en el padre contiene esa ruta más un resumen de como máximo N caracteres, y un test en `core/tests/session/SessionManager.spec.ts` fija ambos hechos (texto completo recuperable desde la ruta + mensaje del padre acotado a N).
+Alternativa descartada: subir `childResultMaxChars` sólo mueve el problema (más contexto consumido por cada hijo, y con `maxChildren: 4` el coste se multiplica), no lo resuelve.
+Depends on: nada.
+
 ### 9.1 orden sugerido
 
 1. [x] Contrato: `SpawnEvent`/`SpawnStatus` reexportados + `listSpawns()` ya expuesto en `IHarness`.
