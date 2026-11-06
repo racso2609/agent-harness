@@ -31,14 +31,37 @@ export const summarizeHistory = (messages: History[], contextWindow?: number) =>
   return parts.join(" | ");
 };
 
+export interface CompactedHistory {
+  history: History[];
+  // The folded text of the older turns, or "" when nothing was compacted.
+  summary: string;
+  // First user message of the folded window, trimmed, or "" when none.
+  title: string;
+}
+
+// Longest title handed to a memory backend: a compaction title is a label, not
+// the whole turn.
+export const MAX_TITLE_CHARS = 100;
+
+// First user turn of the folded window is the session's opening request, so it
+// is the best one-line label for what got compacted. It must come from
+// olderMessages: the compacted history starts with the recent window, whose
+// first user is a later turn.
+const compactionTitle = (messages: History[]) => {
+  const first = messages.find((message) => message.role === "user");
+  const text = first?.content.trim() ?? "";
+
+  return text.length > MAX_TITLE_CHARS ? `${text.slice(0, MAX_TITLE_CHARS)}…` : text;
+};
+
 // Compacts the conversation: keeps system messages, folds older turns into a
 // memory block and preserves the most recent window. Returns the same array
 // reference when no compaction is needed.
-export const compactHistory = (
+export const compactHistoryWithSummary = (
   history: History[],
   compactThreshold = DEFAULT_COMPACT_THRESHOLD,
   contextWindow?: number,
-): History[] => {
+): CompactedHistory => {
   const systemMessages: History[] = [];
   const conversation: History[] = [];
 
@@ -47,7 +70,7 @@ export const compactHistory = (
     else conversation.push(message);
   }
 
-  if (conversation.length <= compactThreshold) return history;
+  if (conversation.length <= compactThreshold) return { history, summary: "", title: "" };
 
   // Never start the recent window with a tool result: it must stay paired
   // with the assistant message that requested it.
@@ -63,5 +86,15 @@ export const compactHistory = (
     content: `[Memoria previa compactada]: ${summaryText}`,
   };
 
-  return [...systemMessages, memoryBlock, ...recentMessages];
+  return {
+    history: [...systemMessages, memoryBlock, ...recentMessages],
+    summary: summaryText,
+    title: compactionTitle(olderMessages),
+  };
 };
+
+export const compactHistory = (
+  history: History[],
+  compactThreshold = DEFAULT_COMPACT_THRESHOLD,
+  contextWindow?: number,
+): History[] => compactHistoryWithSummary(history, compactThreshold, contextWindow).history;

@@ -9,6 +9,7 @@ export { LocalMemoryProvider, DEFAULT_MAX_HIT_CHARS } from "./LocalMemoryProvide
 export type { LocalMemoryProviderOptions } from "./LocalMemoryProvider";
 export { NoopMemoryProvider } from "./NoopMemoryProvider";
 export { normalizeGitRemote, readGitRemote, resolveProjectIdentity } from "./project";
+export { redact } from "./redact";
 export type {
   ProjectIdentity,
   ProjectIdentitySource,

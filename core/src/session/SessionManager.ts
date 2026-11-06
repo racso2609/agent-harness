@@ -12,6 +12,7 @@ import { Config, DEFAULT_PROVIDER_TYPE, ProviderDetail } from "@/configuration";
 import {
   composeMemoryBlock,
   createMemoryProvider,
+  redact,
   resolveProjectIdentity,
   stripMemoryBlocks,
 } from "@/memory";
@@ -37,7 +38,11 @@ import { generateSessionId } from "@/utils/session";
 import { logger } from "@/utils/logger";
 import type { ApprovalHandler } from "@/contract";
 import { ClassifiedAction, classifyAction } from "./classifyAction";
-import { compactHistory, DEFAULT_COMPACT_THRESHOLD, estimateHistoryTokens } from "./history";
+import {
+  compactHistoryWithSummary,
+  DEFAULT_COMPACT_THRESHOLD,
+  estimateHistoryTokens,
+} from "./history";
 import { SessionRecord, SessionStore } from "./SessionStore";
 import { SpawnEventListener, SpawnHandle, SpawnManager } from "./spawn";
 
@@ -736,23 +741,49 @@ class SessionManagerImpl implements SessionManager {
     return `${header}\n${truncateText(outcomeText(handle.result, "(no output)"), max)}`;
   }
 
-  // Compacts the session history using the configured threshold.
+  // Compacts the session history using the configured threshold and, when the
+  // history actually changed, records what was folded into the memory.
   async compactSession() {
     if (!this.provider) throw new Error("Session not initialized");
 
     const before = this.history;
-    this.history = compactHistory(
+    const result = compactHistoryWithSummary(
       this.history,
       this.config.config.compactThreshold ?? DEFAULT_COMPACT_THRESHOLD,
       this.provider.getContextWindow(),
     );
+    this.history = result.history;
     const changed = this.history !== before;
 
     if (changed) {
       this.provider.resetContextUsage();
       this.save();
+      await this.captureCompaction(result.summary, result.title);
     }
     return changed;
+  }
+
+  // Writes the folded window to the memory backend as an episode. Memory never
+  // breaks compaction: a failing backend is a warning and the compacted history
+  // is returned as usual.
+  protected async captureCompaction(summary: string, title: string): Promise<void> {
+    const memory = this.config.config.memory;
+    if (memory?.enabled !== true) return;
+    if (memory.captureOnCompact === false) return;
+    if (!summary.trim()) return;
+
+    try {
+      await this.memoryProvider.capture({
+        kind: "episode",
+        scope: "project",
+        title: title || "Compacted session",
+        content: redact(summary),
+        project: this.memoryProject(),
+        sessionId: this.sessionId,
+      });
+    } catch (error) {
+      logger.warn({ err: error }, "Memory capture on compact failed");
+    }
   }
 
   // Classifies the prompt and dispatches it to text or image generation.
