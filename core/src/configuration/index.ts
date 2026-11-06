@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { agentsHome, env, harnessHome, skillsHome } from "@/utils/env";
 import { DEFAULT_AGENT_ID } from "@/agents/defaults";
+import type { McpConfig } from "@/mcp/McpConfig";
 
 interface ProviderConfig {
   // Backend that interprets url/apikey. Defaults to "openai" so configs
@@ -118,6 +119,8 @@ interface HarnessConfig {
   agents?: AgentsConfig;
   sessions?: SessionsConfig;
   skills?: SkillsConfig;
+  // Remote MCP servers exposed as extra tools. Off unless enabled.
+  mcp?: McpConfig;
   ui?: UiConfig;
 }
 
@@ -149,6 +152,16 @@ const applyDefaults = (config: HarnessConfig): HarnessConfig => {
   config.skills.maxIndexChars ??= 160;
   config.skills.maxBodyChars ??= 16_000;
   config.skills.preload ??= [];
+  // Like tools, sessions and skills, writeConfig persists these defaults into
+  // the user's config.json, so changing a number here will not reach existing users.
+  config.mcp ??= {};
+  config.mcp.enabled ??= false;
+  config.mcp.servers ??= {};
+  config.mcp.maxDescriptionChars ??= 300;
+  config.mcp.maxToolsIndexChars ??= 2000;
+  config.mcp.startupTimeoutMs ??= 10_000;
+  config.mcp.callTimeoutMs ??= 60_000;
+  config.mcp.maxConcurrentCalls ??= 4;
   config.ui ??= {};
   config.ui.theme ??= {};
   config.ui.theme.user ??= { color: "cyan" };
@@ -301,6 +314,7 @@ export { Config, DEFAULT_PROVIDER_TYPE, SUPPORTED_PROVIDERS };
 export type {
   AgentsConfig,
   HarnessConfig,
+  McpConfig,
   UiConfig,
   UiRoleStyle,
   UiTheme,

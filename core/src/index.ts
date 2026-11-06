@@ -9,7 +9,13 @@ export {
 } from "./utils/logger";
 export type { LoggerOptions, LogLevel } from "./utils/logger";
 export { Config, DEFAULT_PROVIDER_TYPE, SUPPORTED_PROVIDERS } from "./configuration";
-export type { ProviderConfig, ProviderDetail, SessionsConfig, SkillsConfig } from "./configuration";
+export type {
+  McpConfig,
+  ProviderConfig,
+  ProviderDetail,
+  SessionsConfig,
+  SkillsConfig,
+} from "./configuration";
 export { SessionStore } from "./session/SessionStore";
 export { SessionManager } from "./session/SessionManager";
 
@@ -27,6 +33,8 @@ export type {
 export type { AgentApproval, AgentDefinition, AgentSummary } from "./agents";
 export type { SessionRecord } from "./session/SessionStore";
 export type { Skill, SkillSummary } from "./skills/Skill";
+export type { McpServerConfig, McpTransportName, ResolvedMcpServer } from "./mcp";
+export { isMcpToolName, mcpToolName, parseMcpToolName, resolveMcpServers } from "./mcp";
 export type { SpawnHandle, SpawnStatus } from "./contract";
 export type { ApprovalDecision, ApprovalRequest } from "./tools";
 export type {
