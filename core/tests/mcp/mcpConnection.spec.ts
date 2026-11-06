@@ -1,9 +1,10 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { KILL_GRACE_MS, defaultKillTreeDeps, killProcessTree } from "../../src/mcp/killTree";
 import { logger } from "../../src/utils/logger";
 import { McpConnection } from "../../src/mcp/McpConnection";
 import type { ResolvedMcpServer } from "../../src/mcp/McpConfig";
@@ -58,7 +59,9 @@ const isAlive = (pid: number): boolean => {
 };
 
 // Polls until the process is gone, so a SIGTERM that lands late does not make
-// the assertion flaky.
+// the assertion flaky. `false` means "still alive after polling for
+// `timeoutMs`", so the timeout is always explicit: it is the observation
+// window, and 0 would quietly reduce it to a plain liveness check.
 const waitForDeath = async (pid: number, timeoutMs = 2000): Promise<boolean> => {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -80,19 +83,34 @@ const childrenOf = (pid: number): number[] => {
     .map(([childPid]) => childPid);
 };
 
-// Polls until a fixture has written the file a test is waiting for, so a
-// handshake that times out in 1 ms does not race the grandchild's pid file.
+// Polls until a fixture has written something to the file a test is waiting
+// for, so a handshake that times out in 1 ms does not race the grandchild's
+// pid file. Empty content is not "ready": it is the state a reader catches
+// when it sees the file before its content has landed.
 const waitForFile = async (file: string, timeoutMs = 5000): Promise<string> => {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {
-      return readFileSync(file, "utf8");
+      const content = readFileSync(file, "utf8");
+      if (content.trim()) return content;
     } catch {
-      await new Promise((resolve) => setTimeout(resolve, 25));
+      // Not created yet.
     }
+
+    await new Promise((resolve) => setTimeout(resolve, 25));
   }
 
   throw new Error(`timed out waiting for ${file}`);
+};
+
+// Pid handed over through a file by a fixture. Read through `waitForFile` so
+// an empty file is never parsed as pid 0, and asserted here instead of at
+// every call site: every assertion below depends on it being a live pid.
+const readPidFile = async (file: string): Promise<number> => {
+  const pid = Number((await waitForFile(file)).trim());
+  expect(pid).toBeGreaterThan(0);
+
+  return pid;
 };
 
 // Temporary directory for fixtures that need to hand state back through a
@@ -424,8 +442,8 @@ describe("McpConnection process tree", () => {
     await connection.connect();
 
     const serverPid = connection.processId as number;
-    const grandchild = Number(readFileSync(pidFile, "utf8"));
-    expect(await waitForDeath(grandchild, 0)).toBe(false);
+    const grandchild = await readPidFile(pidFile);
+    expect(isAlive(grandchild)).toBe(true);
 
     // The same kill a crashed or OOM-killed server gets: no handler of its own
     // ever runs, which is the whole point.
@@ -446,48 +464,43 @@ describe("McpConnection process tree", () => {
   // `graceMs = 0` the SIGTERM and the SIGKILL are sent in the same instant and
   // the grandchild dies before it can record anything, so a test that only
   // waits for its death passes either way. This one reads what the grandchild
-  // wrote: it saw the SIGTERM and stayed alive for a while afterwards, which
-  // is impossible unless the tree really got the full grace period.
+  // wrote: it saw the SIGTERM and stayed alive for a while afterwards, which is
+  // impossible unless the tree really got a full grace period.
   //
-  // The handshake budget is 1 ms on purpose: `connect` times out before it has
-  // recorded the pid, so its own kill is a no-op and `close()` is the call
-  // that walks the tree. That is the path the grace period belongs to, and the
-  // assertion on the server still being alive pins the precondition instead of
-  // leaving it to timing.
-  it("gives the tree of a failed connection the full grace period", async () => {
+  // The tree is killed by the `catch` of `connect`, not by `close()`:
+  // `recordPid()` runs in the `finally` of `connect`, before it rethrows, so the
+  // connection already knows the pid of the server when it marks itself failed
+  // and walks the tree. That kill is what this test pins, and it does not race
+  // `close()` to get it.
+  it("gives the tree of a failed connection the full grace period before SIGKILL", async () => {
     const dir = scratchDir();
     const pidFile = path.join(dir, "grandchild.pid");
     const recordsFile = path.join(dir, "grandchild.records");
 
     const connection = await connect(
       ["--hang", "--grandchild", "--grandchild-records-sigterm", recordsFile],
-      { startupTimeoutMs: 1, env: { GRANDCHILD_PID_FILE: pidFile } },
+      { startupTimeoutMs: 400, env: { GRANDCHILD_PID_FILE: pidFile } },
     );
 
     await expect(connection.connect()).rejects.toThrow(/did not finish the handshake/);
     expect(connection.status).toBe("failed");
 
     const serverPid = connection.processId as number;
-    const grandchild = Number(await waitForFile(pidFile));
-    expect(grandchild).toBeGreaterThan(0);
+    const grandchild = await readPidFile(pidFile);
     // The grandchild announces itself before it can be signalled, so a missing
     // record below means "it never saw the SIGTERM", not "it never started".
     expect(await waitForFile(recordsFile)).toContain("started");
-    // `connect` never got to kill anything, so the tree is still whole and
-    // `close()` is what has to take it down.
-    expect(isAlive(serverPid)).toBe(true);
-    expect(isAlive(grandchild)).toBe(true);
 
-    await connection.close();
-
+    // `connect` killed the tree itself, before it rejected, and the status stays
+    // `failed` afterwards: nothing here goes through `close()`.
     expect(await waitForDeath(serverPid)).toBe(true);
     expect(await waitForDeath(grandchild)).toBe(true);
 
     const records = readFileSync(recordsFile, "utf8");
     expect(records).toContain("sigterm");
 
-    // It lived on after the SIGTERM. The window is bounded by the fixture's
-    // own escalation (the server SIGKILLs its children 100 ms after its own
+    // It lived on after the SIGTERM. The window is bounded by the fixture's own
+    // escalation (the server SIGKILLs its children 100 ms after its own
     // SIGTERM), so the grandchild reports a few heartbeats and then dies. With
     // `graceMs = 0` the connection's SIGKILL lands in the same tick as the
     // SIGTERM and the file holds no heartbeat at all.
@@ -603,4 +616,125 @@ describe("McpConnection listTools", () => {
     // The first definition wins, not the one from the later page.
     expect(tools[0].description).toBe("Echoes back the given text");
   });
+});
+
+describe("McpConnection grace period", () => {
+  // The grace period is only observable from the process that receives the
+  // SIGTERM: with `graceMs = 0` the SIGTERM and the SIGKILL go out in the same
+  // instant and a process that only records the moment it dies looks identical
+  // either way. These tests read what the processes wrote instead.
+  //
+  // The tree is taken down through `killProcessTree`, the call `close()` makes
+  // on a failed connection and its only kill outside `connect`, with the grace
+  // period the product uses. Driving a real `McpConnection` through that route
+  // is not deterministic: `connect` captures the pid in its `finally` and a
+  // 20 ms watcher captures it even earlier, so a handshake that times out
+  // always kills its own tree before `close()` runs, and a connection that
+  // succeeds is never `failed`.
+
+  // Walks the tree of `root` the way a failed connection has to when it lost
+  // the pid of its server, and reports the pids it visited on the way.
+  const observedWalk = async (root: number, graceMs: number): Promise<number[]> => {
+    const visited: number[] = [];
+    const children = (pid: number): number[] => {
+      visited.push(pid);
+      return childrenOf(pid);
+    };
+
+    await killProcessTree(root, { ...defaultKillTreeDeps, children }, graceMs);
+    return visited;
+  };
+
+  // A probe standing in for a server: it spawns the grandchild whose records
+  // are read below, hands over its pid, and stays up for the whole observation
+  // window.
+  const spawnProbe = (pidFile: string, recordsFile: string): ReturnType<typeof spawn> =>
+    spawn(
+      process.execPath,
+      [
+        "-e",
+        `const { spawn } = require("node:child_process");` +
+          `const { appendFileSync, renameSync, writeFileSync } = require("node:fs");` +
+          `const [pidFile, recordsFile] = process.argv.slice(1);` +
+          `const script = "process.on('SIGTERM', () => { require('node:fs').appendFileSync(process.argv[1], 'sigterm\\\\n'); process.exit(0); }); setInterval(() => {}, 1000);";` +
+          `const child = spawn(process.execPath, ["-e", script, recordsFile], { stdio: "ignore", env: { ...process.env } });` +
+          `const staged = pidFile + ".tmp";` +
+          `writeFileSync(staged, String(child.pid));` +
+          `renameSync(staged, pidFile);` +
+          `process.on("SIGTERM", () => appendFileSync(recordsFile, "probe-sigterm\\n"));` +
+          `setInterval(() => {}, 1000);`,
+        pidFile,
+        recordsFile,
+      ],
+      { stdio: "ignore", env: { ...process.env, [TAG_ENV_VAR]: FIXTURE_TAG } },
+    );
+
+  it("gives the tree of a failed connection the full grace period after SIGTERM", async () => {
+    const dir = scratchDir();
+    const pidFile = path.join(dir, "probe.grandchild.pid");
+    const recordsFile = path.join(dir, "probe.records");
+
+    const probe = spawnProbe(pidFile, recordsFile);
+    probe.once("error", () => {});
+
+    try {
+      const grandchild = await readPidFile(pidFile);
+      // The tree is whole when the walk starts, which is the precondition of
+      // everything below: a walk that found nothing would pass vacuously.
+      expect(childrenOf(probe.pid as number)).toContain(grandchild);
+      expect(isAlive(grandchild)).toBe(true);
+
+      // The walk starts from a pid that does not exist, which is the pid a failed
+      // connection ends up holding, and has to find its way to this tree.
+      // Deliberately the real pid, not a phantom of it: `ps` would re-parent a
+      // real process that was orphaned (which is what makes an orphan findable at
+      // all), but it does not invent a parent for a phantom, so a walk that starts
+      // from a pid nothing points to has nowhere to descend. What this pins is the
+      // walk itself (`killProcessTree` reaching the whole tree and signalling it in
+      // the grace-period order), and the grace period it spends on it.
+      const visited = await observedWalk(probe.pid as number, KILL_GRACE_MS);
+      expect(visited).toContain(grandchild);
+
+      // With `graceMs = 0` both records are missing: the SIGKILL lands in the same
+      // tick as the SIGTERM and neither process gets to write anything. Records
+      // that are there are records of a SIGTERM that was really given time.
+      const records = readFileSync(recordsFile, "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => line.trim());
+      // Both processes got the signal and both lived long enough to say so. Who
+      // was scheduled first is up to the OS, so the order is not asserted.
+      expect(records).toContain("probe-sigterm");
+      expect(records).toContain("sigterm");
+
+      // The grace period then ends, and the SIGKILL lands: both are gone. Their
+      // death alone proves nothing, since it happens with or without a grace
+      // period, so it is only asserted once the records above said the period was
+      // really spent.
+      expect(await waitForDeath(probe.pid as number)).toBe(true);
+      expect(await waitForDeath(grandchild)).toBe(true);
+    } finally {
+      probe.kill("SIGKILL");
+    }
+  }, 10_000);
+
+  it("gives a successful connection's tree the same grace period on close()", async () => {
+    const dir = scratchDir();
+    const pidFile = path.join(dir, "grandchild.pid");
+
+    // Control, through the product and its own `close()`: a healthy connection
+    // that closes normally and takes its whole tree down with it. It stays green
+    // when the escalation above is broken, which is what makes it a control.
+    const connection = await connect(["--grandchild"], { env: { GRANDCHILD_PID_FILE: pidFile } });
+    await connection.connect();
+
+    const serverPid = connection.processId as number;
+    const grandchild = await readPidFile(pidFile);
+    expect(childrenOf(serverPid)).toContain(grandchild);
+
+    await connection.close();
+
+    expect(await waitForDeath(serverPid)).toBe(true);
+    expect(await waitForDeath(grandchild)).toBe(true);
+  }, 10_000);
 });

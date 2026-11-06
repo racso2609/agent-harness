@@ -26,9 +26,12 @@
 //                     Spawns a grandchild that appends to <file> when it gets
 //                     SIGTERM and how long it stayed alive afterwards, so a
 //                     test can watch the escalation from the grandchild.
+// --consume-initialize Swallows `initialize`, waits a moment and exits, so a
+// client that closes the transport mid-handshake sees it
+// fail for real instead of being answered behind its back.
 
 import { spawn } from "node:child_process";
-import { writeFileSync } from "node:fs";
+import { renameSync, writeFileSync } from "node:fs";
 import process from "node:process";
 
 const argv = process.argv.slice(2);
@@ -51,6 +54,7 @@ const ENDLESS_PAGES = has("--endless-pages");
 const CODEX_PAGES = has("--codex-pages");
 const GRANDCHILD = has("--grandchild");
 const ABORT_PROOF = has("--abort-proof");
+const CONSUME_INITIALIZE = has("--consume-initialize");
 
 const CALL_DELAY_MS = Number(process.env.CALL_DELAY_MS ?? 5000);
 const GRANDCHILD_PID_FILE = process.env.GRANDCHILD_PID_FILE;
@@ -111,7 +115,15 @@ const startGrandchild = () => {
 
   if (child.pid) {
     spawnedChildren.push(child.pid);
-    if (GRANDCHILD_PID_FILE) writeFileSync(GRANDCHILD_PID_FILE, String(child.pid), "utf8");
+
+    // Staged next to the destination and renamed over it: `rename` is atomic,
+    // so a reader never sees the file existing with the empty or partial content
+    // a plain `writeFileSync` can expose while the pid is still being written.
+    if (GRANDCHILD_PID_FILE) {
+      const staged = `${GRANDCHILD_PID_FILE}.${process.pid}.${Date.now()}.tmp`;
+      writeFileSync(staged, String(child.pid), "utf8");
+      renameSync(staged, GRANDCHILD_PID_FILE);
+    }
   }
 
   // A dead child's pid can be recycled by an unrelated process, and a
@@ -158,6 +170,11 @@ if (EXIT_ON_START) {
   process.stderr.write("minimalServer: exiting on start\n");
   process.exit(3);
 }
+
+// Answers are deferred so the grandchild is already running when the server
+// replies: a handshake that completes first can be closed before the
+// grandchild exists, and a test waiting for its pid file would time out.
+const settle = () => new Promise((resolve) => setTimeout(resolve, 200));
 
 const write = (message) => {
   process.stdout.write(`${JSON.stringify(message)}\n`);
@@ -260,11 +277,21 @@ const handleMessage = (message) => {
   if (method === "initialize") {
     if (HANG) return;
 
-    respond(message.id, {
-      protocolVersion: PROTOCOL_VERSION,
-      capabilities: { tools: { listChanged: false } },
-      serverInfo: { name: "minimal-server", version: "1.0.0" },
-    });
+    // The client is expected to close the transport while this is pending,
+    // and the exit below makes the handshake fail for real instead of
+    // succeeding behind the client's back.
+    if (CONSUME_INITIALIZE) {
+      settle().then(() => process.exit(0));
+      return;
+    }
+
+    settle().then(() =>
+      respond(message.id, {
+        protocolVersion: PROTOCOL_VERSION,
+        capabilities: { tools: { listChanged: false } },
+        serverInfo: { name: "minimal-server", version: "1.0.0" },
+      }),
+    );
     return;
   }
 

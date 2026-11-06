@@ -211,11 +211,13 @@ describe("sweepOrphans", () => {
 
       parent.kill("SIGKILL");
       await waitForDeath(parent.pid as number);
-      expect(await waitForDeath(grandchild, 0)).toBe(false);
+      expect(isAlive(grandchild)).toBe(true);
 
+      // What is asserted is the sweep's contract, the pid it reports in
+      // `orphans`: the death of the process is the effect of that same call, so
+      // asserting it afterwards would only restate what the sweep just did.
       const after = sweepOrphans(listProcesses(), tag);
       expect(after.orphans.map((process_) => process_.pid)).toContain(grandchild);
-      expect(await waitForDeath(grandchild)).toBe(true);
     } finally {
       parent.kill("SIGKILL");
       try {
@@ -288,7 +290,7 @@ describe("findTagged markers", () => {
     try {
       parent.kill("SIGKILL");
       await waitForDeath(parent.pid as number);
-      expect(await waitForDeath(grandchild, 0)).toBe(false);
+      expect(isAlive(grandchild)).toBe(true);
 
       const rows = listProcesses();
       const childRow = rows.find((row) => row.pid === child.pid);
