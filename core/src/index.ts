@@ -9,9 +9,21 @@ export {
 } from "./utils/logger";
 export type { LoggerOptions, LogLevel } from "./utils/logger";
 export { Config, DEFAULT_PROVIDER_TYPE, SUPPORTED_PROVIDERS } from "./configuration";
-export type { ProviderConfig, ProviderDetail, SessionsConfig, SkillsConfig } from "./configuration";
+export type {
+  MemoryConfig,
+  ProviderConfig,
+  ProviderDetail,
+  SessionsConfig,
+  SkillsConfig,
+} from "./configuration";
 export { SessionStore } from "./session/SessionStore";
 export { SessionManager } from "./session/SessionManager";
+export {
+createMemoryProvider,
+HttpMemoryProvider,
+LocalMemoryProvider,
+NoopMemoryProvider,
+} from "./memory";
 
 export type {
   ApprovalHandler,
@@ -27,6 +39,18 @@ export type {
 export type { AgentApproval, AgentDefinition, AgentSummary } from "./agents";
 export type { SessionRecord } from "./session/SessionStore";
 export type { Skill, SkillSummary } from "./skills/Skill";
+// MemoryKind and MemoryScope ride along because MemoryHit references them:
+// without them the emitted .d.ts is unusable for consumers.
+export type {
+  MemoryCapabilities,
+  MemoryContextOptions,
+  MemoryHit,
+  MemoryKind,
+  MemoryObservation,
+  MemoryProvider,
+  MemoryQuery,
+  MemoryScope,
+} from "./memory";
 export type { SpawnHandle, SpawnStatus } from "./contract";
 export type { ApprovalDecision, ApprovalRequest } from "./tools";
 export type {

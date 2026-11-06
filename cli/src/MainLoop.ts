@@ -472,6 +472,7 @@ class MainLoop {
     return {
       harness: this.harness,
       flows: this.flows,
+      config: this.config,
       exit: () => this.shutdown(0),
       clear: () => this.ui.render({ type: "reset" }),
       notify: (message) => this.ui.render({ type: "notice", message }),

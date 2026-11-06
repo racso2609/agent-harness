@@ -1,6 +1,11 @@
-import type { IHarness, SkillSummary, SpawnHandle } from "@racso2609/core";
+import type { Config, IHarness, SkillSummary, SpawnHandle } from "@racso2609/core";
 import type { Flows } from "@/flows";
-import { formatSessionList, formatSessionStatus } from "@/render/status";
+import {
+  formatMemoryHits,
+  formatMemoryStatus,
+  formatSessionList,
+  formatSessionStatus,
+} from "@/render/status";
 
 export interface CommandOption {
   name: string;
@@ -11,6 +16,8 @@ export interface CommandOption {
 export interface CommandContext {
   harness: IHarness;
   flows: Flows;
+  // Needed by commands that persist a setting, such as /memory on|off.
+  config: Config;
   exit: () => void;
   clear: () => void;
   notify: (message: string) => void;
@@ -175,6 +182,49 @@ const BUILT_IN_COMMANDS: CommandDefinition[] = [
       }
 
       context.notify(formatSkill(skill));
+    },
+  },
+  {
+    name: "memory",
+    description: "Memory backend: /memory | search <q> | on | off",
+    run: async (context, args) => {
+      const [action, ...rest] = args;
+
+      if (!action) {
+        // Reporting a down backend is the point of this command, so it never throws.
+        const status = await context.harness.memoryStatus();
+        const enabled = context.config.config.memory?.enabled ? "on" : "off";
+        context.notify(`${formatMemoryStatus(status)}\nEnabled: ${enabled}`);
+        return;
+      }
+
+      if (action === "search") {
+        const query = rest.join(" ").trim();
+        if (!query) {
+          context.notify("Usage: /memory search <query>");
+          return;
+        }
+
+        // Reads the provider directly: no model call and no history entry, the same
+        // criterion as /skill <id>.
+        const hits = await context.harness.searchMemory(query);
+        context.notify(formatMemoryHits(hits, query));
+        return;
+      }
+
+      if (action === "on" || action === "off") {
+        const enabled = action === "on";
+        context.config.config.memory ??= {};
+        context.config.config.memory.enabled = enabled;
+        context.config.writeConfig();
+
+        // The active session keeps the provider it booted with, so saying so is
+        // cheaper than pretending the switch already took effect.
+        context.notify(`Memory ${action} (takes effect on the next session)`);
+        return;
+      }
+
+      context.notify("Usage: /memory | /memory search <query> | /memory on|off");
     },
   },
   {

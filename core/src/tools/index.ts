@@ -3,6 +3,7 @@ import type { SkillRegistry } from "@/skills";
 import { logger } from "@/utils/logger";
 import { ListDirTool } from "./listDir";
 import { ReadFileTool } from "./readFile";
+import { RecallTool } from "./recall";
 import { ShellTool } from "./shell";
 import { SpawnTool } from "./spawn";
 import { ToolRegistry } from "./ToolRegistry";
@@ -18,9 +19,9 @@ interface ToolRegistryWiring {
 // When allowedTools is given, only those tools are registered; an empty list
 // disables tools entirely.
 //
-// use_skill is only offered to agents that declare no allowlist: an agent that
-// lists its tools gets exactly those, so enable skills on it by naming
-// use_skill in its definition instead of adding it behind its back.
+// use_skill and recall are only offered to agents that declare no allowlist: an
+// agent that lists its tools gets exactly those, so enable them on it by
+// naming them in its definition instead of adding them behind its back.
 export const createToolRegistry = (
   config: Config,
   allowedTools?: string[],
@@ -32,6 +33,10 @@ export const createToolRegistry = (
     allowedTools === undefined &&
     config.config.skills?.enabled !== false &&
     (skills?.list().length ?? 0) > 0;
+  const recallUsable =
+    allowedTools === undefined &&
+    config.config.memory?.enabled === true &&
+    config.config.memory?.recallTool !== false;
 
   const all = [
     new ShellTool({
@@ -43,6 +48,7 @@ export const createToolRegistry = (
     new ListDirTool(),
     new SpawnTool(),
     ...(skillsUsable ? [new UseSkillTool()] : []),
+    ...(recallUsable ? [new RecallTool()] : []),
   ];
 
   if (allowedTools === undefined) {
@@ -62,7 +68,7 @@ export const createToolRegistry = (
   );
 };
 
-export { ToolRegistry, UseSkillTool };
+export { RecallTool, ToolRegistry, UseSkillTool };
 export type { ToolRegistryWiring };
 export type {
   ApprovalDecision,
