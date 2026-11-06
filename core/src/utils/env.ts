@@ -23,6 +23,7 @@ export const env = {
   RACSO_HARNESS_SESSIONS_LOCATION: process.env.RACSO_HARNESS_SESSIONS_LOCATION,
   RACSO_HARNESS_AGENTS_LOCATION: process.env.RACSO_HARNESS_AGENTS_LOCATION,
   RACSO_HARNESS_SKILLS_LOCATION: process.env.RACSO_HARNESS_SKILLS_LOCATION,
+  RACSO_HARNESS_MCP_DISABLED: process.env.RACSO_HARNESS_MCP_DISABLED,
   LOG_LEVEL: process.env.LOG_LEVEL as
     "fatal" | "error" | "warn" | "info" | "debug" | "trace" | "silent" | undefined,
   HOME: process.env.HOME,
