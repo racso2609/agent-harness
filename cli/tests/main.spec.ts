@@ -28,6 +28,7 @@ vi.mock("ink", () => ({
 
 const { run } = await import("../src/main");
 const { MainLoop } = await import("../src/MainLoop");
+const { TuiUiAdapter } = await import("../src/ui/TuiUiAdapter");
 const { Config, SUPPORTED_PROVIDERS } = await import("@racso2609/core");
 
 interface Recorded {
@@ -55,6 +56,11 @@ const boot = async (argv: string[]) => {
         start: async (startOptions) => {
           recorded.starts.push(startOptions);
         },
+        // A stand-in loop that resolves to itself, so the boot may still be driven by
+        // the argv alone: what start() re-resolves is proven by the cases that run the
+        // real loop.
+        resolveResume: (targets: MainLoopOptions) => targets.sessionId ?? undefined,
+        close: () => {},
       };
     },
   });
@@ -76,15 +82,17 @@ describe("the boot sequence of the CLI", () => {
     for (const target of ["session-a1b2c3", "session-a1", "1"]) {
       const recorded = await boot(["--resume", target]);
 
-      expect(recorded.starts).toEqual([{ sessionId: target, resumeLatest: undefined }]);
+      expect(recorded.starts).toEqual([{ sessionId: target }]);
       expect(recorded.exits).toEqual([]);
     }
   });
 
   it("asks for the most recent session on a bare --resume", async () => {
+    // The flag is resolved before this, and the boot hands start() what the
+    // resolution produced: the stand-in loop resolves to itself.
     const recorded = await boot(["--resume"]);
 
-    expect(recorded.starts).toEqual([{ sessionId: undefined, resumeLatest: true }]);
+    expect(recorded.starts).toEqual([{ sessionId: undefined }]);
     expect(recorded.exits).toEqual([]);
     // The TUI is off by default, so the logo is the proof the run went on.
     expect(printLogo).toHaveBeenCalledTimes(1);
@@ -259,26 +267,55 @@ describe("the boot sequence of the CLI", () => {
   });
 
   it("never builds the ink renderer for a --tui run it is going to refuse", async () => {
-    // --tui used to build the adapter in the constructor, and mounting ink is what
-    // that adapter does: an unresolvable id printed "raw mode is not supported"
-    // over the real error before the run gave up. Nothing may be mounted for a
-    // boot that is refused, so this loop is built without a renderer at all and
-    // fails just as loudly if the refusal reaches for one.
-    const initialized: (HarnessOptions | undefined)[] = [];
+    // The same refusal, observed instead of inspected: what a real boot must not
+    // do is construct the renderer, so the adapter that would mount ink is made to
+    // throw the moment it is asked to. Any path that reaches for the ui before it
+    // gives up fails here on its own, instead of leaving it to a private field
+    // being null.
+    const mount = vi.spyOn(TuiUiAdapter.prototype, "start").mockImplementation(() => {
+      throw new Error("ink was mounted for a refused boot");
+    });
+
     const harness = {
-      initialize: async (options) => {
-        initialized.push(options);
-      },
-      // Nothing matches, which is the whole point of the case.
       resolveSession: () => undefined,
       listSessions: () => [],
       status: () => ({ sessionId: "session-abc123" }),
       listProviders: () => [...SUPPORTED_PROVIDERS],
       save: () => {},
-      conversation: () => [],
-      childHistory: () => [],
-      onSpawnEvent: () => () => {},
-      shutdown: () => {},
+    } as unknown as IHarness;
+
+    const config = new Config();
+    config.config.providers = {};
+    config.config.defaultProvider = undefined;
+
+    const exits: number[] = [];
+    const loop = new MainLoop({ config, tui: true });
+    loop.harness = harness;
+
+    await run({
+      argv: ["node", "main.js", "--resume", "abc", "--tui"],
+      stdout: { write: () => true },
+      stderr: { write: () => true },
+      exit: (code) => exits.push(code),
+      logo: printLogo,
+      createLoop: () => loop,
+    });
+
+    expect(exits).toEqual([2]);
+    expect(mount).not.toHaveBeenCalled();
+  });
+
+  it("paints no logo when --resume names a session the store does not have", async () => {
+    // Measured on the real binary: the logo was printed — three times, since the
+    // renderer prints it again — before the refusal, so a run leaving with 2 had
+    // already written to the terminal. The resolution happens before the logo, and
+    // this is the boot that proves it.
+    const harness = {
+      resolveSession: () => undefined,
+      listSessions: () => [],
+      status: () => ({ sessionId: "session-abc123" }),
+      listProviders: () => [...SUPPORTED_PROVIDERS],
+      save: () => {},
     } as unknown as IHarness;
 
     const config = new Config();
@@ -287,13 +324,10 @@ describe("the boot sequence of the CLI", () => {
 
     const stderr: string[] = [];
     const exits: number[] = [];
-    const loop = new MainLoop({ config, tui: true });
-    loop.harness = harness;
+    const loop = lineLoop(config, harness).loop;
 
-    // A real boot: run() reads the argv, the loop refuses, and main.ts leaves with
-    // the usage code without ever parking on a prompt.
     await run({
-      argv: ["node", "main.js", "--resume", "abc", "--tui"],
+      argv: ["node", "main.js", "--resume", "abc"],
       stdout: { write: () => true },
       stderr: { write: (chunk) => stderr.push(chunk) },
       exit: (code) => exits.push(code),
@@ -301,14 +335,9 @@ describe("the boot sequence of the CLI", () => {
       createLoop: () => loop,
     });
 
-    // The message travels through the injected stderr, which is the hole the error
-    // path used to have: the loop wrote to the process' own stream instead.
     expect(stderr).toEqual(['no session matches "abc"\n']);
     expect(exits).toEqual([2]);
-    expect(initialized).toEqual([]);
-    // The refusal came before anything had to paint, so the adapter that would
-    // have mounted ink was never built.
-    expect((loop as unknown as { renderer: unknown }).renderer).toBeNull();
+    expect(printLogo).not.toHaveBeenCalled();
   });
 
   // A real MainLoop on line mode with a renderer that paints nowhere. The
@@ -342,6 +371,6 @@ describe("the boot sequence of the CLI", () => {
     const recorded = await boot([]);
 
     expect(recorded.loops).toEqual([{ tui: false }]);
-    expect(recorded.starts).toEqual([{ sessionId: undefined, resumeLatest: undefined }]);
+    expect(recorded.starts).toEqual([{ sessionId: undefined }]);
   });
 });

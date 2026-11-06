@@ -18,9 +18,15 @@ const readVersion = (): string => {
   return manifest.version ?? "0.0.0";
 };
 
+// What the boot needs from the loop. Narrower than MainLoop so a test can hand
+// in a stand-in, but wide enough for the order of the effects: the session is
+// resolved before anything is painted, start() boots it, and close() releases
+// the terminal when an error escapes.
+type LoopHandle = Pick<MainLoop, "start" | "resolveResume" | "close">;
+
 // Everything the boot sequence touches outside itself. Injected so the order of
-// the effects (version, usage error, logo, loop) is assertable without a
-// process, a terminal or a config.
+// the effects (version, usage error, resolution, logo, loop) is assertable
+// without a process, a terminal or a config.
 interface RunDeps {
   argv: readonly string[];
   stdout: Pick<NodeJS.WriteStream, "write">;
@@ -32,7 +38,7 @@ interface RunDeps {
   // options are what carry the session to resume). The default builds the real
   // one; a test may pass a factory, but what reaches start() is always checked
   // through this hook.
-  createLoop?: (options: MainLoopOptions) => Pick<MainLoop, "start">;
+  createLoop?: (options: MainLoopOptions) => LoopHandle;
 }
 
 // Both a badly written flag and a session that does not resolve end here: one
@@ -67,6 +73,24 @@ const run = async (deps: RunDeps): Promise<void> => {
   const launch = await bootLoop(flags, deps);
   if (!launch) return;
 
+  // The session is resolved before the logo and before start(): the logo is
+  // printed more than once and the setup flow start() runs writes to the
+  // terminal and may ask questions, so a boot that cannot be resumed has to give
+  // up before the first write. It is the loop's own gate, so the rule lives in
+  // one place. start() resolves again on purpose (a caller may hand it a raw
+  // flag value); a full id resolves to itself, so the second pass is a no-op.
+  let sessionId: string | undefined;
+  try {
+    sessionId = launch.resolveResume({
+      sessionId: flags.sessionId,
+      resumeLatest: flags.resumeLatest,
+    });
+  } catch (error) {
+    if (error instanceof UsageError) return fail(error.message);
+    launch.close();
+    throw error;
+  }
+
   // The level must be set before any logger is built: `env` (and therefore the
   // default level) is captured at import time, so `process.env.LOG_LEVEL` can no
   // longer be changed usefully here. MainLoop builds the UI logger in its
@@ -78,7 +102,7 @@ const run = async (deps: RunDeps): Promise<void> => {
   if (!flags.tui) (deps.logo ?? printLogo)();
 
   try {
-    await launch.start({ sessionId: flags.sessionId, resumeLatest: flags.resumeLatest });
+    await launch.start({ sessionId });
   } catch (error) {
     // A session that does not resolve is a symptom of the command line, not of
     // the run: it is reported like a bad flag, and only here does the process
@@ -87,16 +111,14 @@ const run = async (deps: RunDeps): Promise<void> => {
     // to unmount, and the message goes through `stderr` like every other usage
     // error.
     if (error instanceof UsageError) return fail(error.message);
+    launch.close();
     throw error;
   }
 };
 
 // Builds the loop without starting it, so nothing is constructed for a run that
 // will already fail on its flags.
-const bootLoop = async (
-  flags: CliFlags,
-  deps: RunDeps,
-): Promise<Pick<MainLoop, "start"> | undefined> => {
+const bootLoop = async (flags: CliFlags, deps: RunDeps): Promise<LoopHandle | undefined> => {
   const createLoop = deps.createLoop ?? ((options: MainLoopOptions) => new MainLoop(options));
 
   return createLoop({ tui: flags.tui });
@@ -117,13 +139,26 @@ const isEntrypoint = (): boolean => {
 };
 
 if (isEntrypoint()) {
+  // The loop is kept so a failure this file does not report still reaches it:
+  // an escaping error used to leave ink mounted over the process, with the tty
+  // never restored. close() is idempotent and a no-op when no renderer was
+  // built.
+  let launch: LoopHandle | undefined;
+  const createLoop = (options: MainLoopOptions): LoopHandle => {
+    launch = new MainLoop(options);
+
+    return launch;
+  };
+
   run({
     argv: process.argv,
     stdout: process.stdout,
     stderr: process.stderr,
     exit: (code) => process.exit(code),
+    createLoop,
   }).catch((error) => {
     process.stderr.write(`fatal error: ${String(error)}\n`);
+    launch?.close();
     process.exit(1);
   });
 }

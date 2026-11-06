@@ -42,7 +42,7 @@ export const showConversation = (harness: IHarness, ui: UiAdapter) => {
   if (entries.length) ui.render({ type: "conversation", entries });
 };
 
-// Thrown by resumeTarget() when resuming cannot be honoured. It escapes
+// Thrown by resolveResume() when resuming cannot be honoured. It escapes
 // start() on purpose: main.ts is the one that reports it and decides the exit
 // code, so a single place decides how a run ends, and it is raised before
 // initialize() and before any renderer is built.
@@ -148,16 +148,19 @@ class MainLoop {
   // Boots the session, wiring key handling and running the prompt loop.
   // Runs the interactive config setup first when no provider is configured.
   async start(options: MainLoopOptions = {}) {
+    // Resolved before anything else, and so before the setup flow: startSetup()
+    // writes to the terminal and may ask questions, and a session that cannot be
+    // resumed must not get that far. Re-resolving here is deliberate even when
+    // main.ts already did it and passes the full id back: start() is called
+    // directly with raw flag values too (a prefix, a 1-based index), and it is the
+    // one that must not hand core something it would load literally. Resolving a
+    // full id again is idempotent, since resolveSession() matches the exact id
+    // first.
+    const sessionId = this.resolveResume(options);
+
     if (this.config.needsSetup()) {
       await startSetup(this.config);
     }
-
-    // Resolved before initialize(): core loads the id literally, so handing it
-    // something it cannot resolve would start a new session in silence. A target
-    // nothing matches is thrown out of start(): nothing is booted and no
-    // renderer exists yet, so the caller reports it over a terminal ink never
-    // touched.
-    const sessionId = this.resumeTarget(options);
 
     await this.harness.initialize({
       sessionId,
@@ -205,12 +208,14 @@ class MainLoop {
     await this.loop();
   }
 
-  // The id core must load, or undefined for a brand new session. initialize()
-  // loads an id literally, so a prefix or a 1-based index reaching it would boot
-  // a fresh session in silence: every shape is resolved here, through the same
-  // gate /resume uses, and one that resolves to nothing is refused instead of
-  // falling back to the literal.
-  protected resumeTarget(options: MainLoopOptions): string | undefined {
+  // The id core must load, or undefined for a brand new session: the only door
+  // to a session id, and the same gate /resume uses. initialize() loads an id
+  // literally, so a prefix or a 1-based index reaching it would boot a fresh
+  // session in silence. Public because main.ts runs it before the logo and
+  // before start(): a boot that cannot be honoured has to fail before anything
+  // touches the terminal. Throws UsageError (before initialize() and before any
+  // renderer is built) instead of falling back to the literal.
+  resolveResume(options: MainLoopOptions): string | undefined {
     const target = options.sessionId?.trim();
     if (target) {
       const resolved = this.harness.resolveSession(target);
@@ -472,6 +477,18 @@ class MainLoop {
       notify: (message) => this.ui.render({ type: "notice", message }),
       help: () => this.commands.helpText(),
     };
+  }
+
+  // Releases the terminal without exiting, for a run that dies of an error main.ts
+  // does not report itself: the entrypoint still leaves on its own, and ink
+  // would stay mounted (and the tty unrestored) over the failure. Idempotent, and
+  // a no-op when no renderer was ever built. Persisting the session stays with
+  // shutdown(): a boot that failed has nothing worth saving.
+  close() {
+    if (this.closing) return;
+    this.closing = true;
+
+    this.renderer?.close();
   }
 
   // Persists the session, restores the terminal and exits.

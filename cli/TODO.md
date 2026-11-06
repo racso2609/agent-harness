@@ -584,29 +584,37 @@ compatibilidad: `SESSION_VERSION` sigue en 4. Los historiales ya persistidos no 
 prompt de continuación, así que se acepta que los turnos viejos se lean como estaban y solo
 los nuevos se marquen; el campo es opcional y `SessionStore.load` no cambió.
 hecho (cli): el arranque sí pasa la sesión. `src/main.ts` acepta el flag y lo entrega a
-`MainLoop.start()` (`src/main.ts:81`), que lo resuelve en `MainLoop#resumeTarget`
-(`src/MainLoop.ts:187`) contra `harness.resolveSession(...)`: `SessionManager.initialize({sessionId})`
+`MainLoop.start()` (`src/main.ts:102`), que lo resuelve en `MainLoop#resolveResume`
+(`src/MainLoop.ts:218`) contra `harness.resolveSession(...)`: `SessionManager.initialize({sessionId})`
 hace `store.load(id)` literal, así que un prefijo o un índice que llegaran ahí arrancarían una
 sesión nueva en silencio. Formas aceptadas por `src/flags.ts`: `--resume <id>`, `-r <id>`,
 `--session <id>`, `-s <id>`, `--resume=<id>` y `-r=<id>` (el `=` corto antes se ignoraba sin
 avisar). Un id completo, un prefijo único o un índice 1-based: la resolución es siempre la
 misma que la de `/resume`. `--resume`/`-r` desnudo reanuda la más reciente
-(`listSessions()[0]`, ordenada por actividad; `src/MainLoop.ts:200`). Cualquier argv ambiguo
+(`listSessions()[0]`, ordenada por actividad; `src/MainLoop.ts:232`). Cualquier argv ambiguo
 termina en error de uso con exit 2 (`USAGE_EXIT_CODE`, `src/main.ts:40` y `src/MainLoop.ts:58`),
 nunca en sesión nueva silenciosa: valor que no resuelve, `--session`/`-s` sin valor, valor
 vacío y store vacío con `--resume` desnudo (`NO_SESSIONS_TO_RESUME`, `src/MainLoop.ts:27`).
 `usageError` (`src/flags.ts`) es pegajoso: gana a los demás flags de la misma línea de
 comandos, con la excepción documentada de `--version`/`-V`, que es consulta pura y gana al
-error de uso. El repintado de `start()` (`src/MainLoop.ts:147`, `showConversation`) se activa
+error de uso. Un `--resume` irresoluble no sale por `shutdown()` ni escribe desde el bucle:
+`resolveResume` lanza `UsageError` y `main.ts` es el único que decide el código de salida
+(exit 2, por `stderr`). `main.ts` llama a `resolveResume` **antes** del logo y de `start()`,
+porque el logo se pinta más de una vez y `startSetup()` escribe en el terminal y puede pedir
+input: un arranque condenado no debe llegar ni a lo uno ni a lo otro. `start()` vuelve a
+resolver (la llaman también con el flag crudo), y resolver un id completo es idempotente
+porque `resolveSession` prueba primero la coincidencia exacta.
+El repintado de `start()` (`src/MainLoop.ts:155`, `showConversation`) se activa
 justo con esa ruta. `src/main.ts` se reorganizó alrededor de `run(deps)` inyectable
 (argv/stdout/stderr/exit/logo/version/createLoop) para que el orden de efectos sea testeable, y
 el arranque quedó tras un guard de entrypoint (`realpathSync` con fallback `pathToFileURL`,
 `isEntrypoint`) para que importar el módulo no tenga efectos.
 tests: `cli/tests/flags.spec.ts` (parser: las cuatro formas, el `=`, el valor vacío y el
 `--version` que gana al error), `cli/tests/main.spec.ts` (cadena argv → `run()` →
-`MainLoop.start()` → `resolveSession()` → `initialize`, con el `MainLoop` real) y
-`cli/tests/ui/resumeWiring.spec.ts` (resolución y rechazos). Suite: 477 tests en 30 ficheros,
-en verde.
+`resolveSession()` → `MainLoop.start()` → `initialize`, con el `MainLoop` real; un rechazo
+con `--tui` no construye el renderer —se espía `TuiUiAdapter#start`— y un `--resume abc`
+irresoluble no pinta el logo ni una vez) y `cli/tests/ui/resumeWiring.spec.ts` (resolución y
+rechazos). Suite: 480 tests en 30 ficheros, en verde.
 pendiente: no se ha probado contra un historial persistido real en una sesión interactiva;
 todo lo anterior está verificado con `IHarness` stubbeado o con el `MainLoop` real pero sin
 store de verdad. Eso es lo único que queda abierto.

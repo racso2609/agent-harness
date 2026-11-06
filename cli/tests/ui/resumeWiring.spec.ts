@@ -231,11 +231,11 @@ const boot = async (options: FakeOptions = {}, start: MainLoopOptions = {}) => {
   // renderer exists. Both states are settled, so the wait accepts either one;
   // each case still asserts which of the two it got.
   const parked = () => (loop as unknown as { isWaitingForPrompt(): boolean }).isWaitingForPrompt();
-  let rejected = false;
+  let settled = false;
   void started.then(() => {
-    rejected = true;
+    settled = true;
   });
-  await until(() => parked() || rejected);
+  await until(() => parked() || settled);
 
   return { ui, calls, settle, started };
 };
