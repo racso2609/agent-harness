@@ -4,6 +4,7 @@ import { CallToolResultSchema, type Progress } from "@modelcontextprotocol/sdk/t
 import type { ToolResult } from "@/types/providers";
 import { logger } from "@/utils/logger";
 import type { ResolvedMcpServer } from "./McpConfig";
+import { KILL_GRACE_MS, killProcessTree } from "./killTree";
 
 // Lifecycle of one connection. `failed` and `closed` are terminal: the
 // connection is never revived, a new instance is created instead (reload).
@@ -34,9 +35,6 @@ export interface CallToolOptions {
   // Text chunks streamed by the server through notifications/progress.
   onProgress?: (chunk: string) => void;
 }
-
-// How long `close` waits for SIGTERM to take effect before SIGKILL.
-const KILL_GRACE_MS = 500;
 
 // Upper bound on tools/list pages, so a server that always returns a cursor
 // cannot make the registry load forever.
@@ -165,10 +163,12 @@ export class McpConnection {
     }
   }
 
-  // Every tool the server exposes, following pagination to the end.
+  // Every tool the server exposes, following pagination to the end. A name
+  // repeated across pages keeps its first definition.
   async listTools(): Promise<RawMcpTool[]> {
     const client = this.requireReady();
     const tools: RawMcpTool[] = [];
+    const seen = new Set<string>();
     let cursor: string | undefined;
 
     for (let page = 0; page < MAX_LIST_PAGES; page += 1) {
@@ -180,6 +180,9 @@ export class McpConnection {
       );
 
       for (const tool of result.tools) {
+        if (seen.has(tool.name)) continue;
+        seen.add(tool.name);
+
         tools.push({
           name: tool.name,
           ...(typeof tool.description === "string" ? { description: tool.description } : {}),
@@ -262,25 +265,27 @@ export class McpConnection {
   }
 
   private async doClose(): Promise<void> {
-    if (this.state === "failed" || this.state === "closed") {
-      // Marked failed by a dead process or by `connect`; still make sure no
-      // child survived.
-      this.state = "closed";
-      await this.killProcess();
-      return;
-    }
+    if (this.state === "closed") return;
 
+    const wasFailed = this.state === "failed";
     this.state = "closed";
 
+    // The tree is signalled first, while the server is still the parent of
+    // everything it spawned. Closing the transport only ends the server's
+    // stdin, and a server that exits on that would orphan its children
+    // before they could be found.
+    await this.killProcess(wasFailed);
+
+    // Closing the transport matters in both branches: a connection that
+    // failed without the process dying (handshake timeout, a transport error
+    // with no close behind it) still has calls in flight, and the SDK only
+    // rejects them when the transport closes.
     try {
       await this.transport?.close();
     } catch (error) {
       logger.debug(`MCP server "${this.server.id}" transport close failed: ${errMessage(error)}`);
     }
 
-    // The SDK transport only kills the direct child; grandchildren spawned by
-    // the server would survive without this.
-    await this.killProcess();
     this.client = undefined;
   }
 
@@ -308,43 +313,17 @@ export class McpConnection {
     this.failure = reason;
   }
 
-  // Terminates the server process group: SIGTERM, then SIGKILL after a short
-  // grace period. Safe when the process is already gone.
-  private async killProcess(): Promise<void> {
+  // Terminates the server and everything it spawned: SIGTERM to each pid of
+  // the tree, then SIGKILL for those still alive after a short grace period.
+  // The tree is walked with `ps` because the SDK transport spawns the server
+  // without `detached`, so the child does not lead its own process group and
+  // killing `-pid` would reach the harness instead. Safe when the process is
+  // already gone. `immediate` skips the wait for SIGTERM to land.
+  private async killProcess(immediate = false): Promise<void> {
     const pid = this.pid;
     if (pid === undefined) return;
 
-    const alive = (): boolean => {
-      try {
-        process.kill(pid, 0);
-        return true;
-      } catch {
-        return false;
-      }
-    };
-
-    const signalTree = (signal: NodeJS.Signals): void => {
-      // The server runs in its own group, so -pid reaches its children too.
-      try {
-        process.kill(-pid, signal);
-      } catch {
-        try {
-          process.kill(pid, signal);
-        } catch {
-          // Already gone.
-        }
-      }
-    };
-
-    if (!alive()) return;
-
-    signalTree("SIGTERM");
-    const deadline = Date.now() + KILL_GRACE_MS;
-    while (alive() && Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, 25));
-    }
-
-    if (alive()) signalTree("SIGKILL");
+    await killProcessTree(pid, undefined, immediate ? 0 : KILL_GRACE_MS);
   }
 
   // Races a promise against a deadline. The losing promise's rejection is
