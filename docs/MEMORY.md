@@ -45,7 +45,7 @@ El hueco está abierto y sin decisión en `core/TODO.md:108-111`:
 ```
 
 Y el punto 6 del mismo TODO (`core/TODO.md:113`, `mcp connections`) sigue sin hacer: **el harness no
-tiene cliente MCP**. Eso condiciona el diseño (ver §3.4 y §7, F-M5). Aviso de lectura: la numeración
+tiene cliente MCP**. Eso condiciona el diseño (ver §3.4 y §7, F-M5, diferido). Aviso de lectura: la numeración
 de `core/TODO.md` es inconsistente — la memoria es el **8** (`:108`), MCP el **6** (`:113`) y después
 reaparece un `8. skills` (`:117`) —, así que esos números no indican orden real ni prioridad: cita por
 línea, no por número.
@@ -56,7 +56,7 @@ línea, no por número.
 |---|---|---|
 | R1 | La memoria es un **conector plug-and-play** (MCP, HTTP o local), no un acoplamiento a un producto | El seam es una interfaz propia; Engram/mem0/Zep son *implementaciones*, nunca el modelo de datos |
 | R2 | `core/package.json` es un paquete **publicado**; hoy sólo tiene `dotenv`, `pino`, `pino-pretty` | Cero dependencias nuevas obligatorias. Todo lo pesado va detrás de `import()` dinámico o de un binario externo |
-| R3 | No hay cliente MCP | MCP es una **fase posterior**, no el camino del MVP |
+| R3 | No hay cliente MCP | MCP **sale de la tanda**: es una feature propia (`core/TODO.md:113`), no el camino del MVP |
 | R4 | Dos procesos (CLI corto + gateway de larga vida) que comparten estado **sólo por disco** (`docs/ARCHITECTURE.md:7-36`) | La memoria no puede ser un singleton en memoria del proceso; el backend tiene que ser un fichero o un servicio externo, nunca estado en RAM |
 | R5 | Baseline 446 tests en verde y el prompt del sistema es **byte-idéntico** sin skills (`agents/defaults.ts:31-34`) | La memoria arranca **apagada por defecto**; con `memory.enabled = false` el comportamiento no cambia ni un byte |
 
@@ -460,8 +460,9 @@ En este orden, y con este reparto de responsabilidades:
 3. **`HttpMemoryProvider` + adaptador Engram** es la primera alternativa real y se entrega en la misma
    tanda de fases: es lo que convierte "plug-and-play" en verdad y lo que permite decir "si ya usas
    Engram, apunta `memory.url` y listo".
-4. **`McpMemoryProvider` se difiere** a F-M5 porque depende del cliente MCP, que no existe
-   (`core/TODO.md:113`). El seam ya lo admite sin cambios: es un adaptador más.
+4. **`McpMemoryProvider` sale de la tanda.** Depende del cliente MCP, que no existe
+(`core/TODO.md:113`) y que es una feature propia, no de memoria. El seam ya lo admite sin cambios: el
+día que exista el cliente, es un adaptador más de ~80 líneas.
 
 ### Alternativas
 
@@ -622,20 +623,24 @@ igual. Más `scripts/memory-smoke.mjs` (documentado, no en CI) que corre contra 
 
 **Depende de:** F-M2. **No depende de F-M1.**
 
-### F-M5 — Cliente MCP + `McpMemoryProvider`
+### F-M5 — (diferido) Cliente MCP + `McpMemoryProvider`
 
-**Entrega.** `core/src/mcp/client.ts`: JSON-RPC 2.0 sobre stdio (`initialize` → `tools/list` →
-`tools/call`), con `id` incremental, timeout y `close()`. `core/src/memory/McpMemoryProvider.ts`
-mapeando `mem_search`, `mem_context`, `mem_save`, `mem_delete` (los 4 de los 27 que son memoria).
-`memory.provider = "mcp"` con `command`/`args`.
+**No entra en esta tanda.** Depende de una feature que no existe: el harness no tiene cliente MCP
+(`core/TODO.md:113`, punto 6, sin hacer). Escribir `McpMemoryProvider` exige antes un cliente JSON-RPC
+2.0 sobre stdio (`initialize` → `tools/list` → `tools/call`, con `id` incremental, timeout y `close()`),
+y ese cliente **no es específico de memoria**: sirve para todas las conexiones MCP del punto 6. Meterlo
+aquí duplicaría el trabajo cuando llegue esa feature.
 
-**Cierre.** `core/tests/mcp/client.spec.ts` contra un servidor stdio falso (un `.mjs` que responde
-`initialize` con `serverInfo` y `tools/call` con `content:[{type:"text",text:"<json>"}]`): handshake,
-`tools/list`, `tools/call` con el JSON desempaquetado, y matar el proceso hijo deja de colgar. Test del
-provider: `search` mapea `mem_search` y parsea el JSON de `content[0].text`.
+**Criterio de entrada:** que exista `core/src/mcp/client.ts` como feature propia (punto 6 del TODO) y
+esté en uso por al menos un consumidor que no sea memoria.
 
-**Depende de:** F-M4 (comparte el patrón de degradación) y del punto 6 de `core/TODO.md:113`.
-**Dimensión:** ~300 LOC + tests; es la fase más cara y por eso va la última de las de backend.
+**Cuando exista, la entrega es:** `core/src/memory/McpMemoryProvider.ts` mapeando `mem_search`,
+`mem_context`, `mem_save` y `mem_delete` (los 4 de los 27 tools de Engram que son memoria) sobre ese
+cliente, con `memory.provider = "mcp"` y `command`/`args` en config. El cierre sería un test contra un
+servidor stdio falso, igual que F-M4 usa un servidor HTTP stub.
+
+**Dimensión estimada:** ~80 LOC de provider + tests, una vez el cliente exista. Sin el cliente, ~300 LOC
+y una feature nueva de por medio.
 
 ### F-M6 — CLI
 
@@ -665,14 +670,17 @@ de búsquedas que FTS5 falló.
 - Borrado duro y exportación GDPR.
 - Memoria procedimental (es skills).
 - UI de memoria en el frontal web (F3 de `docs/ARCHITECTURE.md`).
+- Cliente MCP y `McpMemoryProvider` (F-M5): depende del punto 6 de `core/TODO.md:113`, que no existe.
 
 ### Orden y dependencias
 
 ```
 F-M0 ──► F-M1 ──► F-M2 ──► F-M3
                     │
-                    ├──► F-M4 ──► F-M5
+                    ├──► F-M4
                     └──► F-M6
+
+F-M5 (MCP) queda fuera: depende del cliente MCP, que es una feature aparte.
 ```
 
 Camino crítico para "memoria funcionando de verdad": **F-M0 → F-M1 → F-M2 → F-M3**. Con eso el harness
@@ -691,7 +699,7 @@ recuerda entre sesiones sin instalar nada. F-M4 es lo que hace verdad el "plug-a
 | 7 | **Lock-in al modelo de un producto** (Engram `observations`, mem0 `memories`) | El seam es nuestro y el esquema local también. `MemoryObservation` es un superconjunto mínimo; el adaptador traduce. Cambiar de backend = cambiar `memory.provider`, no migrar código |
 | 8 | **El hueco léxico de Engram se descubre tarde** | `capabilities().semantic = false` es visible desde F-M4 y `/memory` lo imprime. Documentado en §5 con las dos pruebas que fallan. Un usuario que necesite semántica usa `local` + F-M7, no Engram |
 | 9 | **`forget()` miente en Engram** (soft-delete) | El adaptador devuelve `false` cuando la respuesta trae `hard_delete: false`, y `/memory` lo reporta como "borrado lógico". No se promete lo que el backend no hace |
-| 10 | **El cliente MCP (F-M5) se come el presupuesto** | Va el último de los backends y su cierre es un test contra un servidor stdio falso, no contra Engram. Si F-M5 se cae, el harness sigue teniendo memoria local y HTTP |
+| 10 | **El cliente MCP se come el presupuesto** | F-M5 sale de la tanda: depende del punto 6 de `core/TODO.md:113`, que es una feature propia. La memoria no espera a MCP; local y HTTP cubren el MVP |
 | 11 | **Regresión del prompt byte-idéntico** | `memory.enabled = false` por defecto y la inyección es un mensaje aparte, nunca dentro de `composeSystemPrompt` (`agents/defaults.ts:20`). Test de regresión en F-M2, donde existe la inyección y el test puede discriminar; en F-M0 no hay ruta de memoria activa que pudiera tocar el prompt |
 
 ## Notas de verificación
