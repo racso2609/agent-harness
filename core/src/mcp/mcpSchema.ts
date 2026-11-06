@@ -30,7 +30,15 @@ const sanitizeProperty = (value: unknown): JsonSchemaProperty | undefined => {
     property.type = value.type as JsonSchemaProperty["type"];
   }
   if (typeof value.description === "string") property.description = value.description;
-	if (Array.isArray(value.enum)) property.enum = [...value.enum];
+  if (Array.isArray(value.enum)) {
+    // Providers only accept scalar enum entries; objects and arrays would be
+    // forwarded verbatim and rejected on the wire.
+    const entries = value.enum.filter(
+      (entry): entry is string | number | boolean =>
+        typeof entry === "string" || typeof entry === "number" || typeof entry === "boolean",
+    );
+    if (entries.length > 0) property.enum = entries;
+  }
   if ("default" in value) property.default = value.default;
 
   if (isPlainObject(value.items)) {

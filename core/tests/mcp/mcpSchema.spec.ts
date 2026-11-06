@@ -186,6 +186,26 @@ describe("normalizeInputSchema", () => {
     expect(schema.properties).toEqual({ filter: { type: "object", properties: { name: {} } } });
   });
 
+  it("keeps only scalar enum entries", () => {
+    const schema = normalizeInputSchema({
+      type: "object",
+      properties: {
+        mode: { type: "string", enum: ["fast", 1, true, { nested: 1 }, ["a"], null] },
+      },
+    });
+
+    expect(schema.properties?.mode.enum).toEqual(["fast", 1, true]);
+  });
+
+  it("omits enum when no scalar entry survives", () => {
+    const schema = normalizeInputSchema({
+      type: "object",
+      properties: { mode: { type: "string", enum: [{ a: 1 }, [2], null] } },
+    });
+
+    expect(schema.properties?.mode).toEqual({ type: "string" });
+  });
+
   it("does not mutate nested property entries", () => {
     const raw = {
       type: "object",
