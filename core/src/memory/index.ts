@@ -8,6 +8,12 @@ export { composeMemoryBlock, MEMORY_BLOCK_PREFIX, stripMemoryBlocks } from "./co
 export { LocalMemoryProvider, DEFAULT_MAX_HIT_CHARS } from "./LocalMemoryProvider";
 export type { LocalMemoryProviderOptions } from "./LocalMemoryProvider";
 export { NoopMemoryProvider } from "./NoopMemoryProvider";
+export { normalizeGitRemote, readGitRemote, resolveProjectIdentity } from "./project";
+export type {
+  ProjectIdentity,
+  ProjectIdentitySource,
+  ResolveProjectIdentityOptions,
+} from "./project";
 export type {
   MemoryCapabilities,
   MemoryContextOptions,

@@ -9,9 +9,13 @@ import {
   strictestApproval,
 } from "@/agents";
 import { Config, DEFAULT_PROVIDER_TYPE, ProviderDetail } from "@/configuration";
-import { composeMemoryBlock, createMemoryProvider, stripMemoryBlocks } from "@/memory";
-import type { MemoryHit, MemoryProvider } from "@/memory";
-import path from "node:path";
+import {
+  composeMemoryBlock,
+  createMemoryProvider,
+  resolveProjectIdentity,
+  stripMemoryBlocks,
+} from "@/memory";
+import type { MemoryHit, MemoryProvider, ProjectIdentity } from "@/memory";
 
 import { OpenAiProvider } from "@/providers/openai";
 import { ensureSkillsDir, SkillLoader, SkillRegistry } from "@/skills";
@@ -126,7 +130,13 @@ interface SessionManager {
   // Swaps the active agent, its tools and its persona.
   setAgent: (agentId: string) => Promise<boolean>;
   // Health of the configured memory backend, for diagnostics.
-  memoryStatus: () => Promise<{ provider: string; ok: boolean; detail?: string }>;
+  memoryStatus: () => Promise<{
+    provider: string;
+    ok: boolean;
+    detail?: string;
+    project?: string;
+    projectSource?: string;
+  }>;
   // Searches the persistent memory. Empty when memory is off or down.
   searchMemory: (query: string, limit?: number) => Promise<MemoryHit[]>;
   // Installs the handler used when the approval policy is "ask".
@@ -210,6 +220,14 @@ class SessionManagerImpl implements SessionManager {
   // Persistent memory backend. Created by initialize() from the memory config
   // block; until then a no-op, so every path can hold one.
   protected memoryProvider: MemoryProvider = createMemoryProvider(undefined);
+
+  // Cached project identity. memoryProject() is called both when injecting the
+  // memory block and on every recall, and resolving it shells out to git; the
+  // workspace does not change during a session, so resolving once is enough.
+  private projectIdentity: ProjectIdentity | null = null;
+  // Workspace the cached identity was resolved for, so a changed workspace
+  // invalidates it.
+  private projectIdentityCwd: string | null = null;
 
   // Ids of the children whose result already entered the history. Persisted so
   // a resume does not hand the parent the same result twice: the injected
@@ -967,10 +985,30 @@ class SessionManagerImpl implements SessionManager {
     return `${skill.body.slice(0, max)}\n[skill truncated]`;
   }
 
-  // Name of the memory project: the configured one, or the workspace folder
-  // name, so two workspaces do not read each other's memories by accident.
+  // Identity of the memory project: configured override, git remote, or a
+  // hashed workspace path. Resolved once per workspace and cached.
+  protected projectIdentityFor(): ProjectIdentity {
+    const cwd = this.workspaceRoot();
+
+    if (this.projectIdentity && this.projectIdentityCwd === cwd) return this.projectIdentity;
+
+    this.projectIdentity = resolveProjectIdentity({
+      configured: this.config.config.memory?.project,
+      cwd,
+    });
+    this.projectIdentityCwd = cwd;
+
+    return this.projectIdentity;
+  }
+
+  // Key that scopes project memories, so two workspaces never read each other's.
   protected memoryProject(): string {
-    return this.config.config.memory?.project ?? path.basename(this.workspaceRoot());
+    return this.projectIdentityFor().key;
+  }
+
+  // Where the project key came from ("config" | "git" | "path"), for diagnostics.
+  protected memoryProjectSource(): ProjectIdentity["source"] {
+    return this.projectIdentityFor().source;
   }
 
   // Searches the persistent memory on behalf of the recall tool. Never throws:
@@ -1056,11 +1094,25 @@ class SessionManagerImpl implements SessionManager {
     return decision;
   }
 
-  // Health of the memory backend, so the CLI can warn when it is down.
-  async memoryStatus(): Promise<{ provider: string; ok: boolean; detail?: string }> {
+  // Health of the memory backend, so the CLI can warn when it is down. Also
+  // reports the project key in use and where it came from.
+  async memoryStatus(): Promise<{
+    provider: string;
+    ok: boolean;
+    detail?: string;
+    project?: string;
+    projectSource?: string;
+  }> {
     const health = await this.memoryProvider.health();
+    const identity = this.projectIdentityFor();
 
-    return { provider: this.memoryProvider.id, ok: health.ok, detail: health.detail };
+    return {
+      provider: this.memoryProvider.id,
+      ok: health.ok,
+      detail: health.detail,
+      project: identity.key,
+      projectSource: identity.source,
+    };
   }
 
   // Public memory search used by the harness contract.
