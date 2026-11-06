@@ -1,8 +1,11 @@
-import type { SessionStatus, SessionSummary } from "@racso2609/core";
+import type { MemoryHit, SessionStatus, SessionSummary } from "@racso2609/core";
 
 const numberFormat = new Intl.NumberFormat("en-US");
 
 const formatTokens = (value: number) => numberFormat.format(Math.max(0, Math.round(value)));
+
+const truncate = (text: string, max: number) =>
+  text.length > max ? `${text.slice(0, max)}…` : text;
 
 const formatCost = (value: number) => {
   const decimals = value > 0 && value < 0.01 ? 6 : 4;
@@ -52,4 +55,48 @@ const formatSessionList = (sessions: SessionSummary[], currentId?: string) => {
     .join("\n");
 };
 
-export { formatCost, formatSessionList, formatSessionStatus, formatTokens };
+// Health of the configured memory backend, plus the project key it will read
+// and write. A down backend is a line to read, not an error: the detail is
+// what the user needs to fix it.
+const formatMemoryStatus = (status: {
+  provider: string;
+  ok: boolean;
+  detail?: string;
+  project?: string;
+  projectSource?: string;
+}) => {
+  const state = status.ok ? "ok" : "down";
+  const project = status.project
+    ? `Project: ${status.project}${status.projectSource ? ` (${status.projectSource})` : ""}`
+    : undefined;
+
+  return [
+    `Memory: ${status.provider} (${state})`,
+    !status.ok && status.detail ? `Detail: ${status.detail}` : undefined,
+    project,
+  ]
+    .filter(Boolean)
+    .join("\n");
+};
+
+// One bullet per hit. The content is already capped by the provider, so it is
+// only clipped here to keep the transcript readable.
+const formatMemoryHits = (hits: MemoryHit[], query: string) => {
+  if (!hits.length) return `No memories found for: "${query}"`;
+
+  return hits
+    .map((hit) => {
+      const title = hit.title ? `**${hit.title}**` : "(untitled)";
+      return `- [${hit.kind}] ${title}: ${truncate(hit.content, 200)}`;
+    })
+    .join("\n");
+};
+
+export {
+  formatCost,
+  formatMemoryHits,
+  formatMemoryStatus,
+  formatSessionList,
+  formatSessionStatus,
+  formatTokens,
+};
