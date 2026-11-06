@@ -44,6 +44,10 @@ const makeConfig = (project = "e2e-demo") => {
     model: "model",
     // Two messages per turn, so a threshold of 2 folds older turns into memory.
     compactThreshold: 2,
+    // Compaction is driven explicitly by the test, never by the context
+    // heuristic: otherwise how many turns survive depends on token estimates
+    // and the assertions below stop being deterministic.
+    autoCompact: false,
     // Pins the workspace: project resolution then never depends on the
     // repository the test runner happens to live in.
     tools: { workspace: dir },
@@ -76,8 +80,7 @@ const fakeChat = () => {
   provider.setModel = vi.fn(() => true);
   provider.getModel = () => "model";
   // A context window far larger than anything this conversation produces, so
-  // maybeAutoCompact() never fires mid-conversation: the test drives
-  // compaction explicitly and sees exactly one fold.
+  // even a session that re-enables auto-compaction never folds mid-conversation.
   provider.getContextWindow = () => 1_000_000;
   provider.chat = (async (messages: History[]) => {
     const prompt = messages[messages.length - 1]?.content ?? "";
@@ -192,6 +195,27 @@ describe("memory end to end", () => {
     expect(result.isError).toBeUndefined();
     expect(result.output).toContain("[episode]");
     expect(result.output).toContain("node:sqlite");
+  });
+
+  it("keeps a single compaction block across repeated compactions", async () => {
+    const session = await newSession();
+
+    // Three rounds of talk-then-compact, so each compaction really folds a new
+    // window on top of an already compacted history. That is the shape that used
+    // to stack one summary per round and grow the context it exists to shrink.
+    for (let round = 0; round < 3; round++) {
+      await converse(session);
+      await session.compactSession();
+    }
+
+    const blocks = session.history.filter(
+      (message) =>
+        message.role === "system" && message.content.startsWith("[Memoria previa compactada]"),
+    );
+    expect(blocks).toHaveLength(1);
+    // The persona is not a compaction block, so it survives every pass.
+    expect(session.history[0].role).toBe("system");
+    expect(session.history[0].content).not.toContain("[Memoria previa compactada]");
   });
 
   it("scopes recall to the project of the running session", async () => {
