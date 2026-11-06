@@ -23,6 +23,9 @@ import {
 import { toStatusEvent, toUiEvents } from "@/ui/renderEvents";
 import type { UiAdapter } from "@/ui/UiAdapter";
 
+// Message of the bare `--resume` that finds no persisted session at all.
+const NO_SESSIONS_TO_RESUME = "no hay sesiones que reanudar";
+
 // Emits the children persisted in the session (previous runs) so the strip
 // starts with what the session launched instead of empty. Only the core knows
 // whether a load happened, so the loop asks instead of guessing.
@@ -39,23 +42,46 @@ export const showConversation = (harness: IHarness, ui: UiAdapter) => {
   if (entries.length) ui.render({ type: "conversation", entries });
 };
 
+// Thrown by resolveResume() when resuming cannot be honoured. It escapes
+// start() on purpose: main.ts is the one that reports it and decides the exit
+// code, so a single place decides how a run ends, and it is raised before
+// initialize() and before any renderer is built.
+class UsageError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "UsageError";
+  }
+}
+
 interface MainLoopOptions {
-  // Id of a previously persisted session to resume on boot.
+  // Id of a previously persisted session to resume on boot. A full id, a unique
+  // prefix or a 1-based index: resolveSession decides which.
   sessionId?: string;
+  // Resume the most recent session instead of naming one. An id wins over it.
+  resumeLatest?: boolean;
   // Agent to use when starting a new session.
   agent?: string;
   // Configuration source; defaults to a new Config.
   config?: Config;
   // Renders the full-screen ink TUI instead of plain lines.
   tui?: boolean;
+  // Renderer to paint through instead of the one `tui` would build. A seam for
+  // tests; the real boot never passes it.
+  ui?: UiAdapter;
 }
 
 class MainLoop {
   harness: IHarness;
   config: Config;
-  flows: Flows;
   commands: CommandRepository;
-  ui: UiAdapter;
+  // Renderer the loop paints through. Built on first use and never in the
+  // constructor: mounting ink is a side effect on the terminal, and a boot that
+  // is about to be refused (an unreadable --resume) must not have one. Every
+  // path that can reach a refusal runs before this is first touched.
+  private renderer: UiAdapter | null = null;
+  private createdFlows: Flows | null = null;
+  // Which renderer to build on first use.
+  private tui: boolean;
   // Guard so the shutdown handler runs only once.
   private closing = false;
   // Prompts submitted by the TUI. The line renderer reads stdin directly.
@@ -80,26 +106,64 @@ class MainLoop {
   constructor(options: MainLoopOptions = {}) {
     this.config = options.config ?? new Config();
     this.commands = new CommandRepository();
-    // The UI comes before the flows: they ask their pickers through it, so it
-    // has to exist before anything that may open one is built.
-    this.ui = options.tui ? new TuiUiAdapter(this.config.config.ui?.theme) : new CliUiAdapter();
-    this.flows = createFlows(this.ui, [...SUPPORTED_PROVIDERS]);
+    this.tui = options.tui ?? false;
+    // A seam for tests that need a renderer without a terminal. Assigning one
+    // builds nothing else.
+    if (options.ui) this.renderer = options.ui;
     this.harness = createHarness({
       config: this.config,
-      logger: uiLogger(this.ui),
+      // Asked lazily, at the first render or the first approval: by then
+      // start() has already accepted the session it was asked to resume.
+      logger: lazyLogger(() => this.ui),
       approval: (request: ApprovalRequest) => this.ui.promptApproval(request),
     });
+  }
+
+  // The renderer, built the first time something needs to paint or to ask a
+  // question. A boot refused before that ran nothing that could have needed
+  // it.
+  get ui(): UiAdapter {
+    this.renderer ??= this.tui
+      ? new TuiUiAdapter(this.config.config.ui?.theme)
+      : new CliUiAdapter();
+
+    return this.renderer;
+  }
+
+  // The `ui` above used to be a plain field that tests assigned to, so the
+  // setter keeps that seam working.
+  set ui(ui: UiAdapter) {
+    this.renderer = ui;
+  }
+
+  // The flows the slash commands use. They ask their pickers through the UI,
+  // so they are built with it on first use, not in the constructor: they are
+  // only needed once a command wants one.
+  get flows(): Flows {
+    this.createdFlows ??= createFlows(this.ui, [...SUPPORTED_PROVIDERS]);
+
+    return this.createdFlows;
   }
 
   // Boots the session, wiring key handling and running the prompt loop.
   // Runs the interactive config setup first when no provider is configured.
   async start(options: MainLoopOptions = {}) {
+    // Resolved before anything else, and so before the setup flow: startSetup()
+    // writes to the terminal and may ask questions, and a session that cannot be
+    // resumed must not get that far. Re-resolving here is deliberate even when
+    // main.ts already did it and passes the full id back: start() is called
+    // directly with raw flag values too (a prefix, a 1-based index), and it is the
+    // one that must not hand core something it would load literally. Resolving a
+    // full id again is idempotent, since resolveSession() matches the exact id
+    // first.
+    const sessionId = this.resolveResume(options);
+
     if (this.config.needsSetup()) {
       await startSetup(this.config);
     }
 
     await this.harness.initialize({
-      sessionId: options.sessionId,
+      sessionId,
       agent: options.agent,
     });
 
@@ -144,8 +208,38 @@ class MainLoop {
     await this.loop();
   }
 
+  // The id core must load, or undefined for a brand new session: the only door
+  // to a session id, and the same gate /resume uses. initialize() loads an id
+  // literally, so a prefix or a 1-based index reaching it would boot a fresh
+  // session in silence. Public because main.ts runs it before the logo and
+  // before start(): a boot that cannot be honoured has to fail before anything
+  // touches the terminal. Throws UsageError (before initialize() and before any
+  // renderer is built) instead of falling back to the literal.
+  resolveResume(options: MainLoopOptions): string | undefined {
+    const target = options.sessionId?.trim();
+    if (target) {
+      const resolved = this.harness.resolveSession(target);
+      if (!resolved) throw new UsageError(`no session matches "${target}"`);
+
+      return resolved;
+    }
+
+    if (!options.resumeLatest) return undefined;
+
+    // listSessions() is ordered by activity, so the first entry is the most
+    // recent. An empty store cannot honour "the latest one", and booting a new
+    // session instead would look like the flag had been ignored.
+    const latest = this.harness.listSessions()[0]?.id;
+    if (!latest) throw new UsageError(NO_SESSIONS_TO_RESUME);
+
+    return latest;
+  }
+
+  // Asked from the prompt loop, which may run before anything was painted
+  // (a first command with nothing to render), so it reads the choice and not
+  // the renderer: an `instanceof` would build one.
   protected isTui(): boolean {
-    return this.ui instanceof TuiUiAdapter;
+    return this.renderer ? this.renderer instanceof TuiUiAdapter : this.tui;
   }
 
   // Ctrl-C triggers cleanup and exit.
@@ -385,6 +479,18 @@ class MainLoop {
     };
   }
 
+  // Releases the terminal without exiting, for a run that dies of an error main.ts
+  // does not report itself: the entrypoint still leaves on its own, and ink
+  // would stay mounted (and the tty unrestored) over the failure. Idempotent, and
+  // a no-op when no renderer was ever built. Persisting the session stays with
+  // shutdown(): a boot that failed has nothing worth saving.
+  close() {
+    if (this.closing) return;
+    this.closing = true;
+
+    this.renderer?.close();
+  }
+
   // Persists the session, restores the terminal and exits.
   protected shutdown(code: number) {
     if (this.closing) return;
@@ -412,5 +518,23 @@ const uiLogger = (ui: UiAdapter): ILogger => {
   return createLogger(() => {});
 };
 
-export { MainLoop };
+// Forwards to the logger of the renderer, asking for the renderer only when a
+// line is actually logged: building it in the constructor is what mounted ink
+// for a run that was refused right after. Each level asks for the renderer of
+// the moment, so the six levels of the contract stay whatever it provides.
+const lazyLogger = (ui: () => UiAdapter): ILogger => {
+  const forward = (name: keyof ILogger) => (first: unknown, second?: string) =>
+    uiLogger(ui())[name](first, second);
+
+  return {
+    fatal: forward("fatal"),
+    error: forward("error"),
+    warn: forward("warn"),
+    info: forward("info"),
+    debug: forward("debug"),
+    trace: forward("trace"),
+  };
+};
+
+export { MainLoop, UsageError };
 export type { MainLoopOptions };
