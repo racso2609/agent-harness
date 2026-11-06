@@ -397,7 +397,21 @@ usage y coste.
 - `/resume <id|prefijo|índice>` (alias `/switch`) — cambia a esa sesión,
   persistiendo antes la actual. Acepta el id completo, un prefijo único o el
   número de la lista. Sin argumento abre un selector interactivo.
-- Al arrancar: `--session <id>` (o `--resume`) retoma una sesión concreta.
+- Al arrancar, el flag de sesión retoma una sesión concreta. Cuatro formas, con
+  sus alias: `--resume <id>`, `-r <id>`, `--session <id>`, `-s <id>`, y las
+  variantes con `=`: `--resume=<id>` y `-r=<id>`. El valor es el mismo que acepta
+  `/resume`: id completo, prefijo único o índice de la lista de `/sessions`.
+
+  ```sh
+  racso-harness --tui --resume 1
+  racso-harness -r session-a1b2c3
+  racso-harness --session=session-a1b2
+  ```
+
+  `--resume`/`-r` sin valor retoma la más reciente. `--session`/`-s` sin valor es
+  un error: no significa «la más reciente». Un valor que no resuelve, o un
+  `--resume` desnudo con el store vacío, termina en error de uso con código 2 en
+  vez de arrancar una sesión nueva.
 
 ## Skills (recetas en markdown)
 
