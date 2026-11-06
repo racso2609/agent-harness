@@ -17,12 +17,18 @@ export const agentsHome = () =>
 export const skillsHome = () =>
   env.RACSO_HARNESS_SKILLS_LOCATION ?? path.join(harnessHome(), "skills");
 
+// File holding the local memory database (not a directory: it is what
+// MemoryConfig.path expects).
+export const memoryHome = () =>
+  env.RACSO_HARNESS_MEMORY_LOCATION ?? path.join(harnessHome(), "memory.db");
+
 export const env = {
   OMNIROUTE_API_KEY: process.env.OMNIROUTE_API_KEY,
   RACSO_HARNESS_CONFIG_LOCATION: process.env.RACSO_HARNESS_CONFIG_LOCATION,
   RACSO_HARNESS_SESSIONS_LOCATION: process.env.RACSO_HARNESS_SESSIONS_LOCATION,
   RACSO_HARNESS_AGENTS_LOCATION: process.env.RACSO_HARNESS_AGENTS_LOCATION,
   RACSO_HARNESS_SKILLS_LOCATION: process.env.RACSO_HARNESS_SKILLS_LOCATION,
+  RACSO_HARNESS_MEMORY_LOCATION: process.env.RACSO_HARNESS_MEMORY_LOCATION,
   LOG_LEVEL: process.env.LOG_LEVEL as
     "fatal" | "error" | "warn" | "info" | "debug" | "trace" | "silent" | undefined,
   HOME: process.env.HOME,
