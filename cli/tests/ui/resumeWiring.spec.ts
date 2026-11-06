@@ -203,8 +203,14 @@ const until = async (done: () => boolean) => {
 // Boots a real MainLoop in TUI mode on that fake harness and lets the test type
 // into it. TUI mode is what parks the loop, which is the only state a turn can
 // start on its own from.
+// The process exit of a refused boot is spied on up front: the refusal calls
+// it long before the case would have a chance to set the spy itself.
+let exitSpy: ReturnType<typeof vi.spyOn> | null = null;
+
 const boot = async (options: FakeOptions = {}, start: MainLoopOptions = {}) => {
   const { harness, calls, settle } = fakeHarness(options);
+  exitSpy = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
+
   // A hand-built config with no providers is the one shape that never prompts:
   // it keeps the setup flow (which does read stdin) out of the run.
   const config = new Config();
@@ -217,9 +223,14 @@ const boot = async (options: FakeOptions = {}, start: MainLoopOptions = {}) => {
   loop.ui = ui;
 
   void loop.start(start);
-  // Parked in nextPrompt(): the callbacks are wired and a turn may start on its
-  // own, which is the only state these cases make sense in.
-  await until(() => (loop as unknown as { isWaitingForPrompt(): boolean }).isWaitingForPrompt());
+  // Either the loop parked in nextPrompt() — the callbacks are wired and a turn
+  // may start on its own, which is the only state the queued cases make sense
+  // in — or it refused the target and ended the run through shutdown(), whose
+  // path never reaches nextPrompt(). Both are settled, so the wait accepts
+  // either one; each case still asserts which of the two it got.
+  const parked = () => (loop as unknown as { isWaitingForPrompt(): boolean }).isWaitingForPrompt();
+  const exited = () => exitSpy !== null && exitSpy.mock.calls.length > 0;
+  await until(() => parked() || exited());
 
   return { ui, calls, settle };
 };
@@ -422,26 +433,29 @@ describe("booting into a persisted session", () => {
   it("refuses to start a new session when the store is empty", async () => {
     // Bare `--resume` with nothing persisted cannot be honoured, and booting a
     // fresh session instead would look like the flag was ignored: the loop
-    // writes the reason to stderr and exits non-zero, before initialising.
+    // writes the reason to stderr and exits with 2, before initialising. That
+    // is the code a misspelled flag gets too, because the command line asked
+    // for something that cannot be done either way.
     const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-    const exit = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
     const { calls } = await boot({ sessions: [] }, { resumeLatest: true });
 
     expect(calls.initialize).toEqual([]);
     expect(stderr).toHaveBeenCalledWith("no hay sesiones que reanudar\n");
-    expect(exit).toHaveBeenCalledWith(1);
+    expect(exitSpy).toHaveBeenCalledWith(2);
   });
 
   it("refuses an id the store cannot resolve", async () => {
     // initialize() loads an id literally: given one it does not know it boots a
-    // brand new session in silence, which is the bug this guards.
+    // brand new session in silence, which is the bug this guards. It exits with
+    // 2 for the same reason an empty store does: an id nothing matches is the
+    // command line asking for something that cannot be done, exactly like a
+    // misspelled flag.
     const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-    const exit = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
     const { calls } = await boot({ sessions: [summary("session-known")] }, { sessionId: "nope" });
 
     expect(calls.initialize).toEqual([]);
     expect(stderr).toHaveBeenCalledWith('no session matches "nope"\n');
-    expect(exit).toHaveBeenCalledWith(1);
+    expect(exitSpy).toHaveBeenCalledWith(2);
   });
 
   it("hands core the full id of a prefix the store matches", async () => {

@@ -23,6 +23,9 @@ import {
 import { toStatusEvent, toUiEvents } from "@/ui/renderEvents";
 import type { UiAdapter } from "@/ui/UiAdapter";
 
+// Message of the bare `--resume` that finds no persisted session at all.
+const NO_SESSIONS_TO_RESUME = "no hay sesiones que reanudar";
+
 // Emits the children persisted in the session (previous runs) so the strip
 // starts with what the session launched instead of empty. Only the core knows
 // whether a load happened, so the loop asks instead of guessing.
@@ -39,9 +42,27 @@ export const showConversation = (harness: IHarness, ui: UiAdapter) => {
   if (entries.length) ui.render({ type: "conversation", entries });
 };
 
+// Thrown when resuming cannot be honoured. start() reports it through the same
+// path every other ending of a run takes (stderr, then shutdown()), so the
+// reason is visible and an `--tui` run never leaves ink mounted over a terminal
+// nobody restored.
+class UsageError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "UsageError";
+  }
+}
+
+// Exit code for a command line that asked for something undoable: a flag with
+// no value and a session that does not resolve are the same mistake.
+const USAGE_EXIT_CODE = 2;
+
 interface MainLoopOptions {
-  // Id of a previously persisted session to resume on boot.
+  // Id of a previously persisted session to resume on boot. A full id, a unique
+  // prefix or a 1-based index: resolveSession decides which.
   sessionId?: string;
+  // Resume the most recent session instead of naming one. An id wins over it.
+  resumeLatest?: boolean;
   // Agent to use when starting a new session.
   agent?: string;
   // Configuration source; defaults to a new Config.
@@ -98,8 +119,22 @@ class MainLoop {
       await startSetup(this.config);
     }
 
+    // Resolved before initialize(): core loads the id literally, so handing it
+    // something it cannot resolve would start a new session in silence. A target
+    // nothing matches ends the run here, before any session is booted.
+    let sessionId: string | undefined;
+    try {
+      sessionId = this.resumeTarget(options);
+    } catch (error) {
+      if (!(error instanceof UsageError)) throw error;
+      process.stderr.write(`${error.message}\n`);
+      this.shutdown(USAGE_EXIT_CODE);
+
+      return;
+    }
+
     await this.harness.initialize({
-      sessionId: options.sessionId,
+      sessionId,
       agent: options.agent,
     });
 
@@ -142,6 +177,31 @@ class MainLoop {
 
     this.installKeyHandlers();
     await this.loop();
+  }
+
+  // The id core must load, or undefined for a brand new session. initialize()
+  // loads an id literally, so a prefix or a 1-based index reaching it would boot
+  // a fresh session in silence: every shape is resolved here, through the same
+  // gate /resume uses, and one that resolves to nothing is refused instead of
+  // falling back to the literal.
+  protected resumeTarget(options: MainLoopOptions): string | undefined {
+    const target = options.sessionId?.trim();
+    if (target) {
+      const resolved = this.harness.resolveSession(target);
+      if (!resolved) throw new UsageError(`no session matches "${target}"`);
+
+      return resolved;
+    }
+
+    if (!options.resumeLatest) return undefined;
+
+    // listSessions() is ordered by activity, so the first entry is the most
+    // recent. An empty store cannot honour "the latest one", and booting a new
+    // session instead would look like the flag had been ignored.
+    const latest = this.harness.listSessions()[0]?.id;
+    if (!latest) throw new UsageError(NO_SESSIONS_TO_RESUME);
+
+    return latest;
   }
 
   protected isTui(): boolean {
@@ -412,5 +472,5 @@ const uiLogger = (ui: UiAdapter): ILogger => {
   return createLogger(() => {});
 };
 
-export { MainLoop };
+export { MainLoop, UsageError };
 export type { MainLoopOptions };
