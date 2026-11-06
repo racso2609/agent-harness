@@ -1,6 +1,10 @@
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { logger } from "../../src/utils/logger";
 import { McpConnection } from "../../src/mcp/McpConnection";
 import type { ResolvedMcpServer } from "../../src/mcp/McpConfig";
 
@@ -14,20 +18,20 @@ const fixture = path.join(
 // leaves a server process behind.
 const opened: McpConnection[] = [];
 
-const makeServer = (args: string[] = []): ResolvedMcpServer => ({
+const makeServer = (args: string[] = [], env: Record<string, string> = {}): ResolvedMcpServer => ({
   id: "fixture",
   transport: "stdio",
   command: process.execPath,
   args: [fixture, ...args],
-  env: {},
+  env,
   untrusted: false,
 });
 
 const connect = async (
   args: string[] = [],
-  options: { startupTimeoutMs?: number; callTimeoutMs?: number } = {},
+  options: { startupTimeoutMs?: number; callTimeoutMs?: number; env?: Record<string, string> } = {},
 ): Promise<McpConnection> => {
-  const connection = new McpConnection(makeServer(args), {
+  const connection = new McpConnection(makeServer(args, options.env), {
     startupTimeoutMs: options.startupTimeoutMs ?? 5000,
     callTimeoutMs: options.callTimeoutMs ?? 2000,
   });
@@ -57,8 +61,30 @@ const waitForDeath = async (pid: number, timeoutMs = 2000): Promise<boolean> => 
   return !isAlive(pid);
 };
 
+// Direct children of a live pid, read from `ps` so it does not rely on the
+// implementation under test.
+const childrenOf = (pid: number): number[] => {
+  const output = execFileSync("ps", ["-A", "-o", "pid=", "-o", "ppid="], { encoding: "utf8" });
+  return output
+    .split("\n")
+    .map((line) => line.trim().split(/\s+/).map(Number))
+    .filter(([childPid, parentPid]) => parentPid === pid && childPid > 0)
+    .map(([childPid]) => childPid);
+};
+
+// Temporary directory for fixtures that need to hand state back through a
+// file (the pid of a grandchild of the server).
+const scratchDirs: string[] = [];
+
+const scratchDir = (): string => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "racso-mcp-"));
+  scratchDirs.push(dir);
+  return dir;
+};
+
 afterEach(async () => {
   await Promise.all(opened.splice(0).map((connection) => connection.close()));
+  for (const dir of scratchDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
 describe("McpConnection handshake", () => {
@@ -109,7 +135,111 @@ describe("McpConnection handshake", () => {
   });
 });
 
-describe("McpConnection failures", () => {
+describe("McpConnection aborts", () => {
+  it("answers an already aborted call without touching the connection", async () => {
+    const connection = await connect(["--slow-call"], { callTimeoutMs: 10_000 });
+    await connection.connect();
+
+    const controller = new AbortController();
+    controller.abort();
+
+    const started = Date.now();
+    const result = await connection.callTool("slow", {}, { signal: controller.signal });
+
+    expect(result).toEqual({ output: 'Tool "slow" was cancelled', isError: true });
+    expect(Date.now() - started).toBeLessThan(1000);
+    expect(connection.status).toBe("ready");
+    expect(connection.lastError).toBeUndefined();
+  });
+
+  it("answers an aborted call in flight without waiting for the call timeout", async () => {
+    const connection = await connect(["--slow-call"], { callTimeoutMs: 10_000 });
+    await connection.connect();
+
+    const controller = new AbortController();
+    const started = Date.now();
+    const pending = connection.callTool("slow", {}, { signal: controller.signal });
+    setTimeout(() => controller.abort(), 50);
+
+    const result = await pending;
+
+    expect(result).toEqual({ output: 'Tool "slow" was cancelled', isError: true });
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(connection.status).toBe("ready");
+  });
+
+  it("does not wait for the call timeout when a server ignores the cancellation", async () => {
+    // The server drops cancellations, so the SDK handler only goes away when
+    // the transport closes. That must not turn into a stuck call.
+    const connection = await connect(["--slow-call", "--abort-proof"], {
+      callTimeoutMs: 300,
+    });
+    await connection.connect();
+
+    const controller = new AbortController();
+    const started = Date.now();
+    const pending = connection.callTool("slow", {}, { signal: controller.signal });
+    controller.abort();
+
+    const result = await pending;
+
+    expect(result.output).toBe('Tool "slow" was cancelled');
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(connection.status).toBe("ready");
+  });
+
+  it("keeps the server usable after an abort", async () => {
+    const connection = await connect(["--slow-call"], { callTimeoutMs: 10_000 });
+    await connection.connect();
+
+    // Aborted while the call is on the wire, which is what has to leave the
+    // server usable.
+    const controller = new AbortController();
+    const pending = connection.callTool("slow", {}, { signal: controller.signal });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    controller.abort();
+    expect((await pending).isError).toBe(true);
+
+    // The process is still there, so the next call must work: the connection
+    // stays `ready` and never becomes a lie.
+    expect(connection.status).toBe("ready");
+    const pid = connection.processId as number;
+    expect(isAlive(pid)).toBe(true);
+
+    const after = await connection.callTool("echo", { text: "still here" });
+    expect(after).toEqual({ output: "still here", isError: false });
+  });
+});
+
+describe("McpConnection environment", () => {
+  it("passes only the declared env plus the SDK whitelist to the server", async () => {
+    // A variable the test owns: if the child inherited process.env, it would
+    // be visible to the server.
+    process.env.RACSO_TEST_SECRET = "do-not-leak";
+    const previousPath = process.env.PATH;
+
+    try {
+      const connection = await connect([], { env: { MY_VAR: "x" } });
+      await connection.connect();
+
+      const result = await connection.callTool("env", {});
+      expect(result.isError).toBe(false);
+
+      const names = result.output.split(",");
+      expect(names).toContain("MY_VAR");
+      expect(names).not.toContain("RACSO_TEST_SECRET");
+      // The SDK whitelist is what the server is supposed to see, so PATH (set
+      // for this process) must be there even though the config never asked.
+      if (previousPath !== undefined) expect(names).toContain("PATH");
+      expect(names).not.toContain("OMNIROUTE_API_KEY");
+    } finally {
+      delete process.env.RACSO_TEST_SECRET;
+      if (previousPath === undefined) delete process.env.PATH;
+    }
+  });
+});
+
+describe("McpConnection failure paths", () => {
   it("fails the handshake on timeout and kills the server", async () => {
     const connection = await connect(["--hang"], { startupTimeoutMs: 400 });
 
@@ -199,5 +329,133 @@ describe("McpConnection close", () => {
 
     expect(connection.status).toBe("closed");
     await expect(connection.connect()).rejects.toThrow(/cannot connect while closed/);
+  });
+});
+
+describe("McpConnection process tree", () => {
+  it("kills the grandchildren of the server on close", async () => {
+    const dir = scratchDir();
+    const pidFile = path.join(dir, "grandchild.pid");
+
+    const connection = await connect(["--grandchild"], {
+      env: { GRANDCHILD_PID_FILE: pidFile },
+    });
+    await connection.connect();
+
+    const serverPid = connection.processId as number;
+    const grandchild = Number(readFileSync(pidFile, "utf8"));
+    expect(grandchild).toBeGreaterThan(0);
+    expect(childrenOf(serverPid)).toContain(grandchild);
+    expect(isAlive(grandchild)).toBe(true);
+
+    await connection.close();
+
+    expect(await waitForDeath(serverPid)).toBe(true);
+    expect(await waitForDeath(grandchild)).toBe(true);
+  });
+
+  it("kills the grandchildren of a server that never finished the handshake", async () => {
+    const dir = scratchDir();
+    const pidFile = path.join(dir, "grandchild.pid");
+
+    const connection = await connect(["--grandchild", "--hang"], {
+      startupTimeoutMs: 400,
+      env: { GRANDCHILD_PID_FILE: pidFile },
+    });
+
+    await expect(connection.connect()).rejects.toThrow(/did not finish the handshake/);
+
+    const serverPid = connection.processId as number;
+    const grandchild = Number(readFileSync(pidFile, "utf8"));
+
+    expect(await waitForDeath(serverPid)).toBe(true);
+    expect(await waitForDeath(grandchild)).toBe(true);
+  });
+});
+
+describe("McpConnection close after a failure", () => {
+  it("releases calls still in flight instead of waiting for the call timeout", async () => {
+    const connection = await connect(["--hang", "--slow-call"], {
+      startupTimeoutMs: 300,
+      callTimeoutMs: 10_000,
+    });
+
+    // `connect` rejects on the handshake timeout while the server keeps
+    // running, which is exactly the `failed` state that used to leak calls.
+    // `connect` owns the kill, so close() racing it is not what is tested.
+    await expect(connection.connect()).rejects.toThrow(/did not finish the handshake/);
+    expect(connection.status).toBe("failed");
+
+    const started = Date.now();
+    await connection.close();
+
+    expect(connection.status).toBe("closed");
+    expect(Date.now() - started).toBeLessThan(3000);
+  });
+
+  it("closes a failed connection without hanging when a call is in flight", async () => {
+    const connection = await connect(["--slow-call"], { callTimeoutMs: 10_000 });
+    await connection.connect();
+
+    const pending = connection.callTool("slow", {});
+    const started = Date.now();
+    await connection.close();
+
+    const result = await pending;
+    expect(result.isError).toBe(true);
+    expect(Date.now() - started).toBeLessThan(3000);
+  });
+});
+
+describe("McpConnection concurrency", () => {
+  it("rejects a second connect while the first is starting", async () => {
+    const connection = await connect();
+    const first = connection.connect();
+
+    await expect(connection.connect()).rejects.toThrow(/cannot connect while starting/);
+
+    await first;
+    expect(connection.status).toBe("ready");
+
+    const result = await connection.callTool("echo", { text: "one" });
+    expect(result).toEqual({ output: "one", isError: false });
+
+    // Exactly one server exists: the second connect failed before spawning,
+    // and the connection has a single pid.
+    expect(childrenOf(process.pid).filter((pid) => pid === connection.processId)).toHaveLength(1);
+  });
+});
+
+describe("McpConnection listTools", () => {
+  it("stops at the page cap and warns instead of dropping tools silently", async () => {
+    const warnings: string[] = [];
+    const spy = vi.spyOn(logger, "warn").mockImplementation((message: string) => {
+      warnings.push(message);
+    });
+
+    try {
+      const connection = await connect(["--endless-pages"]);
+      await connection.connect();
+
+      const tools = await connection.listTools();
+
+      expect(tools).toEqual([]);
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toMatch(/still had tools after 50 pages/);
+      expect(connection.status).toBe("ready");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("de-duplicates a tool name repeated across pages, keeping the first", async () => {
+    const connection = await connect(["--codex-pages"]);
+    await connection.connect();
+
+    const tools = await connection.listTools();
+
+    expect(tools.map((tool) => tool.name)).toEqual(["echo", "fail"]);
+    // The first definition wins, not the one from the later page.
+    expect(tools[0].description).toBe("Echoes back the given text");
   });
 });
