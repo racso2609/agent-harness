@@ -267,14 +267,14 @@ export class McpConnection {
   private async doClose(): Promise<void> {
     if (this.state === "closed") return;
 
- this.state = "closed";
+    this.state = "closed";
 
- // The tree is walked and signalled first, while the server is still the
- // parent of everything it spawned, and even a failed connection gets the
- // full grace period. Closing the transport ends the server's stdin, and a
- // server that exits on that re-parents its children to init, where no
- // walk from its pid can reach them any more.
- await this.killProcess();
+    // The tree is walked and signalled first, while the server is still the
+    // parent of everything it spawned, and even a failed connection gets the
+    // full grace period. Closing the transport ends the server's stdin, and a
+    // server that exits on that re-parents its children to init, where no
+    // walk from its pid can reach them any more.
+    await this.killProcess();
 
     // Closing the transport matters in both branches: a connection that
     // failed without the process dying (handshake timeout, a transport error
@@ -318,14 +318,14 @@ export class McpConnection {
   // The tree is walked with `ps` because the SDK transport spawns the server
   // without `detached`, so the child does not lead its own process group and
   // killing `-pid` would reach the harness instead. Safe when the process is
- // already gone, and always given the full grace period: a tree walked
- // after the server exited no longer contains the children it left behind.
- private async killProcess(): Promise<void> {
- const pid = this.pid;
- if (pid === undefined) return;
+  // already gone, and always given the full grace period: a tree walked
+  // after the server exited no longer contains the children it left behind.
+  private async killProcess(): Promise<void> {
+    const pid = this.pid;
+    if (pid === undefined) return;
 
- await killProcessTree(pid, undefined, KILL_GRACE_MS);
- }
+    await killProcessTree(pid, undefined, KILL_GRACE_MS);
+  }
 
   // Races a promise against a deadline. The losing promise's rejection is
   // swallowed so it cannot surface as an unhandled rejection.
