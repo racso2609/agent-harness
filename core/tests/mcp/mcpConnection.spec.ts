@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { logger } from "../../src/utils/logger";
 import { McpConnection } from "../../src/mcp/McpConnection";
 import type { ResolvedMcpServer } from "../../src/mcp/McpConfig";
-import { findTagged, isOrphaned, listProcesses, type TaggedProcess } from "./processTable";
+import { listProcesses, sweepOrphans, type TaggedProcess } from "./processTable";
 
 const fixture = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -80,6 +80,21 @@ const childrenOf = (pid: number): number[] => {
     .map(([childPid]) => childPid);
 };
 
+// Polls until a fixture has written the file a test is waiting for, so a
+// handshake that times out in 1 ms does not race the grandchild's pid file.
+const waitForFile = async (file: string, timeoutMs = 5000): Promise<string> => {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      return readFileSync(file, "utf8");
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  }
+
+  throw new Error(`timed out waiting for ${file}`);
+};
+
 // Temporary directory for fixtures that need to hand state back through a
 // file (the pid of a grandchild of the server).
 const scratchDirs: string[] = [];
@@ -95,36 +110,12 @@ const scratchDir = (): string => {
 // grandchild it spawned is re-parented to init and nothing else in the suite
 // will ever reap it.
 //
-// The sweep only ever kills orphans. A tagged process that still has its
-// parent was not abandoned by it, and killing it here would SIGKILL a server
-// in the middle of its own `stopChildren()`, which is exactly the layer that
-// takes the grandchild down.
-//
-// Returns what it found, and both lists are failures: a survivor is a real
-// leak, and a tagged process that is still parented to something means a
-// connection was never closed.
+// The sweep itself lives in `processTable.ts` so it can be tested on its own
+// (`processTable.spec.ts`), instead of only ever running here where a broken
+// sweep would look exactly like a clean run.
 const sweepTagged = (): { swept: TaggedProcess[]; parented: TaggedProcess[] } => {
-  const rows = listProcesses();
-  const tagged = findTagged(rows, FIXTURE_TAG);
-  const swept: TaggedProcess[] = [];
-  const parented: TaggedProcess[] = [];
-
-  for (const process_ of tagged) {
-    if (!isOrphaned(process_.pid, process_.ppid, rows)) {
-      parented.push(process_);
-      continue;
-    }
-
-    try {
-      process.kill(process_.pid, "SIGKILL");
-    } catch {
-      // Already gone.
-    }
-
-    swept.push(process_);
-  }
-
-  return { swept, parented };
+  const { orphans, parented } = sweepOrphans(listProcesses(), FIXTURE_TAG);
+  return { swept: orphans, parented };
 };
 
 // Why the suite lets a leaked process fail the file instead of only sweeping
@@ -442,18 +433,70 @@ describe("McpConnection process tree", () => {
     expect(await waitForDeath(serverPid)).toBe(true);
 
     // The system does not clean this up: the grandchild is still running, and
-    // the sweep sees it as an orphan it would have to reap.
+    // the sweep sees it as an orphan it has to reap. The same function the
+    // `afterEach` runs is called here, so this test fails if the sweep stops
+    // detecting the leak instead of only if the leak itself disappears.
     expect(await waitForDeath(grandchild, 250)).toBe(false);
-    const rows = listProcesses();
-    const orphan = findTagged(rows, FIXTURE_TAG).find((process_) => process_.pid === grandchild);
-    expect(orphan).toBeDefined();
-    expect(isOrphaned(orphan!.pid, orphan!.ppid, rows)).toBe(true);
-
-    // Reaped here only so this test can assert the sweep's finding without
-    // failing the file it runs in. `sweepTagged` above does exactly this, and
-    // the deliberate-leak check in the report relies on it.
-    process.kill(grandchild, "SIGKILL");
+    const { orphans } = sweepOrphans(listProcesses(), FIXTURE_TAG);
+    expect(orphans.map((process_) => process_.pid)).toContain(grandchild);
     expect(await waitForDeath(grandchild)).toBe(true);
+  });
+
+  // The grace period is only observable from the grandchild's side. With
+  // `graceMs = 0` the SIGTERM and the SIGKILL are sent in the same instant and
+  // the grandchild dies before it can record anything, so a test that only
+  // waits for its death passes either way. This one reads what the grandchild
+  // wrote: it saw the SIGTERM and stayed alive for a while afterwards, which
+  // is impossible unless the tree really got the full grace period.
+  //
+  // The handshake budget is 1 ms on purpose: `connect` times out before it has
+  // recorded the pid, so its own kill is a no-op and `close()` is the call
+  // that walks the tree. That is the path the grace period belongs to, and the
+  // assertion on the server still being alive pins the precondition instead of
+  // leaving it to timing.
+  it("gives the tree of a failed connection the full grace period", async () => {
+    const dir = scratchDir();
+    const pidFile = path.join(dir, "grandchild.pid");
+    const recordsFile = path.join(dir, "grandchild.records");
+
+    const connection = await connect(
+      ["--hang", "--grandchild", "--grandchild-records-sigterm", recordsFile],
+      { startupTimeoutMs: 1, env: { GRANDCHILD_PID_FILE: pidFile } },
+    );
+
+    await expect(connection.connect()).rejects.toThrow(/did not finish the handshake/);
+    expect(connection.status).toBe("failed");
+
+    const serverPid = connection.processId as number;
+    const grandchild = Number(await waitForFile(pidFile));
+    expect(grandchild).toBeGreaterThan(0);
+    // The grandchild announces itself before it can be signalled, so a missing
+    // record below means "it never saw the SIGTERM", not "it never started".
+    expect(await waitForFile(recordsFile)).toContain("started");
+    // `connect` never got to kill anything, so the tree is still whole and
+    // `close()` is what has to take it down.
+    expect(isAlive(serverPid)).toBe(true);
+    expect(isAlive(grandchild)).toBe(true);
+
+    await connection.close();
+
+    expect(await waitForDeath(serverPid)).toBe(true);
+    expect(await waitForDeath(grandchild)).toBe(true);
+
+    const records = readFileSync(recordsFile, "utf8");
+    expect(records).toContain("sigterm");
+
+    // It lived on after the SIGTERM. The window is bounded by the fixture's
+    // own escalation (the server SIGKILLs its children 100 ms after its own
+    // SIGTERM), so the grandchild reports a few heartbeats and then dies. With
+    // `graceMs = 0` the connection's SIGKILL lands in the same tick as the
+    // SIGTERM and the file holds no heartbeat at all.
+    const heartbeats = records
+      .split("\n")
+      .filter((line) => line.startsWith("alive "))
+      .map((line) => Number(line.slice("alive ".length)));
+    expect(heartbeats.length).toBeGreaterThanOrEqual(2);
+    expect(Math.max(...heartbeats)).toBeGreaterThanOrEqual(40);
   });
 
   it("kills the grandchildren of a server that never finished the handshake", async () => {
