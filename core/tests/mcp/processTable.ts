@@ -69,10 +69,14 @@ export const ancestorPids = (rows: ProcessRow[], root: number = process.pid): Se
 // Every process carrying the marker of a fixture, whether as the environment
 // variable `FIXTURE_TAG=<tag>` or as the title `fixture-grandchild:<tag>`.
 //
-// Both forms are matched on purpose: a server passes the tag down in its
-// environment, while a grandchild stamps it in its process title, and a leak
-// is only findable if either one is enough. Ancestors of `root` are left out
-// because they inherit the same environment.
+// Both forms are matched on purpose, but they are not interchangeable, and
+// which one works depends on the process. Measured on macOS with `ps -A -E`:
+// a live direct child of the server is found by its environment, while an
+// orphaned grandchild is found by its title only. Once the grandchild is
+// re-parented to init, `ps -E` no longer prints `FIXTURE_TAG=<tag>` for it
+// (the variable is still in its environment, `ps` just does not show it), so
+// the title is the only marker that survives the re-parenting. Ancestors of
+// `root` are left out because they inherit the same environment.
 export const findTagged = (
   rows: ProcessRow[],
   tag: string,
@@ -93,4 +97,58 @@ export const isOrphaned = (pid: number, ppid: number, rows: ProcessRow[]): boole
   if (pid === ppid || ppid <= REPARENTED_PPID) return true;
 
   return !rows.some((row) => row.pid === ppid);
+};
+
+export interface SweepResult {
+  // Tagged processes that had lost their parent: killed by the sweep.
+  orphans: TaggedProcess[];
+  // Tagged processes still running under a live parent: left alone.
+  parented: TaggedProcess[];
+}
+
+// Kills every tagged process that lost its parent, and reports what it found.
+//
+// Only orphans are killed. A tagged process that still has its parent was not
+// abandoned by it, and killing it here would SIGKILL a server in the middle of
+// its own `stopChildren()`, which is exactly the layer that takes the
+// grandchild down.
+//
+// Both lists are failures for the caller: an orphan is a real leak, and a
+// tagged process still parented to something means a connection was never
+// closed.
+export const sweepOrphans = (
+  rows: ProcessRow[],
+  tag: string,
+  root: number = process.pid,
+): SweepResult => {
+  const orphans: TaggedProcess[] = [];
+  const parented: TaggedProcess[] = [];
+
+  for (const process_ of findTagged(rows, tag, root)) {
+    if (!isOrphaned(process_.pid, process_.ppid, rows)) {
+      parented.push(process_);
+      continue;
+    }
+
+    // Re-checked right before the signal, the way the fixture does: the pid may
+    // have been recycled between the `ps` snapshot and this line. The window is
+    // narrowed, not closed: `kill(pid, 0)` and `kill(pid, "SIGKILL")` are two
+    // syscalls, and a pid recycled in between still gets the signal.
+    try {
+      process.kill(process_.pid, 0);
+    } catch {
+      // Already gone: nothing left to sweep.
+      continue;
+    }
+
+    try {
+      process.kill(process_.pid, "SIGKILL");
+    } catch {
+      // Died between the check and the signal.
+    }
+
+    orphans.push(process_);
+  }
+
+  return { orphans, parented };
 };
