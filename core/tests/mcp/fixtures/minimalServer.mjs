@@ -23,6 +23,8 @@
 //   --all-pages       Splits `tools/list` in two pages and expects the client to
 //                     follow the `nextCursor` of the first one.
 
+import { spawn } from "node:child_process";
+import { writeFileSync } from "node:fs";
 import process from "node:process";
 
 const argv = process.argv.slice(2);
@@ -35,8 +37,32 @@ const HANG = has("--hang");
 const EXIT_ON_START = has("--exit-on-start");
 const SLOW_CALL = has("--slow-call");
 const ALL_PAGES = has("--all-pages");
+const ENDLESS_PAGES = has("--endless-pages");
+const CODEX_PAGES = has("--codex-pages");
+const GRANDCHILD = has("--grandchild");
+const ABORT_PROOF = has("--abort-proof");
 
 const CALL_DELAY_MS = Number(process.env.CALL_DELAY_MS ?? 5000);
+const GRANDCHILD_PID_FILE = process.env.GRANDCHILD_PID_FILE;
+
+// A child of the server that refuses SIGTERM, so only a real tree kill or a
+// SIGKILL escalation gets rid of it. Its pid is handed out through the
+// "grandchild" tool and, when asked for, through a file.
+const startGrandchild = () => {
+  const child = spawn(
+    process.execPath,
+    ["-e", "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);"],
+    { stdio: "ignore" },
+  );
+
+  if (GRANDCHILD_PID_FILE && child.pid) {
+    writeFileSync(GRANDCHILD_PID_FILE, String(child.pid), "utf8");
+  }
+
+  return child.pid;
+};
+
+const GRANDCHILD_PID = GRANDCHILD ? startGrandchild() : undefined;
 
 const PROTOCOL_VERSION = "2025-06-18";
 
@@ -83,9 +109,22 @@ const respondError = (id, code, message) => write({ jsonrpc: "2.0", id, error: {
 const pendingCalls = new Map();
 
 const listToolsPage = (cursor) => {
+  if (ENDLESS_PAGES) {
+    const page = Number(cursor ?? 0);
+    return { tools: [], nextCursor: String(page + 1) };
+  }
+
+  // Repeats "echo" on the second page with a different description, so a
+  // de-duplicating client keeps the first one.
+  if (CODEX_PAGES) {
+    if (!cursor) return { tools: [TOOLS[0], TOOLS[1]], nextCursor: "page-2" };
+    if (cursor === "page-2") return { tools: [{ ...TOOLS[0], description: "Repeated name" }] };
+    return { tools: [] };
+  }
+
   if (!ALL_PAGES) return { tools: TOOLS };
 
-  // Two pages: [echo] then [fail, slow].
+  // Two pages: [echo] then [fail, slow, env, grandchild].
   if (!cursor) return { tools: TOOLS.slice(0, 1), nextCursor: "page-2" };
   if (cursor === "page-2") return { tools: TOOLS.slice(1) };
 
@@ -94,6 +133,8 @@ const listToolsPage = (cursor) => {
 
 const toolText = (name, args) => {
   if (name === "echo") return typeof args?.text === "string" ? args.text : "";
+  if (name === "env") return Object.keys(process.env).sort().join(",");
+  if (name === "grandchild") return String(GRANDCHILD_PID ?? "none");
   return `${name} ok`;
 };
 
@@ -101,7 +142,10 @@ const handleCall = (id, params) => {
   const name = typeof params?.name === "string" ? params.name : "";
   const args = params?.arguments;
 
-  if (SLOW_CALL) {
+  // Only the "slow" tool is delayed: a "slow" server still answers everything
+  // else promptly, which is what lets a test prove the connection is usable
+  // after a call was aborted.
+  if (SLOW_CALL && name === "slow") {
     const timer = setTimeout(() => {
       pendingCalls.delete(id);
       if (name === "fail") {
@@ -121,7 +165,7 @@ const handleCall = (id, params) => {
     return;
   }
 
-  if (name === "echo" || name === "slow") {
+  if (name === "echo" || name === "slow" || name === "env" || name === "grandchild") {
     respond(id, { content: [{ type: "text", text: toolText(name, args) }] });
     return;
   }
@@ -137,8 +181,9 @@ const handleMessage = (message) => {
 
   if (!hasId) {
     // Notification. `notifications/initialized` needs no answer; a
-    // cancellation drops the pending call so its timer never fires.
-    if (method === "notifications/cancelled") {
+    // cancellation drops the pending call so its timer never fires, unless
+    // the server ignores cancellations on purpose.
+    if (method === "notifications/cancelled" && !ABORT_PROOF) {
       const requestId = message.params?.requestId;
       const cancel = pendingCalls.get(requestId);
       if (cancel) {
