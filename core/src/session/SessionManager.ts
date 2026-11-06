@@ -9,6 +9,10 @@ import {
   strictestApproval,
 } from "@/agents";
 import { Config, DEFAULT_PROVIDER_TYPE, ProviderDetail } from "@/configuration";
+import { composeMemoryBlock, createMemoryProvider, stripMemoryBlocks } from "@/memory";
+import type { MemoryHit, MemoryProvider } from "@/memory";
+import path from "node:path";
+
 import { OpenAiProvider } from "@/providers/openai";
 import { ensureSkillsDir, SkillLoader, SkillRegistry } from "@/skills";
 import type { SkillSummary } from "@/skills";
@@ -121,6 +125,10 @@ interface SessionManager {
   listAgents: () => AgentSummary[];
   // Swaps the active agent, its tools and its persona.
   setAgent: (agentId: string) => Promise<boolean>;
+  // Health of the configured memory backend, for diagnostics.
+  memoryStatus: () => Promise<{ provider: string; ok: boolean; detail?: string }>;
+  // Searches the persistent memory. Empty when memory is off or down.
+  searchMemory: (query: string, limit?: number) => Promise<MemoryHit[]>;
   // Installs the handler used when the approval policy is "ask".
   approveWith: (handler: ApprovalHandler) => void;
   // Launches a background child agent. Returns a handle immediately.
@@ -199,6 +207,10 @@ class SessionManagerImpl implements SessionManager {
   // a child as delivered, so the queue never holds the same one twice.
   protected undelivered: SpawnHandle[] = [];
 
+  // Persistent memory backend. Created by initialize() from the memory config
+  // block; until then a no-op, so every path can hold one.
+  protected memoryProvider: MemoryProvider = createMemoryProvider(undefined);
+
   // Ids of the children whose result already entered the history. Persisted so
   // a resume does not hand the parent the same result twice: the injected
   // message itself is not a reliable marker, since history compaction may
@@ -219,6 +231,10 @@ class SessionManagerImpl implements SessionManager {
   // When options.sessionId is given, the stored session is resumed instead.
   async initialize(options: SessionOptions = {}) {
     if (options.store) this.store = options.store;
+
+    // Built before any injection point: both load() and the new-session
+    // branch below assume the provider already exists.
+    this.memoryProvider = createMemoryProvider(this.config.config.memory);
 
     this.loadAgentRegistry();
 
@@ -252,6 +268,7 @@ class SessionManagerImpl implements SessionManager {
 
     if (!resumed) {
       this.applySystemPrompt();
+      await this.injectMemoryContext();
       this.save();
     }
   }
@@ -316,6 +333,10 @@ class SessionManagerImpl implements SessionManager {
     this.costUsd = record.costUsd ?? 0;
 
     await this.initializeClassifier();
+
+    // Single injection point for resumed sessions: the history is
+    // restored by now, so the block lands right after the persona.
+    await this.injectMemoryContext();
 
     return true;
   }
@@ -919,6 +940,7 @@ class SessionManagerImpl implements SessionManager {
       spawn: (agentId, prompt) => this.spawn(agentId, prompt),
       getSkillBody: (id) => this.skillBody(id),
       listSkillIds: () => this.skillIds(),
+      recallMemory: (query, limit) => this.recallMemory(query, limit),
       // Streams shell/tool output live, tagged with the originating call so the
       // UI can attribute it.
       onOutput: (chunk) => {
@@ -943,6 +965,59 @@ class SessionManagerImpl implements SessionManager {
     if (skill.body.length <= max) return skill.body;
 
     return `${skill.body.slice(0, max)}\n[skill truncated]`;
+  }
+
+  // Name of the memory project: the configured one, or the workspace folder
+  // name, so two workspaces do not read each other's memories by accident.
+  protected memoryProject(): string {
+    return this.config.config.memory?.project ?? path.basename(this.workspaceRoot());
+  }
+
+  // Searches the persistent memory on behalf of the recall tool. Never throws:
+  // a down backend is an empty result, which the tool reports as "not found".
+  protected async recallMemory(query: string, limit?: number): Promise<MemoryHit[]> {
+    try {
+      return await this.memoryProvider.search({
+        text: query,
+        limit,
+        project: this.memoryProject(),
+      });
+    } catch (error) {
+      logger.warn({ err: error }, "Memory search failed");
+
+      return [];
+    }
+  }
+
+  // Injects the memory context into the history, right after the persona. This
+  // is the only place that writes the block: initialize() calls it on the
+  // new-session branch and load() calls it once the history is restored, so a
+  // resumed session never gets it twice. Stripping before injecting is what
+  // makes the operation idempotent, including on a record that already carries
+  // the block from a previous run.
+  protected async injectMemoryContext(): Promise<void> {
+    const memory = this.config.config.memory;
+    if (memory?.enabled !== true) return;
+    if (memory.injectOnStart === false) return;
+
+    this.history = stripMemoryBlocks(this.history);
+
+    try {
+      const text = await this.memoryProvider.context({
+        project: this.memoryProject(),
+        maxChars: memory.maxContextChars ?? 2000,
+      });
+      if (!text.trim()) return;
+
+      // The persona owns index 0; without one, the block goes first.
+      if (this.history[0]?.role === "system") {
+        this.history.splice(1, 0, composeMemoryBlock(text));
+      } else {
+        this.history.unshift(composeMemoryBlock(text));
+      }
+    } catch (error) {
+      logger.warn({ err: error }, "Memory context injection failed");
+    }
   }
 
   // Approval gate. The effective mode is the strictest of the configured
@@ -979,6 +1054,18 @@ class SessionManagerImpl implements SessionManager {
       return "allow";
     }
     return decision;
+  }
+
+  // Health of the memory backend, so the CLI can warn when it is down.
+  async memoryStatus(): Promise<{ provider: string; ok: boolean; detail?: string }> {
+    const health = await this.memoryProvider.health();
+
+    return { provider: this.memoryProvider.id, ok: health.ok, detail: health.detail };
+  }
+
+  // Public memory search used by the harness contract.
+  searchMemory(query: string, limit?: number): Promise<MemoryHit[]> {
+    return this.recallMemory(query, limit);
   }
 
   // Installs the handler used when the approval policy is "ask".

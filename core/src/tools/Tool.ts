@@ -1,3 +1,4 @@
+import type { MemoryHit } from "@/memory";
 import type { JsonSchema, ToolResult } from "@/types/providers";
 
 // What a tool is about to do, handed to the approval gate.
@@ -31,6 +32,9 @@ export interface ToolContext {
   getSkillBody?: (id: string) => string | undefined;
   // Lists the ids of the loaded skills, for error messages.
   listSkillIds?: () => string[];
+  // Searches the persistent memory. Injected by the session manager; tools
+  // that cannot recall leave it undefined.
+  recallMemory?: (query: string, limit?: number) => Promise<MemoryHit[]>;
   // Live output of a long-running tool. Chunks are already throttled by the
   // tool. Optional: every tool must work without it.
   onOutput?: (chunk: string) => void;

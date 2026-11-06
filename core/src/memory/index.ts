@@ -4,6 +4,7 @@ import { LocalMemoryProvider } from "./LocalMemoryProvider";
 import { NoopMemoryProvider } from "./NoopMemoryProvider";
 import type { MemoryProvider } from "./Memory";
 
+export { composeMemoryBlock, MEMORY_BLOCK_PREFIX, stripMemoryBlocks } from "./context";
 export { LocalMemoryProvider, DEFAULT_MAX_HIT_CHARS } from "./LocalMemoryProvider";
 export type { LocalMemoryProviderOptions } from "./LocalMemoryProvider";
 export { NoopMemoryProvider } from "./NoopMemoryProvider";

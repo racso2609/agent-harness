@@ -105,6 +105,14 @@ class Harness implements IHarness {
     return this.session.setAgent(agentId);
   }
 
+  memoryStatus() {
+    return this.session.memoryStatus();
+  }
+
+  searchMemory(query: string, limit?: number) {
+    return this.session.searchMemory(query, limit);
+  }
+
   approveWith(handler: ApprovalHandler) {
     this.session.approveWith(handler);
   }
