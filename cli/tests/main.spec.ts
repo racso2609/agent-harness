@@ -21,7 +21,12 @@ vi.mock("../src/flows/startSetup", () => ({ startSetup: async () => {} }));
 // The mount itself, so a case can prove ink was never asked to paint. It is a
 // vi.fn and not an inline arrow for that reason: the namespace of a mocked ESM
 // module cannot be spied on, but the function it exports can be asserted.
-const inkRender = vi.fn(() => ({ rerender: () => {}, unmount: () => {} }));
+// hoisted because vi.mock is lifted above every other statement: a plain const
+// would be read before it is initialised, and only works today because the
+// factory runs when main.ts is imported.
+const { inkRender } = vi.hoisted(() => ({
+  inkRender: vi.fn(() => ({ rerender: () => {}, unmount: () => {} })),
+}));
 
 vi.mock("ink", () => ({
   render: inkRender,
@@ -280,8 +285,7 @@ describe("the boot sequence of the CLI", () => {
   it("never builds the ink renderer for a --tui run it is going to refuse", async () => {
     // The same refusal, observed instead of inspected: what a real boot must not
     // do is mount ink, so the mount itself is what is watched. Any path that
-    // reaches for the renderer before it gives up paints here and fails, instead
-    // of leaving it to a private field being null.
+    // reaches for the renderer before it gives up paints here and fails.
 
     const harness = {
       resolveSession: () => undefined,
