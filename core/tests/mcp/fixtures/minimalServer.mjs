@@ -44,20 +44,48 @@ const ABORT_PROOF = has("--abort-proof");
 
 const CALL_DELAY_MS = Number(process.env.CALL_DELAY_MS ?? 5000);
 const GRANDCHILD_PID_FILE = process.env.GRANDCHILD_PID_FILE;
+// Handed to every grandchild as an environment variable and stamped into its
+// process title, so a test can find and sweep the descendants of an earlier
+// server by either half of the marker, even after they were re-parented.
+const FIXTURE_TAG = process.env.FIXTURE_TAG ?? "";
+
+// Ignores SIGTERM and never exits on its own: only SIGKILL takes it down.
+const REFUSES_SIGTERM = "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);";
+
+// Children this server spawned and must take down with it: a server that
+// exits while a grandchild runs leaves it re-parented to init, out of reach
+// of any later process-tree walk of the server.
+const spawnedChildren = [];
 
 // A child of the server that refuses SIGTERM, so only a real tree kill or a
 // SIGKILL escalation gets rid of it. Its pid is handed out through the
-// "grandchild" tool and, when asked for, through a file.
+// "grandchild" tool and, when asked for, through a file. A tagged grandchild
+// carries the marker in its environment and in its title, which is what a
+// `ps -E` sweep looks for either way.
 const startGrandchild = () => {
-  const child = spawn(
-    process.execPath,
-    ["-e", "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);"],
-    { stdio: "ignore" },
-  );
+  const marker = FIXTURE_TAG ? `fixture-grandchild:${FIXTURE_TAG}` : "";
+  const script = marker
+    ? `process.title = ${JSON.stringify(marker)}; ${REFUSES_SIGTERM}`
+    : REFUSES_SIGTERM;
 
-  if (GRANDCHILD_PID_FILE && child.pid) {
-    writeFileSync(GRANDCHILD_PID_FILE, String(child.pid), "utf8");
+  const child = spawn(process.execPath, ["-e", script], {
+    stdio: "ignore",
+    // A real variable, not just a marker in the title: a sweep that looks for
+    // either one has to find this process.
+    env: { ...process.env, FIXTURE_TAG },
+  });
+
+  if (child.pid) {
+    spawnedChildren.push(child.pid);
+    if (GRANDCHILD_PID_FILE) writeFileSync(GRANDCHILD_PID_FILE, String(child.pid), "utf8");
   }
+
+  // A dead child's pid can be recycled by an unrelated process, and a
+  // deferred SIGKILL aimed at it would then land on the wrong one.
+  child.on("exit", () => {
+    const index = spawnedChildren.indexOf(child.pid);
+    if (index !== -1) spawnedChildren.splice(index, 1);
+  });
 
   return child.pid;
 };
@@ -248,6 +276,57 @@ process.stdin.on("data", (chunk) => {
 
     index = buffer.indexOf("\n");
   }
+});
+
+// Only signals a child that is still there: `process.kill(pid, 0)` is checked
+// first, so a signal deferred by the escalation timer never reaches a pid that
+// was recycled in the meantime.
+const signalChildren = (signal) => {
+  for (const pid of [...spawnedChildren]) {
+    try {
+      process.kill(pid, 0);
+    } catch {
+      continue;
+    }
+
+    try {
+      process.kill(pid, signal);
+    } catch {
+      // Died between the check and the signal.
+    }
+  }
+};
+
+// Kills every child this server spawned. A grandchild built to ignore SIGTERM
+// must still die with its parent, or it is re-parented to init and outlives
+// the whole suite. SIGTERM gets a short grace period while the server keeps
+// running, and SIGKILL always follows: the "exit" handler cannot wait, so by
+// then the escalation has to be immediate.
+let childrenStopped = false;
+const stopChildren = (immediate = false) => {
+  if (childrenStopped) return;
+  childrenStopped = true;
+
+  signalChildren("SIGTERM");
+  if (immediate) {
+    signalChildren("SIGKILL");
+    return;
+  }
+
+  const escalation = setTimeout(() => signalChildren("SIGKILL"), 100);
+  escalation.unref();
+};
+
+// "exit" is the one handler no termination path skips, and it is the last
+// chance to act: nothing else runs after it.
+process.on("exit", () => stopChildren(true));
+process.on("SIGTERM", () => {
+  stopChildren();
+  setTimeout(() => process.exit(0), 150);
+});
+process.on("SIGINT", () => {
+  stopChildren();
+  setTimeout(() => process.exit(0), 150);
 });
 
 // A client closing stdin is the normal way to stop a stdio server.
