@@ -2,10 +2,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   AskOptions,
   ConversationEntry,
+  HarnessOptions,
   IHarness,
+  SessionSummary,
   SpawnHandle,
   SpawnEventListener,
 } from "@racso2609/core";
+import type { MainLoopOptions } from "../../src/MainLoop";
 import type { TuiState } from "../../src/ui/tui/App";
 import type { UiEvent } from "../../src/ui/UiAdapter";
 
@@ -77,6 +80,8 @@ const handle = (overrides: Partial<SpawnHandle> = {}): SpawnHandle => ({
 });
 
 interface FakeOptions {
+  // Sessions the store lists, most recent first; empty means a first run.
+  sessions?: SessionSummary[];
   // Session `loadSession` switches to; undefined means the switch failed.
   resumeTo?: string;
   conversation?: ConversationEntry[];
@@ -90,13 +95,19 @@ interface FakeOptions {
 // calls initialize, status, ask and the spawn subscription too, and a stub that
 // lied about them would let the wiring under test go untested.
 const fakeHarness = (options: FakeOptions = {}) => {
-  const calls = { ask: [] as { prompt: string; options?: AskOptions }[] };
+  const calls = {
+    ask: [] as { prompt: string; options?: AskOptions }[],
+    // What the loop asked core to boot, which is the whole point of resuming.
+    initialize: [] as (HarnessOptions | undefined)[],
+  };
   const listeners: SpawnEventListener[] = [];
   let sessionId = "session-new";
   let pending = options.pending ?? [];
 
   const harness: IHarness = {
-    initialize: async () => {},
+    initialize: async (initOptions) => {
+      calls.initialize.push(initOptions);
+    },
     ask: async (prompt, askOptions) => {
       calls.ask.push({ prompt, options: askOptions });
       if (prompt === CONTINUATION) pending = [];
@@ -113,18 +124,30 @@ const fakeHarness = (options: FakeOptions = {}) => {
       autoCompact: true,
       autoCompactThreshold: 60,
     }),
-    listSessions: () => [
-      {
-        id: "session-old",
-        createdAt: "2024-01-01T00:00:00.000Z",
-        updatedAt: "2024-01-02T00:00:00.000Z",
-        provider: "openai",
-        model: "gpt-test",
-        messageCount: 2,
-        title: "hola",
-      },
-    ],
-    resolveSession: () => undefined,
+    listSessions: () =>
+      options.sessions ?? [
+        {
+          id: "session-old",
+          createdAt: "2024-01-01T00:00:00.000Z",
+          updatedAt: "2024-01-02T00:00:00.000Z",
+          provider: "openai",
+          model: "gpt-test",
+          messageCount: 2,
+          title: "hola",
+        },
+      ],
+    // The real gate, narrowed to what these cases need: an exact id, a unique
+    // prefix or a 1-based index resolve; anything else does not, so a case
+    // cannot "resume" a session the store never held.
+    resolveSession: (target) => {
+      const sessions = options.sessions ?? [{ id: "session-old" }];
+      const index = Number(target);
+      if (Number.isInteger(index) && index >= 1 && index <= sessions.length) {
+        return sessions[index - 1]!.id;
+      }
+      const matches = sessions.filter((session) => session.id.startsWith(target));
+      return matches.length === 1 ? matches[0]!.id : undefined;
+    },
     loadSession: async () => {
       if (!options.resumeTo) return false;
       sessionId = options.resumeTo;
@@ -180,7 +203,7 @@ const until = async (done: () => boolean) => {
 // Boots a real MainLoop in TUI mode on that fake harness and lets the test type
 // into it. TUI mode is what parks the loop, which is the only state a turn can
 // start on its own from.
-const boot = async (options: FakeOptions = {}) => {
+const boot = async (options: FakeOptions = {}, start: MainLoopOptions = {}) => {
   const { harness, calls, settle } = fakeHarness(options);
   // A hand-built config with no providers is the one shape that never prompts:
   // it keeps the setup flow (which does read stdin) out of the run.
@@ -193,7 +216,7 @@ const boot = async (options: FakeOptions = {}) => {
   loop.harness = harness;
   loop.ui = ui;
 
-  void loop.start();
+  void loop.start(start);
   // Parked in nextPrompt(): the callbacks are wired and a turn may start on its
   // own, which is the only state these cases make sense in.
   await until(() => (loop as unknown as { isWaitingForPrompt(): boolean }).isWaitingForPrompt());
@@ -345,5 +368,105 @@ describe("the session picker", () => {
 
     expect(names).toContain("resume");
     expect(names).toContain("model");
+  });
+});
+
+// Resuming on boot is the same repaint /resume does, only the id comes from the
+// command line. These cases pin the hop that used to be missing: whatever the
+// flags said has to reach initialize(), because core is the one that loads.
+describe("booting into a persisted session", () => {
+  const summary = (id: string, updatedAt = "2024-01-02T00:00:00.000Z"): SessionSummary => ({
+    id,
+    createdAt: "2024-01-01T00:00:00.000Z",
+    updatedAt,
+    provider: "openai",
+    model: "gpt-test",
+    messageCount: 2,
+    title: id,
+  });
+
+  it("hands the given id to initialize and repaints once", async () => {
+    const entries: ConversationEntry[] = [
+      { role: "user", content: "hola" },
+      { role: "assistant", content: "buenas" },
+    ];
+    const restored = handle({ spawnId: "spawn-old", status: "done" });
+    const { ui, calls } = await boot(
+      { conversation: entries, history: [restored], resumeTo: "session-old" },
+      { sessionId: "session-old" },
+    );
+
+    // The loop resolves the id through resolveSession (prefix, index) and hands
+    // the full id to initialize, which loads it literally.
+    expect(calls.initialize).toEqual([{ sessionId: "session-old", agent: undefined }]);
+    // One repaint of each: a second conversation event would clear what it just
+    // showed, and the strip follows the transcript it belongs to.
+    expect(ui.events.filter((event) => event.type === "conversation")).toHaveLength(1);
+    expect(ui.events.filter((event) => event.type === "spawnHistory")).toHaveLength(1);
+    expect(ui.view.history.map((entry) => entry.id)).toEqual(["spawn-old"]);
+    expect(ui.view.lines.map((line) => line.role)).toEqual(["user", "answer"]);
+  });
+
+  it("resolves resumeLatest to the first session of the store", async () => {
+    // Core already orders listSessions() by activity, so position one is the
+    // most recent one; picking any other would resume a session the user did
+    // not mean.
+    const { calls } = await boot(
+      { sessions: [summary("session-recent"), summary("session-stale", "2023-01-01T00:00:00Z")] },
+      { resumeLatest: true },
+    );
+
+    expect(calls.initialize).toEqual([{ sessionId: "session-recent", agent: undefined }]);
+  });
+
+  it("refuses to start a new session when the store is empty", async () => {
+    // Bare `--resume` with nothing persisted cannot be honoured, and booting a
+    // fresh session instead would look like the flag was ignored: the loop
+    // writes the reason to stderr and exits non-zero, before initialising.
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const exit = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
+    const { calls } = await boot({ sessions: [] }, { resumeLatest: true });
+
+    expect(calls.initialize).toEqual([]);
+    expect(stderr).toHaveBeenCalledWith("no hay sesiones que reanudar\n");
+    expect(exit).toHaveBeenCalledWith(1);
+  });
+
+  it("refuses an id the store cannot resolve", async () => {
+    // initialize() loads an id literally: given one it does not know it boots a
+    // brand new session in silence, which is the bug this guards.
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const exit = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
+    const { calls } = await boot({ sessions: [summary("session-known")] }, { sessionId: "nope" });
+
+    expect(calls.initialize).toEqual([]);
+    expect(stderr).toHaveBeenCalledWith('no session matches "nope"\n');
+    expect(exit).toHaveBeenCalledWith(1);
+  });
+
+  it("hands core the full id of a prefix the store matches", async () => {
+    const { calls } = await boot(
+      { sessions: [summary("session-abc123")] },
+      { sessionId: "session-ab" },
+    );
+
+    expect(calls.initialize).toEqual([{ sessionId: "session-abc123", agent: undefined }]);
+  });
+
+  it("prefers the explicit id over resumeLatest", async () => {
+    // The id the user named wins even when the first entry of the store is a
+    // different session, which is what "the latest one" would have picked.
+    const { calls } = await boot(
+      { sessions: [summary("session-recent"), summary("session-chosen")] },
+      { sessionId: "session-chosen", resumeLatest: true },
+    );
+
+    expect(calls.initialize).toEqual([{ sessionId: "session-chosen", agent: undefined }]);
+  });
+
+  it("boots a new session when neither is asked for", async () => {
+    const { calls } = await boot();
+
+    expect(calls.initialize).toEqual([{ sessionId: undefined, agent: undefined }]);
   });
 });
