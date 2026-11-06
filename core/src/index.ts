@@ -18,7 +18,12 @@ export type {
 } from "./configuration";
 export { SessionStore } from "./session/SessionStore";
 export { SessionManager } from "./session/SessionManager";
-export { createMemoryProvider, LocalMemoryProvider, NoopMemoryProvider } from "./memory";
+export {
+createMemoryProvider,
+HttpMemoryProvider,
+LocalMemoryProvider,
+NoopMemoryProvider,
+} from "./memory";
 
 export type {
   ApprovalHandler,

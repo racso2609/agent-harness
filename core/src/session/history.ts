@@ -2,6 +2,11 @@ import { History } from "@/types/providers";
 
 export const DEFAULT_COMPACT_THRESHOLD = 4;
 
+// Prefix of the system block that holds the folded older turns. A new
+// compaction replaces the previous block instead of stacking another summary
+// of the same conversation on top of it.
+export const COMPACTED_MEMORY_PREFIX = "[Memoria previa compactada]";
+
 // Rough character-based token estimate used when the provider has not reported
 // usage yet (for example right after resuming a persisted session).
 export const estimateHistoryTokens = (messages: History[]) => {
@@ -56,7 +61,10 @@ const compactionTitle = (messages: History[]) => {
 
 // Compacts the conversation: keeps system messages, folds older turns into a
 // memory block and preserves the most recent window. Returns the same array
-// reference when no compaction is needed.
+// reference when no compaction is needed. Previous compaction blocks are
+// dropped: the new one supersedes them, otherwise every compaction would add
+// another summary of the same conversation and grow the context it is meant
+// to shrink.
 export const compactHistoryWithSummary = (
   history: History[],
   compactThreshold = DEFAULT_COMPACT_THRESHOLD,
@@ -66,8 +74,15 @@ export const compactHistoryWithSummary = (
   const conversation: History[] = [];
 
   for (const message of history) {
-    if (message.role === "system") systemMessages.push(message);
-    else conversation.push(message);
+    if (message.role !== "system") {
+      conversation.push(message);
+      continue;
+    }
+    // A previous compaction block is superseded by the one built below:
+    // keeping it would stack another summary of the same conversation on
+    // every pass and grow the context compaction exists to shrink.
+    if (message.content.startsWith(COMPACTED_MEMORY_PREFIX)) continue;
+    systemMessages.push(message);
   }
 
   if (conversation.length <= compactThreshold) return { history, summary: "", title: "" };
@@ -83,7 +98,7 @@ export const compactHistoryWithSummary = (
 
   const memoryBlock: History = {
     role: "system",
-    content: `[Memoria previa compactada]: ${summaryText}`,
+    content: `${COMPACTED_MEMORY_PREFIX}: ${summaryText}`,
   };
 
   return {

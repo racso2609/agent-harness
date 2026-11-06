@@ -159,6 +159,44 @@ describe("compactHistory", () => {
     ]);
   });
 
+  it("replaces the previous compaction block instead of stacking another one", () => {
+    const history: History[] = [
+      { role: "system", content: "you are a helpful agent" },
+      { role: "system", content: "[Memoria previa compactada]: user: u1" },
+      ...userMessages("u2", "u3", "u4", "u5", "u6"),
+    ];
+
+    const compacted = compactHistory(history, 2);
+
+    // Exactly one compaction block survives, and it holds the newly folded
+    // window: the old summary is superseded, not kept alongside the new one.
+    const blocks = compacted.filter(
+      (message) =>
+        message.role === "system" && message.content.startsWith("[Memoria previa compactada]"),
+    );
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].content).toBe("[Memoria previa compactada]: user: u2 | user: u3 | user: u4");
+    // The persona is not a compaction block, so it is preserved.
+    expect(compacted[0]).toEqual({ role: "system", content: "you are a helpful agent" });
+    expect(compacted.slice(1)).toEqual([blocks[0], ...userMessages("u5", "u6")]);
+  });
+
+  it("keeps a single compaction block across repeated compactions", () => {
+    let history: History[] = [
+      { role: "system", content: "persona" },
+      ...userMessages("u1", "u2", "u3", "u4", "u5", "u6"),
+    ];
+
+    for (let round = 0; round < 3; round++) history = compactHistory(history, 2);
+
+    const blocks = history.filter(
+      (message) =>
+        message.role === "system" && message.content.startsWith("[Memoria previa compactada]"),
+    );
+    expect(blocks).toHaveLength(1);
+    expect(history[0]).toEqual({ role: "system", content: "persona" });
+  });
+
   it("does not count system messages towards the threshold", () => {
     const history: History[] = [
       ...userMessages("u1", "u2", "u3", "u4"),

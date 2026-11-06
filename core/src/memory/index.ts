@@ -1,10 +1,22 @@
 import type { MemoryConfig } from "@/configuration";
 import { logger } from "@/utils/logger";
+import { HttpMemoryProvider } from "./HttpMemoryProvider";
 import { LocalMemoryProvider } from "./LocalMemoryProvider";
 import { NoopMemoryProvider } from "./NoopMemoryProvider";
 import type { MemoryProvider } from "./Memory";
 
 export { composeMemoryBlock, MEMORY_BLOCK_PREFIX, stripMemoryBlocks } from "./context";
+export { HttpMemoryProvider, DEFAULT_TIMEOUT_MS } from "./HttpMemoryProvider";
+export type { HttpMemoryProviderOptions } from "./HttpMemoryProvider";
+export {
+  buildContextUrl,
+  buildSearchUrl,
+  buildUrl,
+  fromEngramScope,
+  fromEngramType,
+  toEngramScope,
+  toEngramType,
+} from "./engram";
 export { LocalMemoryProvider, DEFAULT_MAX_HIT_CHARS } from "./LocalMemoryProvider";
 export type { LocalMemoryProviderOptions } from "./LocalMemoryProvider";
 export { NoopMemoryProvider } from "./NoopMemoryProvider";
@@ -39,9 +51,20 @@ export const createMemoryProvider = (config: MemoryConfig | undefined): MemoryPr
         maxHitChars: config.maxHitChars,
       });
     case "http":
+      if (!config.url) {
+        logger.warn('Memory provider "http" needs memory.url; disabling memory');
+        return new NoopMemoryProvider();
+      }
+      return new HttpMemoryProvider({
+        url: config.url,
+        apikey: config.apikey,
+        project: config.project,
+        timeoutMs: config.timeoutMs,
+        maxHitChars: config.maxHitChars,
+      });
     case "mcp":
-      // F-M4 (http) and F-M5 (mcp) implement these. Until then, warn once
-      // per call and behave like memory turned off.
+      // F-M5 (mcp) implements this. Until then, warn once per call and behave
+      // like memory turned off.
       logger.warn(`Memory provider "${config.provider}" is not implemented yet; disabling memory`);
       return new NoopMemoryProvider();
     default:
