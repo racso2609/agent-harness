@@ -7,12 +7,20 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { logger } from "../../src/utils/logger";
 import { McpConnection } from "../../src/mcp/McpConnection";
 import type { ResolvedMcpServer } from "../../src/mcp/McpConfig";
+import { findTagged, isOrphaned, listProcesses, type TaggedProcess } from "./processTable";
 
 const fixture = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
   "fixtures",
   "minimalServer.mjs",
 );
+
+// Carried by every server this file spawns. The fixture hands the same value
+// to each grandchild both as the `FIXTURE_TAG` environment variable and as the
+// `fixture-grandchild:<tag>` process title, which is what makes a leaked one
+// findable even after its parent exited and it was re-parented to init.
+const FIXTURE_TAG = `mcp-connection-${process.pid}-${Date.now()}`;
+const TAG_ENV_VAR = "FIXTURE_TAG";
 
 // Every connection a test creates, closed in afterEach so the suite never
 // leaves a server process behind.
@@ -23,7 +31,7 @@ const makeServer = (args: string[] = [], env: Record<string, string> = {}): Reso
   transport: "stdio",
   command: process.execPath,
   args: [fixture, ...args],
-  env,
+  env: { [TAG_ENV_VAR]: FIXTURE_TAG, ...env },
   untrusted: false,
 });
 
@@ -82,9 +90,62 @@ const scratchDir = (): string => {
   return dir;
 };
 
+// The belt for what neither `close()` nor the fixture can clean up: a server
+// killed with SIGKILL by a test never runs its own handlers, so the
+// grandchild it spawned is re-parented to init and nothing else in the suite
+// will ever reap it.
+//
+// The sweep only ever kills orphans. A tagged process that still has its
+// parent was not abandoned by it, and killing it here would SIGKILL a server
+// in the middle of its own `stopChildren()`, which is exactly the layer that
+// takes the grandchild down.
+//
+// Returns what it found, and both lists are failures: a survivor is a real
+// leak, and a tagged process that is still parented to something means a
+// connection was never closed.
+const sweepTagged = (): { swept: TaggedProcess[]; parented: TaggedProcess[] } => {
+  const rows = listProcesses();
+  const tagged = findTagged(rows, FIXTURE_TAG);
+  const swept: TaggedProcess[] = [];
+  const parented: TaggedProcess[] = [];
+
+  for (const process_ of tagged) {
+    if (!isOrphaned(process_.pid, process_.ppid, rows)) {
+      parented.push(process_);
+      continue;
+    }
+
+    try {
+      process.kill(process_.pid, "SIGKILL");
+    } catch {
+      // Already gone.
+    }
+
+    swept.push(process_);
+  }
+
+  return { swept, parented };
+};
+
+// Why the suite lets a leaked process fail the file instead of only sweeping
+// it: `expect` inside `afterEach` fails the run and does not swallow the
+// failure of the test that leaked it.
 afterEach(async () => {
   await Promise.all(opened.splice(0).map((connection) => connection.close()));
   for (const dir of scratchDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+
+  const { swept, parented } = sweepTagged();
+  const describe_ = (found: TaggedProcess[]): string =>
+    found.map((process_) => `${process_.pid} (ppid ${process_.ppid})`).join(", ");
+
+  expect(
+    swept,
+    `processes tagged ${FIXTURE_TAG} outlived their server and had to be swept: ${describe_(swept)}`,
+  ).toEqual([]);
+  expect(
+    parented,
+    `processes tagged ${FIXTURE_TAG} were still running under a live parent after close(): ${describe_(parented)}`,
+  ).toEqual([]);
 });
 
 describe("McpConnection handshake", () => {
@@ -351,6 +412,47 @@ describe("McpConnection process tree", () => {
     await connection.close();
 
     expect(await waitForDeath(serverPid)).toBe(true);
+    expect(await waitForDeath(grandchild)).toBe(true);
+  });
+
+  // Documented limit, not a bug to be fixed here. A server killed with SIGKILL
+  // never runs `process.on("exit")`, so the grandchild it spawned is
+  // re-parented to init while it is still alive. Nothing in this process can
+  // bring it down: `close()` walks the tree of a pid that no longer exists, and
+  // following the orphan would mean a supervisor of its own around every
+  // server. What the suite guarantees instead, and what this test pins, is
+  // that the leak is never silent: the `afterEach` sweep finds the orphan,
+  // reports it, and fails the file. That sweep runs right after this test.
+  it("leaves no grandchild behind when the server is SIGKILLed", async () => {
+    const dir = scratchDir();
+    const pidFile = path.join(dir, "grandchild.pid");
+
+    const connection = await connect(["--grandchild"], {
+      env: { GRANDCHILD_PID_FILE: pidFile },
+    });
+    await connection.connect();
+
+    const serverPid = connection.processId as number;
+    const grandchild = Number(readFileSync(pidFile, "utf8"));
+    expect(await waitForDeath(grandchild, 0)).toBe(false);
+
+    // The same kill a crashed or OOM-killed server gets: no handler of its own
+    // ever runs, which is the whole point.
+    process.kill(serverPid, "SIGKILL");
+    expect(await waitForDeath(serverPid)).toBe(true);
+
+    // The system does not clean this up: the grandchild is still running, and
+    // the sweep sees it as an orphan it would have to reap.
+    expect(await waitForDeath(grandchild, 250)).toBe(false);
+    const rows = listProcesses();
+    const orphan = findTagged(rows, FIXTURE_TAG).find((process_) => process_.pid === grandchild);
+    expect(orphan).toBeDefined();
+    expect(isOrphaned(orphan!.pid, orphan!.ppid, rows)).toBe(true);
+
+    // Reaped here only so this test can assert the sweep's finding without
+    // failing the file it runs in. `sweepTagged` above does exactly this, and
+    // the deliberate-leak check in the report relies on it.
+    process.kill(grandchild, "SIGKILL");
     expect(await waitForDeath(grandchild)).toBe(true);
   });
 
