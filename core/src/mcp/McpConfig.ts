@@ -77,17 +77,29 @@ const safeStringify = (value: unknown): string => {
 // Builds the resolved server for one config entry, or returns the reason why
 // it must be skipped. Invalid entries never throw: they are logged and left
 // out so a typo cannot break the boot.
+// A server the user switched off is reported as `disabled` instead, because
+// it is not a problem to log.
 const resolveServer = (
   id: string,
   raw: McpServerConfig,
-): { server: ResolvedMcpServer } | { reason: string } => {
+): { server: ResolvedMcpServer } | { reason: string } | { disabled: true } => {
   const serverId = sanitizeServerId(id);
   if (!serverId) {
     return { reason: `MCP server id "${id}" has no usable characters` };
   }
 
   if (!raw || typeof raw !== "object") return { reason: `MCP server "${id}" is not an object` };
-  if (raw.enabled === false) return { reason: `MCP server "${id}" is disabled` };
+  // An explicit `enabled: false` is a user decision, not an error, so it is
+  // skipped silently. Any other non-boolean value (`"false"`, 0, null) is a
+  // mistake that would otherwise start the server: report it and skip.
+  if (raw.enabled === false) return { disabled: true };
+  if (raw.enabled !== undefined && typeof raw.enabled !== "boolean") {
+    return {
+      reason: `MCP server "${id}" has a non-boolean enabled (${safeStringify(
+        raw.enabled,
+      )}) and was skipped; use true or false`,
+    };
+  }
 
   const transport = raw.transport ?? "stdio";
   if (!SUPPORTED_TRANSPORTS.includes(transport)) {
@@ -165,12 +177,27 @@ const resolveServer = (
 };
 
 // Returns the servers that can actually be started, with defaults applied.
-// Disabled servers (master switch or per-server flag) yield an empty list,
-// and every discarded entry is reported once through logger.warn.
+// The master switch must be the literal `true`, so a typo can never start a
+// process. A server switched off by the user is left out silently; a malformed
+// switch or an invalid entry is reported once through logger.warn.
 // Order follows the config object so the registry stays deterministic.
 export function resolveMcpServers(config: McpConfigSource): ResolvedMcpServer[] {
   const mcp = config.mcp;
-  if (!mcp || mcp.enabled === false) return [];
+  if (!mcp) return [];
+  // Only a literal `true` turns MCP on. A malformed switch (`"false"`, 1, null)
+  // used to start every server, so it is reported and treated as off: the
+  // module never starts a process unless it was explicitly asked to.
+  if (mcp.enabled !== true) {
+    if (mcp.enabled !== undefined && mcp.enabled !== false) {
+      logger.warn(
+        `MCP is disabled because mcp.enabled is not a boolean (${safeStringify(
+          mcp.enabled,
+        )}); use true or false`,
+      );
+    }
+
+    return [];
+  }
 
   const servers = mcp.servers ?? {};
   const resolved: ResolvedMcpServer[] = [];
@@ -181,6 +208,7 @@ export function resolveMcpServers(config: McpConfigSource): ResolvedMcpServer[] 
 
   for (const [id, raw] of Object.entries(servers)) {
     const outcome = resolveServer(id, raw);
+    if ("disabled" in outcome) continue;
     if ("reason" in outcome) {
       logger.warn(outcome.reason);
       continue;
