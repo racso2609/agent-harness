@@ -61,31 +61,31 @@ interface SkillsConfig {
 }
 
 interface MemoryConfig {
-// Master switch. Off by default: with false the prompt and the history are
-// byte-identical to a build without memory.
-enabled?: boolean;
-// "none" | "local" | "http" | "mcp". Selects the implementation.
-provider?: string;
-// Default scope for what is written and searched.
-project?: string;
-// --- http ---
-url?: string;
-apikey?: string;
-// --- mcp ---
-command?: string;
-args?: string[];
-// --- local ---
-path?: string;
-// --- injection ---
-injectOnStart?: boolean;
-maxContextChars?: number;
-maxHitChars?: number;
-// --- capture ---
-captureOnCompact?: boolean;
-// --- tool ---
-recallTool?: boolean;
-// --- network ---
-timeoutMs?: number;
+  // Master switch. Off by default: with false the prompt and the history are
+  // byte-identical to a build without memory.
+  enabled?: boolean;
+  // "none" | "local" | "http" | "mcp". Selects the implementation.
+  provider?: string;
+  // Default scope for what is written and searched.
+  project?: string;
+  // --- http ---
+  url?: string;
+  apikey?: string;
+  // --- mcp ---
+  command?: string;
+  args?: string[];
+  // --- local ---
+  path?: string;
+  // --- injection ---
+  injectOnStart?: boolean;
+  maxContextChars?: number;
+  maxHitChars?: number;
+  // --- capture ---
+  captureOnCompact?: boolean;
+  // --- tool ---
+  recallTool?: boolean;
+  // --- network ---
+  timeoutMs?: number;
 }
 
 interface SessionsConfig {
@@ -146,7 +146,7 @@ interface HarnessConfig {
   agents?: AgentsConfig;
   sessions?: SessionsConfig;
   skills?: SkillsConfig;
- memory?: MemoryConfig;
+  memory?: MemoryConfig;
   ui?: UiConfig;
 }
 
@@ -178,16 +178,16 @@ const applyDefaults = (config: HarnessConfig): HarnessConfig => {
   config.skills.maxIndexChars ??= 160;
   config.skills.maxBodyChars ??= 16_000;
   config.skills.preload ??= [];
- config.memory ??= {};
- config.memory.enabled ??= false;
- config.memory.provider ??= "local";
- config.memory.injectOnStart ??= true;
- config.memory.maxContextChars ??= 2000;
- config.memory.maxHitChars ??= 1200;
- config.memory.captureOnCompact ??= true;
- config.memory.recallTool ??= true;
- config.memory.timeoutMs ??= 5000;
- config.memory.path ??= path.join(harnessHome(), "memory.db");
+  config.memory ??= {};
+  config.memory.enabled ??= false;
+  config.memory.provider ??= "local";
+  config.memory.injectOnStart ??= true;
+  config.memory.maxContextChars ??= 2000;
+  config.memory.maxHitChars ??= 1200;
+  config.memory.captureOnCompact ??= true;
+  config.memory.recallTool ??= true;
+  config.memory.timeoutMs ??= 5000;
+  config.memory.path ??= path.join(harnessHome(), "memory.db");
   config.ui ??= {};
   config.ui.theme ??= {};
   config.ui.theme.user ??= { color: "cyan" };
@@ -340,7 +340,7 @@ export { Config, DEFAULT_PROVIDER_TYPE, SUPPORTED_PROVIDERS };
 export type {
   AgentsConfig,
   HarnessConfig,
- MemoryConfig,
+  MemoryConfig,
   UiConfig,
   UiRoleStyle,
   UiTheme,
