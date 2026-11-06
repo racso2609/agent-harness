@@ -80,9 +80,12 @@ const run = async (deps: RunDeps): Promise<void> => {
   try {
     await launch.start({ sessionId: flags.sessionId, resumeLatest: flags.resumeLatest });
   } catch (error) {
-    // Refused before initialize(): no session was loaded, so there is nothing to
-    // shut down and no UI to close. The loop only reports; this is the one place
-    // that decides the process leaves with the usage code.
+    // A session that does not resolve is a symptom of the command line, not of
+    // the run: it is reported like a bad flag, and only here does the process
+    // learn it leaves with the usage code. start() throws it before booting the
+    // session or building a renderer, so there is nothing to shut down, no ink
+    // to unmount, and the message goes through `stderr` like every other usage
+    // error.
     if (error instanceof UsageError) return fail(error.message);
     throw error;
   }

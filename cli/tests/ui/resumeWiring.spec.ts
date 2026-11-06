@@ -28,7 +28,7 @@ vi.mock("ink", () => ({
   useStdout: () => ({ stdout: { columns: 80, rows: 24 } }),
 }));
 
-const { MainLoop } = await import("../../src/MainLoop");
+const { MainLoop, UsageError } = await import("../../src/MainLoop");
 const { Config, SUPPORTED_PROVIDERS } = await import("@racso2609/core");
 const { TuiUiAdapter } = await import("../../src/ui/TuiUiAdapter");
 const { createFlows } = await import("../../src/flows");
@@ -203,13 +203,8 @@ const until = async (done: () => boolean) => {
 // Boots a real MainLoop in TUI mode on that fake harness and lets the test type
 // into it. TUI mode is what parks the loop, which is the only state a turn can
 // start on its own from.
-// The process exit of a refused boot is spied on up front: the refusal calls
-// it long before the case would have a chance to set the spy itself.
-let exitSpy: ReturnType<typeof vi.spyOn> | null = null;
-
 const boot = async (options: FakeOptions = {}, start: MainLoopOptions = {}) => {
   const { harness, calls, settle } = fakeHarness(options);
-  exitSpy = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
 
   // A hand-built config with no providers is the one shape that never prompts:
   // it keeps the setup flow (which does read stdin) out of the run.
@@ -217,22 +212,32 @@ const boot = async (options: FakeOptions = {}, start: MainLoopOptions = {}) => {
   config.config.providers = {};
   config.config.defaultProvider = undefined;
 
-  const loop = new MainLoop({ config, tui: true });
+  // The renderer goes in through the constructor seam: start() itself builds
+  // nothing, so a refusal never reaches an ink mount.
   const ui = new Probe();
+  const loop = new MainLoop({ config, tui: true, ui });
   loop.harness = harness;
-  loop.ui = ui;
 
-  void loop.start(start);
+  // A refusal is a rejected promise now, so the wait watches the promise
+  // instead of a process exit.
+  const started = loop.start(start).then(
+    () => undefined,
+    (error: unknown) => error,
+  );
   // Either the loop parked in nextPrompt() — the callbacks are wired and a turn
   // may start on its own, which is the only state the queued cases make sense
-  // in — or it refused the target and ended the run through shutdown(), whose
-  // path never reaches nextPrompt(). Both are settled, so the wait accepts
-  // either one; each case still asserts which of the two it got.
+  // in — or start() rejected the target. A refusal leaves nothing to shut down
+  // any more: it throws before nextPrompt(), before initialize() and before any
+  // renderer exists. Both states are settled, so the wait accepts either one;
+  // each case still asserts which of the two it got.
   const parked = () => (loop as unknown as { isWaitingForPrompt(): boolean }).isWaitingForPrompt();
-  const exited = () => exitSpy !== null && exitSpy.mock.calls.length > 0;
-  await until(() => parked() || exited());
+  let rejected = false;
+  void started.then(() => {
+    rejected = true;
+  });
+  await until(() => parked() || rejected);
 
-  return { ui, calls, settle };
+  return { ui, calls, settle, started };
 };
 
 // Nothing here exits the process: the loop stays parked and the pending
@@ -432,30 +437,33 @@ describe("booting into a persisted session", () => {
 
   it("refuses to start a new session when the store is empty", async () => {
     // Bare `--resume` with nothing persisted cannot be honoured, and booting a
-    // fresh session instead would look like the flag was ignored: the loop
-    // writes the reason to stderr and exits with 2, before initialising. That
-    // is the code a misspelled flag gets too, because the command line asked
-    // for something that cannot be done either way.
-    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-    const { calls } = await boot({ sessions: [] }, { resumeLatest: true });
+    // fresh session instead would look like the flag was ignored. The loop
+    // refuses before initialising and before anything is painted; reporting
+    // the reason and leaving with 2 is main.ts's job now, and it is this very
+    // error that reaches it. That is the code a misspelled flag gets too,
+    // because the command line asked for something that cannot be done
+    // either way.
+    const { calls, started } = await boot({ sessions: [] }, { resumeLatest: true });
 
     expect(calls.initialize).toEqual([]);
-    expect(stderr).toHaveBeenCalledWith("no hay sesiones que reanudar\n");
-    expect(exitSpy).toHaveBeenCalledWith(2);
+    await expect(started).resolves.toBeInstanceOf(UsageError);
+    await expect(started).resolves.toHaveProperty("message", "no hay sesiones que reanudar");
   });
 
   it("refuses an id the store cannot resolve", async () => {
-    // initialize() loads an id literally: given one it does not know it boots a
-    // brand new session in silence, which is the bug this guards. It exits with
-    // 2 for the same reason an empty store does: an id nothing matches is the
-    // command line asking for something that cannot be done, exactly like a
-    // misspelled flag.
-    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-    const { calls } = await boot({ sessions: [summary("session-known")] }, { sessionId: "nope" });
+    // initialize() loads an id literally: given one it does not know, it boots
+    // a brand new session in silence, which is the bug this guards. It is
+    // refused for the same reason an empty store is: an id nothing matches is
+    // the command line asking for something that cannot be done, exactly like
+    // a misspelled flag.
+    const { calls, started } = await boot(
+      { sessions: [summary("session-known")] },
+      { sessionId: "nope" },
+    );
 
     expect(calls.initialize).toEqual([]);
-    expect(stderr).toHaveBeenCalledWith('no session matches "nope"\n');
-    expect(exitSpy).toHaveBeenCalledWith(2);
+    await expect(started).resolves.toBeInstanceOf(UsageError);
+    await expect(started).resolves.toHaveProperty("message", 'no session matches "nope"');
   });
 
   it("hands core the full id of a prefix the store matches", async () => {

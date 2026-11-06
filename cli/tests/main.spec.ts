@@ -168,17 +168,19 @@ describe("the boot sequence of the CLI", () => {
 
     // Line mode is what this needs: the TUI would wait for ink, and the pending
     // prompt below is dropped with the process instead of read.
-    const loop = new MainLoop({ config });
+    const loop = new MainLoop({
+      config,
+      ui: {
+        render: () => {},
+        renderImage: async () => {},
+        close: () => {},
+        select: async () => undefined,
+        promptText: async () => undefined,
+        confirm: async () => undefined,
+        promptApproval: async () => "deny",
+      } as unknown as NonNullable<MainLoopOptions["ui"]>,
+    });
     loop.harness = harness;
-    loop.ui = {
-      render: () => {},
-      renderImage: async () => {},
-      close: () => {},
-      select: async () => undefined,
-      promptText: async () => undefined,
-      confirm: async () => undefined,
-      promptApproval: async () => "deny",
-    } as unknown as typeof loop.ui;
 
     // run() awaits start(), which only returns once the loop is over, so the
     // assertion is made while the process is parked on its first prompt. The
@@ -198,6 +200,143 @@ describe("the boot sequence of the CLI", () => {
     expect(initialized).toEqual([{ sessionId: "session-abc123", agent: undefined }]);
     expect(exits).toEqual([]);
   });
+
+  it("resolves a bare --resume to the first session of the store", async () => {
+    // The bare flag is covered in halves elsewhere: flags.spec.ts fixes "bare
+    // --resume means resumeLatest" and tests/ui/resumeWiring.spec.ts fixes
+    // "resumeLatest means the first session". Nothing walked the whole chain, so
+    // a break in the middle left both halves green. This one goes from argv to
+    // initialize(): run() reads the argv, the real start() asks the store for the
+    // most recent session, and that is what core is told to load.
+    const sessions = ["session-recent", "session-stale"];
+    const initialized: (HarnessOptions | undefined)[] = [];
+    const harness = {
+      initialize: async (options) => {
+        initialized.push(options);
+      },
+      // The store is ordered by activity, so position one is the most recent one:
+      // picking any other would resume a session the user did not mean.
+      listSessions: () =>
+        sessions.map((id) => ({
+          id,
+          createdAt: "2024-01-01T00:00:00.000Z",
+          updatedAt: "2024-01-02T00:00:00.000Z",
+          provider: "openai",
+          model: "gpt-test",
+          messageCount: 1,
+          title: id,
+        })),
+      resolveSession: (target: string) => sessions.find((id) => id.startsWith(target)),
+      status: () => ({ sessionId: sessions[0] }),
+      listProviders: () => [...SUPPORTED_PROVIDERS],
+      save: () => {},
+      conversation: () => [],
+      childHistory: () => [],
+      onSpawnEvent: () => () => {},
+      shutdown: () => {},
+    } as unknown as IHarness;
+
+    const config = new Config();
+    config.config.providers = {};
+    config.config.defaultProvider = undefined;
+
+    const { exits, loop } = lineLoop(config, harness);
+
+    void run({
+      argv: ["node", "main.js", "--resume"],
+      stdout: { write: () => true },
+      stderr: { write: () => true },
+      exit: (code) => exits.push(code),
+      logo: printLogo,
+      createLoop: () => loop,
+    });
+    for (let attempt = 0; attempt < 500 && !initialized.length; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    }
+
+    expect(initialized).toEqual([{ sessionId: sessions[0], agent: undefined }]);
+    expect(exits).toEqual([]);
+  });
+
+  it("never builds the ink renderer for a --tui run it is going to refuse", async () => {
+    // --tui used to build the adapter in the constructor, and mounting ink is what
+    // that adapter does: an unresolvable id printed "raw mode is not supported"
+    // over the real error before the run gave up. Nothing may be mounted for a
+    // boot that is refused, so this loop is built without a renderer at all and
+    // fails just as loudly if the refusal reaches for one.
+    const initialized: (HarnessOptions | undefined)[] = [];
+    const harness = {
+      initialize: async (options) => {
+        initialized.push(options);
+      },
+      // Nothing matches, which is the whole point of the case.
+      resolveSession: () => undefined,
+      listSessions: () => [],
+      status: () => ({ sessionId: "session-abc123" }),
+      listProviders: () => [...SUPPORTED_PROVIDERS],
+      save: () => {},
+      conversation: () => [],
+      childHistory: () => [],
+      onSpawnEvent: () => () => {},
+      shutdown: () => {},
+    } as unknown as IHarness;
+
+    const config = new Config();
+    config.config.providers = {};
+    config.config.defaultProvider = undefined;
+
+    const stderr: string[] = [];
+    const exits: number[] = [];
+    const loop = new MainLoop({ config, tui: true });
+    loop.harness = harness;
+
+    // A real boot: run() reads the argv, the loop refuses, and main.ts leaves with
+    // the usage code without ever parking on a prompt.
+    await run({
+      argv: ["node", "main.js", "--resume", "abc", "--tui"],
+      stdout: { write: () => true },
+      stderr: { write: (chunk) => stderr.push(chunk) },
+      exit: (code) => exits.push(code),
+      logo: printLogo,
+      createLoop: () => loop,
+    });
+
+    // The message travels through the injected stderr, which is the hole the error
+    // path used to have: the loop wrote to the process' own stream instead.
+    expect(stderr).toEqual(['no session matches "abc"\n']);
+    expect(exits).toEqual([2]);
+    expect(initialized).toEqual([]);
+    // The refusal came before anything had to paint, so the adapter that would
+    // have mounted ink was never built.
+    expect((loop as unknown as { renderer: unknown }).renderer).toBeNull();
+  });
+
+  // A real MainLoop on line mode with a renderer that paints nowhere. The
+  // cases below boot it from the real argv, so what reaches initialize() is
+  // what the loop decided and not what a test handed it. The prompt the line
+  // loop parks on (stdin never answers) goes with the test.
+  const lineLoop = (config: InstanceType<typeof Config>, harness: IHarness) => {
+    const exits: number[] = [];
+    vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
+      exits.push(code ?? 0);
+    }) as never);
+
+    const loop = new MainLoop({
+      config,
+      ui: {
+        render: () => {},
+        renderImage: async () => {},
+        close: () => {},
+        select: async () => undefined,
+        promptText: async () => undefined,
+        confirm: async () => undefined,
+        promptApproval: async () => "deny",
+      } as unknown as NonNullable<MainLoopOptions["ui"]>,
+    });
+    loop.harness = harness;
+
+    return { exits, loop };
+  };
 
   it("boots a loop with neither id when nothing is asked", async () => {
     const recorded = await boot([]);

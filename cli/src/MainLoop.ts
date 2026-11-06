@@ -42,20 +42,16 @@ export const showConversation = (harness: IHarness, ui: UiAdapter) => {
   if (entries.length) ui.render({ type: "conversation", entries });
 };
 
-// Thrown when resuming cannot be honoured. start() reports it through the same
-// path every other ending of a run takes (stderr, then shutdown()), so the
-// reason is visible and an `--tui` run never leaves ink mounted over a terminal
-// nobody restored.
+// Thrown by resumeTarget() when resuming cannot be honoured. It escapes
+// start() on purpose: main.ts is the one that reports it and decides the exit
+// code, so a single place decides how a run ends, and it is raised before
+// initialize() and before any renderer is built.
 class UsageError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "UsageError";
   }
 }
-
-// Exit code for a command line that asked for something undoable: a flag with
-// no value and a session that does not resolve are the same mistake.
-const USAGE_EXIT_CODE = 2;
 
 interface MainLoopOptions {
   // Id of a previously persisted session to resume on boot. A full id, a unique
@@ -69,14 +65,23 @@ interface MainLoopOptions {
   config?: Config;
   // Renders the full-screen ink TUI instead of plain lines.
   tui?: boolean;
+  // Renderer to paint through instead of the one `tui` would build. A seam for
+  // tests; the real boot never passes it.
+  ui?: UiAdapter;
 }
 
 class MainLoop {
   harness: IHarness;
   config: Config;
-  flows: Flows;
   commands: CommandRepository;
-  ui: UiAdapter;
+  // Renderer the loop paints through. Built on first use and never in the
+  // constructor: mounting ink is a side effect on the terminal, and a boot that
+  // is about to be refused (an unreadable --resume) must not have one. Every
+  // path that can reach a refusal runs before this is first touched.
+  private renderer: UiAdapter | null = null;
+  private createdFlows: Flows | null = null;
+  // Which renderer to build on first use.
+  private tui: boolean;
   // Guard so the shutdown handler runs only once.
   private closing = false;
   // Prompts submitted by the TUI. The line renderer reads stdin directly.
@@ -101,15 +106,43 @@ class MainLoop {
   constructor(options: MainLoopOptions = {}) {
     this.config = options.config ?? new Config();
     this.commands = new CommandRepository();
-    // The UI comes before the flows: they ask their pickers through it, so it
-    // has to exist before anything that may open one is built.
-    this.ui = options.tui ? new TuiUiAdapter(this.config.config.ui?.theme) : new CliUiAdapter();
-    this.flows = createFlows(this.ui, [...SUPPORTED_PROVIDERS]);
+    this.tui = options.tui ?? false;
+    // A seam for tests that need a renderer without a terminal. Assigning one
+    // builds nothing else.
+    if (options.ui) this.renderer = options.ui;
     this.harness = createHarness({
       config: this.config,
-      logger: uiLogger(this.ui),
+      // Asked lazily, at the first render or the first approval: by then
+      // start() has already accepted the session it was asked to resume.
+      logger: lazyLogger(() => this.ui),
       approval: (request: ApprovalRequest) => this.ui.promptApproval(request),
     });
+  }
+
+  // The renderer, built the first time something needs to paint or to ask a
+  // question. A boot refused before that ran nothing that could have needed
+  // it.
+  get ui(): UiAdapter {
+    this.renderer ??= this.tui
+      ? new TuiUiAdapter(this.config.config.ui?.theme)
+      : new CliUiAdapter();
+
+    return this.renderer;
+  }
+
+  // The `ui` above used to be a plain field that tests assigned to, so the
+  // setter keeps that seam working.
+  set ui(ui: UiAdapter) {
+    this.renderer = ui;
+  }
+
+  // The flows the slash commands use. They ask their pickers through the UI,
+  // so they are built with it on first use, not in the constructor: they are
+  // only needed once a command wants one.
+  get flows(): Flows {
+    this.createdFlows ??= createFlows(this.ui, [...SUPPORTED_PROVIDERS]);
+
+    return this.createdFlows;
   }
 
   // Boots the session, wiring key handling and running the prompt loop.
@@ -121,17 +154,10 @@ class MainLoop {
 
     // Resolved before initialize(): core loads the id literally, so handing it
     // something it cannot resolve would start a new session in silence. A target
-    // nothing matches ends the run here, before any session is booted.
-    let sessionId: string | undefined;
-    try {
-      sessionId = this.resumeTarget(options);
-    } catch (error) {
-      if (!(error instanceof UsageError)) throw error;
-      process.stderr.write(`${error.message}\n`);
-      this.shutdown(USAGE_EXIT_CODE);
-
-      return;
-    }
+    // nothing matches is thrown out of start(): nothing is booted and no
+    // renderer exists yet, so the caller reports it over a terminal ink never
+    // touched.
+    const sessionId = this.resumeTarget(options);
 
     await this.harness.initialize({
       sessionId,
@@ -204,8 +230,11 @@ class MainLoop {
     return latest;
   }
 
+  // Asked from the prompt loop, which may run before anything was painted
+  // (a first command with nothing to render), so it reads the choice and not
+  // the renderer: an `instanceof` would build one.
   protected isTui(): boolean {
-    return this.ui instanceof TuiUiAdapter;
+    return this.renderer ? this.renderer instanceof TuiUiAdapter : this.tui;
   }
 
   // Ctrl-C triggers cleanup and exit.
@@ -470,6 +499,24 @@ const uiLogger = (ui: UiAdapter): ILogger => {
     return (ui.logger as () => ILogger)();
   }
   return createLogger(() => {});
+};
+
+// Forwards to the logger of the renderer, asking for the renderer only when a
+// line is actually logged: building it in the constructor is what mounted ink
+// for a run that was refused right after. Each level asks for the renderer of
+// the moment, so the six levels of the contract stay whatever it provides.
+const lazyLogger = (ui: () => UiAdapter): ILogger => {
+  const forward = (name: keyof ILogger) => (first: unknown, second?: string) =>
+    uiLogger(ui())[name](first, second);
+
+  return {
+    fatal: forward("fatal"),
+    error: forward("error"),
+    warn: forward("warn"),
+    info: forward("info"),
+    debug: forward("debug"),
+    trace: forward("trace"),
+  };
 };
 
 export { MainLoop, UsageError };
