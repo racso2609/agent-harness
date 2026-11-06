@@ -22,6 +22,10 @@
 //                     unless the client cancels (notifications/cancelled).
 //   --all-pages       Splits `tools/list` in two pages and expects the client to
 //                     follow the `nextCursor` of the first one.
+//   --grandchild-records-sigterm <file>
+//                     Spawns a grandchild that appends to <file> when it gets
+//                     SIGTERM and how long it stayed alive afterwards, so a
+//                     test can watch the escalation from the grandchild.
 
 import { spawn } from "node:child_process";
 import { writeFileSync } from "node:fs";
@@ -29,6 +33,12 @@ import process from "node:process";
 
 const argv = process.argv.slice(2);
 const flags = new Set(argv.filter((arg) => arg.startsWith("--")));
+// Value of a flag that takes an argument, e.g. `--grandchild-records-sigterm
+// /tmp/records.txt`.
+const argValue = (flag) => {
+  const index = argv.indexOf(flag);
+  return index === -1 ? undefined : argv[index + 1];
+};
 const env = (name) => process.env[name] === "1" || process.env[name] === "true";
 
 const has = (flag) => flags.has(flag) || env(flag.replace(/^--/, "").replace(/-/g, "_"));
@@ -44,6 +54,7 @@ const ABORT_PROOF = has("--abort-proof");
 
 const CALL_DELAY_MS = Number(process.env.CALL_DELAY_MS ?? 5000);
 const GRANDCHILD_PID_FILE = process.env.GRANDCHILD_PID_FILE;
+const GRANDCHILD_SIGTERM_FILE = argValue("--grandchild-records-sigterm");
 // Handed to every grandchild as an environment variable and stamped into its
 // process title, so a test can find and sweep the descendants of an earlier
 // server by either half of the marker, even after they were re-parented.
@@ -51,6 +62,30 @@ const FIXTURE_TAG = process.env.FIXTURE_TAG ?? "";
 
 // Ignores SIGTERM and never exits on its own: only SIGKILL takes it down.
 const REFUSES_SIGTERM = "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);";
+
+// A grandchild that reports the escalation it is put through, so a test can
+// tell a real SIGTERM-then-SIGKILL grace period from both signals landing in
+// the same instant. It appends `started` on boot, `sigterm` when the signal
+// arrives, a heartbeat every 20 ms with the time elapsed since, and
+// `survived <ms>` if it is still alive 400 ms later. A SIGKILL that follows
+// the SIGTERM immediately leaves no heartbeat behind, which is exactly what
+// the test looks for.
+const recordsSigterm = (file) => `
+const { appendFileSync } = require("node:fs");
+const file = ${JSON.stringify(file)};
+const started = Date.now();
+appendFileSync(file, "started\\n");
+process.on("SIGTERM", () => {
+  const at = Date.now();
+  appendFileSync(file, "sigterm\\n");
+  setInterval(() => appendFileSync(file, "alive " + (Date.now() - at) + "\\n"), 20).unref();
+  setTimeout(() => {
+    appendFileSync(file, "survived " + (Date.now() - started) + "\\n");
+    process.exit(0);
+  }, 400).unref();
+});
+setInterval(() => {}, 1000);
+`;
 
 // Children this server spawned and must take down with it: a server that
 // exits while a grandchild runs leaves it re-parented to init, out of reach
@@ -64,9 +99,8 @@ const spawnedChildren = [];
 // `ps -E` sweep looks for either way.
 const startGrandchild = () => {
   const marker = FIXTURE_TAG ? `fixture-grandchild:${FIXTURE_TAG}` : "";
-  const script = marker
-    ? `process.title = ${JSON.stringify(marker)}; ${REFUSES_SIGTERM}`
-    : REFUSES_SIGTERM;
+  const body = GRANDCHILD_SIGTERM_FILE ? recordsSigterm(GRANDCHILD_SIGTERM_FILE) : REFUSES_SIGTERM;
+  const script = marker ? `process.title = ${JSON.stringify(marker)}; ${body}` : body;
 
   const child = spawn(process.execPath, ["-e", script], {
     stdio: "ignore",
