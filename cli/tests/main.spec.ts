@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { HarnessOptions, IHarness } from "@racso2609/core";
 import type { MainLoopOptions } from "../src/MainLoop";
 
@@ -18,8 +18,13 @@ vi.mock("../src/terminal/stdin", () => ({ printLogo, input: () => new Promise(()
 // `needsSetup()` is true by construction.
 vi.mock("../src/flows/startSetup", () => ({ startSetup: async () => {} }));
 
+// The mount itself, so a case can prove ink was never asked to paint. It is a
+// vi.fn and not an inline arrow for that reason: the namespace of a mocked ESM
+// module cannot be spied on, but the function it exports can be asserted.
+const inkRender = vi.fn(() => ({ rerender: () => {}, unmount: () => {} }));
+
 vi.mock("ink", () => ({
-  render: () => ({ rerender: () => {}, unmount: () => {} }),
+  render: inkRender,
   Box: () => null,
   Text: () => null,
   useInput: () => {},
@@ -28,7 +33,6 @@ vi.mock("ink", () => ({
 
 const { run } = await import("../src/main");
 const { MainLoop } = await import("../src/MainLoop");
-const { TuiUiAdapter } = await import("../src/ui/TuiUiAdapter");
 const { Config, SUPPORTED_PROVIDERS } = await import("@racso2609/core");
 
 interface Recorded {
@@ -73,6 +77,13 @@ const boot = async (argv: string[]) => {
 // is exercised end to end by tests/ui/resumeWiring.spec.ts.
 beforeEach(() => {
   vi.clearAllMocks();
+});
+
+// clearAllMocks empties the call log but keeps the implementation, and one case
+// below installs a spy that throws: without restoring, that spy would stay
+// armed for every case that runs after it.
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 describe("the boot sequence of the CLI", () => {
@@ -268,13 +279,9 @@ describe("the boot sequence of the CLI", () => {
 
   it("never builds the ink renderer for a --tui run it is going to refuse", async () => {
     // The same refusal, observed instead of inspected: what a real boot must not
-    // do is construct the renderer, so the adapter that would mount ink is made to
-    // throw the moment it is asked to. Any path that reaches for the ui before it
-    // gives up fails here on its own, instead of leaving it to a private field
-    // being null.
-    const mount = vi.spyOn(TuiUiAdapter.prototype, "start").mockImplementation(() => {
-      throw new Error("ink was mounted for a refused boot");
-    });
+    // do is mount ink, so the mount itself is what is watched. Any path that
+    // reaches for the renderer before it gives up paints here and fails, instead
+    // of leaving it to a private field being null.
 
     const harness = {
       resolveSession: () => undefined,
@@ -302,7 +309,7 @@ describe("the boot sequence of the CLI", () => {
     });
 
     expect(exits).toEqual([2]);
-    expect(mount).not.toHaveBeenCalled();
+    expect(inkRender).not.toHaveBeenCalled();
   });
 
   it("paints no logo when --resume names a session the store does not have", async () => {
@@ -310,8 +317,18 @@ describe("the boot sequence of the CLI", () => {
     // renderer prints it again — before the refusal, so a run leaving with 2 had
     // already written to the terminal. The resolution happens before the logo, and
     // this is the boot that proves it.
+    //
+    // The count is what makes the case discriminate the order and not just the
+    // existence of the early look: the gate is asked exactly once, and start() is
+    // never reached. A boot that resolved late would ask twice — the second time
+    // from start(), after the logo — and would paint it.
+    const resolutions: string[] = [];
     const harness = {
-      resolveSession: () => undefined,
+      resolveSession: (target: string) => {
+        resolutions.push(target);
+
+        return undefined;
+      },
       listSessions: () => [],
       status: () => ({ sessionId: "session-abc123" }),
       listProviders: () => [...SUPPORTED_PROVIDERS],
@@ -324,7 +341,14 @@ describe("the boot sequence of the CLI", () => {
 
     const stderr: string[] = [];
     const exits: number[] = [];
+    const starts: (MainLoopOptions | undefined)[] = [];
     const loop = lineLoop(config, harness).loop;
+    const start = loop.start.bind(loop);
+    loop.start = async (options?: MainLoopOptions) => {
+      starts.push(options);
+
+      return start(options);
+    };
 
     await run({
       argv: ["node", "main.js", "--resume", "abc"],
@@ -337,7 +361,13 @@ describe("the boot sequence of the CLI", () => {
 
     expect(stderr).toEqual(['no session matches "abc"\n']);
     expect(exits).toEqual([2]);
+    // The logo first: it is the write the real binary was making before the
+    // refusal, so it is the one this case exists to keep out.
     expect(printLogo).not.toHaveBeenCalled();
+    // Asked once, by main.ts, before the logo; the loop never started, so the
+    // refusal came from that early look and not from a second one inside start().
+    expect(resolutions).toEqual(["abc"]);
+    expect(starts).toEqual([]);
   });
 
   // A real MainLoop on line mode with a renderer that paints nowhere. The
