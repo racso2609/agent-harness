@@ -141,75 +141,97 @@
       por qué no se sincroniza automáticamente: pisar el directorio del usuario borraría agentes editados a mano y el error no se vería en un `git diff`. Una sincronización con backup (`*.md.bak`) es una tarea aparte, no parte del ritual.
       nota (2026-11-02): `default` diverge además en algo funcional, no de texto: la copia de runtime dice `approval: auto` y el repo `ask`. Con `ask`, `git`/`pnpm`/`tsc`/`vitest` no piden permiso (`READ_ONLY_COMMANDS` en `tools/shellPolicy.ts`), pero cada `writeFile` sí — y en un hijo headless sin handler la respuesta es **deny**, no una pregunta (`SessionManager.ts:855`). Por eso `approval` no se toca en el ritual de agentes: se decide en una tarea propia.
 
-9. session reporting (lo que necesita la UI)
- ESTADO: **§9 con el orden sugerido completo (8/8)**: cerrada la superficie que consume el histórico desde el CLI (`childHistory()`, pintada al reanudar en `cli/TODO.md` §P1) y la entrada 7 (hijos asentados con resultado sin entregar, que desbloquea `cli/TODO.md` §P6). Sigue abierta la tarea «Devolver los informes largos de un hijo como artefacto, no como mensaje».
-   Formato de esta sección: ver la skill `todo-format`. Las secciones 0–8 se dejan como están (histórico de decisiones).
-   Contexto: el CLI va a una TUI de pantalla completa (ver `cli/TODO.md` §P0) que necesita saber _qué está corriendo ahora mismo_ y _qué pasó_. Hoy `SpawnManager` emite `started`/`settled` in-memory y `SessionManager` inyecta el resultado al padre en el turno siguiente, pero no hay forma pública de reconstruir el estado ni de recibir eventos sin acoplarse a `SessionManagerImpl`.
+## Abierto
+
+- **`skills.preload` es decorativo** — §8.1 · `Done when` en §8.1 (sin criterio fijado)
+- **`triggers` se parsea y se guarda, pero no se usa** — §8.1 · `Done when` en §8.1 (sin criterio fijado)
+- **no hay comando para crear/editar una skill** — §8.1 · `Done when` en §8.1 (sin criterio fijado)
+- **`/skill <id>` no imprime el body** — §8.1 · `Done when` en §8.1 (sin criterio fijado)
+- **`use_skill` no aparece en el help por agente** — §8.1 · `Done when` en §8.1 (sin criterio fijado)
+- **limitación conocida de `SkillLoader`** — §8.1 · `Done when` en §8.1 (sin criterio fijado)
+- **orden de commits** — §8.1 · `Done when` en §8.1 (sin criterio fijado)
+- **`~/.racso-harness/agents/*.md` divergió del repo** — §8.1 · `Done when` en §8.1 (sin criterio fijado)
+- **`skills/preload` se parsea pero no se usa (reservado); `triggers` tampoco influyen en nada todavía** — §8 (cierre de skills) · `Done when` en §8
+- **Devolver los informes largos de un hijo como artefacto, no como mensaje** — §9 · `Done when` en §9
+
+## 9. Session reporting (lo que necesita la UI)
+
+§9 está cerrada (8/8): la superficie que consume el histórico desde el CLI vive en
+`childHistory()` y `pendingSpawns()`, pintadas al reanudar en `cli/TODO.md` §P1 y
+consumidas por la continuación automática en §P6. Sigue abierta «Devolver los informes
+largos de un hijo como artefacto, no como mensaje».
+El cuerpo narrativo de los nueve ítems cerrados vive en
+[journal §8–§9](../docs/journal/core/s8-s9-reporting.md); sus contratos y tests siguen
+vigentes y se conservan en la línea `tests:` de cada uno.
 
 - [x] **Exponer `SpawnEvent` y `SpawnStatus` en el contrato público**
-      review: `IHarness` ya exponía `spawn`/`pollSpawn`/`listSpawns`/`waitSpawn`/`collectSpawns` y `SpawnHandle` ya se importaba de `session/spawn.ts`; lo que faltaba era `SpawnEvent` y `SpawnStatus` fuera del módulo interno.
-      hecho: `contract.ts` reexporta `SpawnEvent`/`SpawnHandle`/`SpawnStatus`, `index.ts` los publica desde `./contract` (ya no desde `./session/spawn`) y `tests/session/spawnContract.spec.ts` fija el shape de `started`/`settled`. Build + 195 tests (core) + 49 (cli) + lint verdes.
+Faltaban `SpawnEvent` y `SpawnStatus` fuera del módulo interno, que es lo que la UI necesita para no acoplarse a `SessionManagerImpl`.
+Done when: no se fijó uno; el hecho está en el journal.
+hecho: `core/src/contract.ts` (reexporta `SpawnEvent`/`SpawnHandle`/`SpawnStatus`) — ver [journal §8–§9](../docs/journal/core/s8-s9-reporting.md)
+tests: `core/tests/session/spawnContract.spec.ts` fija el shape de `started`/`settled`.
 
 - [x] **Añadir un listener de spawn al `IHarness`**
-      review: `SpawnManager.on()` ya devolvía el unsubscribe y `emit()` aislaba errores de listener; faltaba exponerlo sin acoplar la UI a `SessionManagerImpl`.
-      hecho: `SessionManager.onSpawnEvent()` construye el manager on-demand (un listener registrado antes del primer spawn igual lo recibe) y `IHarness`/`harness.ts` lo delegan. Semántica A: solo en vivo, sin replay; el estado inicial es `listSpawns()`. La suscripción interna del mensaje `system` sigue intacta (test explícito). 4 tests en `SessionManager.spec.ts` (started→settled, unsubscribe, coexistencia con la inyección, listener que lanza). Build + 199 tests (core) + 49 (cli) + lint verdes.
-      Depends on: exponer `SpawnEvent` y `SpawnStatus` en el contrato público. [x]
+Expuso `onSpawnEvent()` en el contrato con semántica solo-en-vivo (sin replay), para que la UI reciba eventos sin acoplarse al `SessionManagerImpl`.
+Done when: no se fijó uno; el hecho está en el journal.
+Depends on: exponer `SpawnEvent` y `SpawnStatus` en el contrato público. [x]
+hecho: `core/src/harness.ts#onSpawnEvent` — ver [journal §8–§9](../docs/journal/core/s8-s9-reporting.md)
+tests: 4 en `core/tests/session/SessionManager.spec.ts` (started→settled, unsubscribe, coexistencia con la inyección, listener que lanza). La suscripción interna del mensaje `system` sigue intacta.
 
 - [x] **Devolver estado consultable de los hijos**
-      review: `listSpawns()` ya devuelve lo que la franja lee (`spawnId`, `sessionId`, `agentId`,
-      `prompt`, `status`, `startedAt` y, al asentar, `finishedAt`/`result`/`error`) y está en
-      `IHarness` desde §9.1.1. Lo que faltaba era el test y, sobre todo, el histórico:
-      `listSpawns()` solo ve este proceso.
-      hecho: 3 tests en `SessionManager.spec.ts` — shape exacto de un hijo recién lanzado,
-      campos que se añaden al asentar, y `childHistory()` tras reanudar (transcript persistido
-      intacto, `listSpawns()`/`pollSpawn()` vacíos para esos hijos) + uno que verifica que
-      devuelve una copia. `IHarness.childHistory()` entra al contrato para que el CLI pinte lo
-      persistido sin acoplarse a `SessionManagerImpl`.
-      nota: `listSpawns()` ordena por `startedAt` descendente y `childHistory()` en orden de
-      lanzamiento; la franja normaliza ambas en `spawnStrip`.
-      Depends on: añadir un listener de spawn al `IHarness`.
+`listSpawns()` solo veía el proceso actual, así que faltaba el histórico persistido para que el CLI pinte tras reanudar sin acoplarse a `SessionManagerImpl`.
+Done when: no se fijó uno; el hecho está en el journal.
+Depends on: añadir un listener de spawn al `IHarness`.
+hecho: `core/src/harness.ts#childHistory` — ver [journal §8–§9](../docs/journal/core/s8-s9-reporting.md)
+tests: 3 en `SessionManager.spec.ts` — shape exacto de un hijo recién lanzado, campos que se añaden al asentar, y `childHistory()` tras reanudar — más uno que verifica que devuelve una copia.
+nota: `listSpawns()` ordena por `startedAt` descendente y `childHistory()` en orden de lanzamiento; la franja normaliza ambas en `spawnStrip`.
 
 - [x] **Persistir eventos de spawn en la sesión**
-      review: los handles vivían solo en `SpawnManager`, así que tras `/resume` no había rastro de qué hijos corrieron ni cómo terminaron, y la franja del TUI se perdía entera.
-      decisión de formato: se guarda el **handle final** (`SpawnHandle[]`), no los eventos. El handle ya trae `startedAt`/`finishedAt` (toda la duración que hace falta) y crece O(hijos), mientras el array de eventos crece O(reintentos). Para un histórico de lectura basta.
-      decisión de I/O: `save()` ya hace `writeFileSync` completo y se llama ~7 veces por turno; añadir una escritura por evento habría duplicado I/O sobre un JSON que crece con el historial. En su lugar, `SessionManager` acumula `spawnHistory` en memoria y lo persiste dentro del `save()` existente. Excepción: al hacer `settled` sí se llama a `save()`, porque un hijo puede terminar sin que haya otro turno y su estado no debe perderse.
-      hecho: `SessionRecord.spawns?: SpawnHandle[]`, `SESSION_VERSION` 3 → 4, migración en `load` (`record.spawns ??= []`, así los llamadores no ramifican por versión). El campo se **omite** del JSON cuando no hay hijos (test). Al restaurar es histórico de **solo lectura**: los hijos no se reanudan y conservan el `status` con el que se persistieron.
-      tests: 3 en `SessionStore.spec.ts` (round-trip con un hijo `done` y otro `error`, migración v3 → v4, campo omitido si no hay hijos) + 3 en `SessionManager.spec.ts` (persiste el hijo al terminar, persiste el error, no escribe el campo sin hijos). Build + 220 tests (core) + 103 (cli) + lint verdes.
-      pendiente: cerrado en `cli/TODO.md` §P1 (franja con los hijos restaurados) y en §9 «Devolver estado consultable» (`childHistory()`).
+Los handles vivían solo en `SpawnManager`, así que tras `/resume` no había rastro de qué hijos corrieron ni cómo terminaron.
+Done when: no se fijó uno; el hecho está en el journal.
+hecho: `core/src/session/SessionStore.ts` (`SessionRecord.spawns`, `SESSION_VERSION` 4) — ver [journal §8–§9](../docs/journal/core/s8-s9-reporting.md)
+tests: 3 en `SessionStore.spec.ts` (round-trip con un hijo `done` y otro `error`, migración v3 → v4, campo omitido si no hay hijos) + 3 en `SessionManager.spec.ts` (persiste el hijo al terminar, persiste el error, no escribe el campo sin hijos).
+contrato: se guarda el **handle final** (`SpawnHandle[]`), no los eventos — el handle ya trae `startedAt`/`finishedAt` y crece O(hijos), no O(reintentos) —, y `spawnHistory` se acumula en memoria y se persiste dentro del `save()` existente; la excepción es el `settled`, que sí llama a `save()`. El campo se **omite** del JSON cuando no hay hijos y al restaurar es histórico de **solo lectura**: los hijos no se reanudan y conservan su `status` persistido.
 
 - [x] **Emitir progreso del turno desde `ask()`**
-      review: `ask()` devolvía solo el `AgentResponse` final y, aunque `OpenAiProvider` ya tenía un `_onChunk` en el constructor, era global del provider (no por llamada) y solo transportaba texto: no había forma de atribuir eventos a un turno ni de ver tool calls o razonamiento.
-      hecho: `ChatEvent`/`ChatEventListener` en `types/providers.ts` (`text`, `reasoning`, `toolCallStart`, `toolCallEnd`). `_handleStream(response, onEvent?)` emite texto y razonamiento por delta y `toolCallEnd` por llamada; `chat()` reenvía `options.onEvent`. `AssistantTurn.reasoning` guarda el razonamiento, nunca vuelve al history. `ask(prompt, onEvent?)` y `runAgentLoop` lo propagan; `IHarness.ask(prompt, { onEvent })` vía `AskOptions`. El `_onChunk` del constructor se deja intacto (dos caminos en paralelo, documentado). 6 tests en `openai.spec.ts` (texto, `reasoning_content`, fallback `reasoning`, sin razonamiento, `toolCallEnd`, y que omitir `onEvent` no cambia nada). Build + 205 tests (core) + 49 (cli) + lint verdes.
-      Bug encontrado por los tests: la captura de razonamiento había quedado dentro del `if (content)`, así que se perdía en chunks que solo traían razonamiento.
+`ask()` solo devolvía el `AgentResponse` final y el `_onChunk` del constructor era global del provider, así que no había forma de atribuir eventos a un turno ni de ver tool calls o razonamiento.
+Done when: no se fijó uno; el hecho está en el journal.
+hecho: `core/src/types/providers.ts` (`ChatEvent`/`ChatEventListener`) — ver [journal §8–§9](../docs/journal/core/s8-s9-reporting.md)
+tests: 6 en `core/tests/providers/openai.spec.ts` (texto, `reasoning_content`, fallback `reasoning`, sin razonamiento, `toolCallEnd`, y que omitir `onEvent` no cambia nada).
+contrato: `ChatEvent` = `text` | `reasoning` | `toolCallStart` | `toolCallEnd`; `AssistantTurn.reasoning` guarda el razonamiento y **nunca vuelve al history**; `ask(prompt, { onEvent })` vía `AskOptions`; el `_onChunk` del constructor se deja intacto (dos caminos en paralelo, documentado).
 
 - [x] **Emitir salida viva de `shell` vía `ToolContext.onOutput`**
-      hecho: `ToolContext.onOutput?: (chunk) => void` y `ShellTool` coalesce los chunks por ventana (`outputThrottleMs`, default 100, `0` lo desactiva) y hace flush al terminar. `SessionManager` lo etiqueta con `id`/`name` de la call y lo emite como `ChatEvent` `toolOutput`, así que la UI lo recibe por el mismo canal que el resto. El truncado (`maxOutputBytes`) sigue aplicando **solo** al resultado final, no al stream (test explícito).
-      4 tests en `tools/shell.spec.ts` (stream, sin `onOutput`, stream sin truncar, coalescing) + 2 en `SessionManager.spec.ts` (etiquetado con la call, turno idéntico sin listener). Build + 211 tests (core) + 49 (cli) + lint verdes.
+Un `shell` largo no mostraba nada hasta terminar, así que se añadió un canal de salida viva independiente del resultado final.
+Done when: no se fijó uno; el hecho está en el journal.
+hecho: `core/src/tools/Tool.ts` (`ToolContext.onOutput`) y `core/src/tools/shell.ts` — ver [journal §8–§9](../docs/journal/core/s8-s9-reporting.md)
+tests: 4 en `core/tests/tools/shell.spec.ts` (stream, sin `onOutput`, stream sin truncar, coalescing) + 2 en `SessionManager.spec.ts` (etiquetado con la call, turno idéntico sin listener).
+contrato: `ShellTool` coalesce los chunks por ventana (`outputThrottleMs`, default 100, `0` lo desactiva) y hace flush al terminar; `SessionManager` lo etiqueta con `id`/`name` de la call y lo emite como `ChatEvent` `toolOutput`. El truncado (`maxOutputBytes`) aplica **solo** al resultado final, no al stream.
 
 - [x] **Incluir un resumen de cierre en `AgentResponse`**
-      hecho: `TurnOutcome { status: "completed" | "toolError" | "incomplete", pending: string[], next? }` y `AgentResponse.outcome?`. `runAgentLoop` acumula las tools que fallaron (`pending`) y distingue el corte por `tools.maxIterations` (`incomplete` + qué hacer). El campo es opcional, así ningún `toEqual` existente cambió. 3 tests (completed, toolError con la tool nombrada, incomplete por tope de iteraciones).
-      Nota: hoy lo rellena `runAgentLoop`; el camino de `generateImage` no lo emite (no hay turno ReAct que resumir).
+El usuario tenía que inferir qué pasó en el turno, así que el resultado del turno pasa a ser estructurado.
+Done when: no se fijó uno; el hecho está en el journal.
+hecho: `core/src/session/SessionManager.ts` (`TurnOutcome`, `AgentResponse.outcome`) — ver [journal §8–§9](../docs/journal/core/s8-s9-reporting.md)
+tests: 3 (completed, toolError con la tool nombrada, incomplete por tope de iteraciones).
+contrato: `TurnOutcome { status: "completed" | "toolError" | "incomplete", pending: string[], next? }`; `runAgentLoop` acumula las tools que fallaron (`pending`) y distingue el corte por `tools.maxIterations`. El campo es opcional, así ningún `toEqual` existente cambió. Hoy lo rellena `runAgentLoop`; el camino de `generateImage` no lo emite.
+
 - [x] **Añadir resumen del hijo y duración a `SpawnHandle`**
-      `SpawnHandle` no lleva ni un resumen de lo que hizo el hijo ni una duración
-      explícita (`startedAt`/`finishedAt` como ISO obligan a recalcular), así que la
-      franja del CLI mide el tiempo por su cuenta y, al reanudar una sesión, el resumen
-      se pierde: el histórico (`childHistory()`) solo conserva `result`/`error`, sin
-      resumen corto ni métrica de tokens.
-      Done when: `SpawnHandle` gana `summary?: string` y `durationMs?: number` (fijados
-      al asentar, `durationMs` derivado de `startedAt`/`finishedAt`) y `childHistory()`
-      los devuelve al reanudar, con un test en `tests/session/SessionManager.spec.ts`
-      que lo comprueba; el CLI pinta la duración desde `durationMs` sin recalcular.
-      hecho: `SpawnHandle.summary?: string` y `durationMs?: number`. Ambos los fija `SpawnManager.settle()` (spawn.ts), el punto único al que desemboca el `finally` de `run()`, así que éxito, error, timeout y cancel pasan por ahí; `finishedAt` se fija en el mismo sitio. `durationMs` = `Date.parse(finishedAt) - Date.parse(startedAt)` (clamp a 0 si el reloj va hacia atrás) y `summary` se deriva del propio hijo — su `result` o su `error`, aplanado a una línea y capado a 120 chars — para no inventar una llamada extra al modelo; un hijo sin texto deja `summary` en `undefined`. `snapshot()` los copia, así que `poll`/`list`/`wait`/`collect` y el evento `settled` los llevan, y `save()` persiste `spawnHistory` (que el listener de `settled` actualiza) por lo que `childHistory()` los devuelve al reanudar. Sin subir `SESSION_VERSION` (sigue en 4): son campos opcionales y un record viejo simplemente no los trae (`undefined`, nunca `NaN` ni `""`), igual que un hijo sin asentar. 4 tests nuevos en `tests/session/SessionManager.spec.ts` (duración + resumen en éxito, duración en error, supervivencia al guardado/recarga, y record antiguo sin los campos); el test que fija la forma del hijo en `running` ahora comprueba que los dos campos aún no están. `formatSpawnResult` y el texto inyectado en el padre no cambian. 233 tests (core) + 188 (cli) + lint + prettier + tsc verdes.
-      Depends on: devolver estado consultable de los hijos.
+La franja del CLI medía el tiempo por su cuenta y, al reanudar, el resumen se perdía porque `childHistory()` solo conservaba `result`/`error`.
+Done when: `SpawnHandle` gana `summary?: string` y `durationMs?: number` (fijados
+al asentar, `durationMs` derivado de `startedAt`/`finishedAt`) y `childHistory()`
+los devuelve al reanudar, con un test en `tests/session/SessionManager.spec.ts`
+que lo comprueba; el CLI pinta la duración desde `durationMs` sin recalcular.
+Depends on: devolver estado consultable de los hijos.
+hecho: `core/src/session/spawn.ts#settle` — ver [journal §8–§9](../docs/journal/core/s8-s9-reporting.md)
+tests: 4 en `core/tests/session/SessionManager.spec.ts` (duración + resumen en éxito, duración en error, supervivencia al guardado/recarga, y record antiguo sin los campos).
+contrato: ambos campos los fija `SpawnManager.settle()`, el punto único al que desemboca el `finally` de `run()` (éxito, error, timeout y cancel); `durationMs` = `Date.parse(finishedAt) - Date.parse(startedAt)` con clamp a 0, y `summary` se deriva del propio hijo (su `result` o su `error`, aplanado a una línea y capado a 120 chars). Sin subir `SESSION_VERSION` (sigue en 4): son opcionales y un record viejo los trae `undefined`.
 
 - [x] **Exponer los hijos asentados con resultado sin entregar**
-      Hoy el resultado del hijo se inyecta como mensaje `system` en el history del padre (`SessionManager.ts:592`) y desde fuera nadie puede saber si esa entrega ya ocurrió; el CLI necesita saberlo para continuar solo tras un `delegate`.
-      Done when: una prueba en `core/tests/session/SessionManager.spec.ts` fija que un hijo asentado con el padre sin turno posterior sigue en la lista y solo desaparece cuando el padre ejecuta un turno que inyecta su resultado como mensaje system (el punto de inyección en SessionManager.ts), y que la lista vuelve vacía cuando ya no queda ningún hijo sin entregar.
- hecho: `SessionManager` mantiene la cola `protected undelivered: SpawnHandle[] = []` (`src/session/SessionManager.ts:223`), que se llena en el listener de `settled` (L696-701, reemplazando cualquier entrada previa del mismo hijo para no encolarlo dos veces) y se vacía en `flushPendingSpawns()` (L712-731), llamado desde el turno (L795). El marcador de entrega es `protected delivered = new Set<string>()` (L241): el push al history añade el `spawnId` y `save()` lo persiste como `SessionRecord.deliveredSpawns` (L419-435), de modo que al reanudar (L335-339) solo se reencolan los hijos asentados que aún no se entregaron; un hijo todavía `running` no se encola y uno ya entregado no se repite. El acceso público es `pendingSpawns(): SpawnHandle[]` (L640-642), documentado como copia que no drena la cola, y está en el contrato (`contract.ts:128`, `IHarness.pendingSpawns`, delegado en `harness.ts:140-142`).
- tests: 8 casos en `tests/session/SessionManager.spec.ts` — «reports a settled child until the parent runs the turn that delivers it» (L1358), «persists the delivered child result even when the turn then fails» (L1387), «delivers two settled children in settlement order» (L1430), «does not report a running child as pending» (L1463), «hands out a copy of the pending children, not its own array» (L1477), «queues a settled child that was never delivered when the session is resumed» (L1492), «does not queue a child already delivered before the resume» (L1527) y «does not queue a child that was still running when the process died» (L1572). Verificado ahora: `npx vitest run tests/session/SessionManager.spec.ts -t pending` → 5 passed; `-t resumed` → 2 passed; `-t "settled child until the parent runs the turn"` → 1 passed.
- nota: `deliveredSpawns` no sube `SESSION_VERSION` (sigue en 4); un record anterior se lee como «nada entregado» y el peor caso es volver a entregar un resultado una vez (comentado en `SessionManager.ts:331-334` y `SessionStore.ts:78-83`).
-      Consumidor: `cli/TODO.md` §P6, tarea «Arrancar un turno sin prompt cuando un hijo deja trabajo».
-      Depends on: nada.
+Nadie podía saber desde fuera si la entrega del resultado al padre ya ocurrió, que es lo que el CLI necesita para continuar solo tras un `delegate`.
+Done when: una prueba en `core/tests/session/SessionManager.spec.ts` fija que un hijo asentado con el padre sin turno posterior sigue en la lista y solo desaparece cuando el padre ejecuta un turno que inyecta su resultado como mensaje system (el punto de inyección en SessionManager.ts), y que la lista vuelve vacía cuando ya no queda ningún hijo sin entregar.
+Depends on: nada.
+hecho: `core/src/session/SessionManager.ts#pendingSpawns` — ver [journal §8–§9](../docs/journal/core/s8-s9-reporting.md)
+tests: 8 casos en `core/tests/session/SessionManager.spec.ts` — «reports a settled child until the parent runs the turn that delivers it», «persists the delivered child result even when the turn then fails», «delivers two settled children in settlement order», «does not report a running child as pending», «hands out a copy of the pending children, not its own array», «queues a settled child that was never delivered when the session is resumed», «does not queue a child already delivered before the resume» y «does not queue a child that was still running when the process died».
+nota: `deliveredSpawns` no sube `SESSION_VERSION` (sigue en 4); un record anterior se lee como «nada entregado» y el peor caso es volver a entregar un resultado una vez.
+Consumidor: `cli/TODO.md` §P6, tarea «Arrancar un turno sin prompt cuando un hijo deja trabajo».
 
 - [ ] **Devolver los informes largos de un hijo como artefacto, no como mensaje**
 `formatSpawnResult` (`SessionManager.ts:690`) trunca el resultado del hijo antes de inyectarlo en el history del padre con `truncateText` (`SessionManager.ts:75`), que corta a `sessions.childResultMaxChars` (default 2000) y añade `…`; medido en una sesión real, un hijo devolvió **4360 caracteres** y el padre recibió **2000**, así que los informes de agentes revisores (hallazgos con severidad y `fichero:línea`) no caben y el padre decide sobre un texto cortado a mitad de frase.
@@ -226,126 +248,24 @@ Depends on: nada.
 4. [x] Persistencia de handles + migración de `SessionStore`.
 5. [x] `ToolContext.onOutput` (shell vivo).
 6. [x] Resumen de cierre estructurado.
-7. [x] Hijos asentados con resultado sin entregar (desbloquea `cli/TODO.md` §P6) — `pendingSpawns()` (`SessionManager.ts:640`, `contract.ts:128`), cubierto por los 8 casos citados arriba.
+7. [x] Hijos asentados con resultado sin entregar (desbloquea `cli/TODO.md` §P6) — `pendingSpawns()` (`SessionManager.ts:640`, `contract.ts:128`), cubierto por los 8 casos del ítem correspondiente.
 
 Nota: los puntos 1–2 desbloquean `cli/TODO.md` §P1; el 3 desbloquea §P3; el 7 desbloquea §P6.
 
-10. gateway persistente (F1–F5): `@racso2609/gateway` como paquete nuevo
-    Formato de esta sección: ver la skill `todo-format`. Las secciones 0–9 se dejan como están.
-    La referencia es `docs/ARCHITECTURE.md` (fases F0–F6, decisiones 1–7 y huecos 1–10): esta sección no repite el diseño, sólo lista las tareas con su `Done when`.
-    Contexto: `core` es la librería base; el **gateway** es un **paquete nuevo y proceso aparte** (`@racso2609/gateway`) que consume la **lib publicada** del core, y el CLI es otra implementación separada que consume esa misma lib. Los tres se publican. Hoy `createHarness()` sólo vive dentro del proceso del CLI, así que nada puede correr sin una terminal abierta. Reutiliza lo que ya existe: `SpawnManager`, `SessionStore` y `SessionManagerImpl`; `IHarness` no cambia (decisión 7).
-    Bloquea: nada del CLI actual; F0 (`cli/TODO.md` §P4) es requisito previo, porque el gateway consume el core del registro y no del workspace.
+## 10. Gateway
 
-### F0 — prerrequisito: el paquete
+Las 16 tareas de F0–F5 viven en [gateway/TODO.md](../gateway/TODO.md). Bloqueadas por la verificación de F0 (`cli/TODO.md` §P4).
 
-- [ ] **Crear el paquete `gateway/` en el workspace**
-      El gateway es un proceso de larga vida con su propio ciclo de release, así que no puede nacer dentro de `core/` ni de `cli/`.
-      Done when: existe `gateway/package.json` con `name: "@racso2609/gateway"`, `private: false` y `@racso2609/core` como dependencia con rango publicado (no `workspace:*`), está listado en `pnpm-workspace.yaml` y `pnpm -r build` lo incluye.
-      Depends on: publicar `@racso2609/core` (`cli/TODO.md` §P4).
- pendiente: sigue bloqueado porque el prerrequisito no está cumplido: no existe el directorio `gateway/` y `pnpm-workspace.yaml` solo lista `core` y `cli`; `cli/TODO.md` §P4 declara que la publicación (F0 de `docs/ARCHITECTURE.md`) todavía no está hecha. Se desbloquea al cerrar `cli/TODO.md` §P4.
+## Decisiones vigentes
 
-### F1 — `SessionRegistry` + `runTurn` (huecos 1–3)
+- **`ChatEvent` es el único canal de progreso del turno** (`text`/`reasoning`/`toolCallStart`/`toolCallEnd`/`toolOutput`) — el razonamiento nunca vuelve al history y el truncado no aplica al stream · §9
+- **Los eventos de spawn se persisten como handle final, no como eventos** (`SessionRecord.spawns`, `SESSION_VERSION` 4) — el coste crece O(hijos), no O(reintentos) · §9
+- **El histórico restaurado es solo lectura** — un hijo reanudado no se puede `poll`/`wait`/`cancel` ni debe parecer que sí · §9
+- **`onSpawnEvent()` es solo en vivo, sin replay** — el estado inicial se reconstruye con `listSpawns()` y `childHistory()` · §9
+- **`TurnOutcome` y los campos nuevos de `SpawnHandle` son opcionales** — no suben `SESSION_VERSION` ni rompen un record antiguo · §9
+- **`deliveredSpawns` marca la entrega del resultado al padre** — sin subir `SESSION_VERSION`; el peor caso es reentregar una vez · §9
 
-- [ ] **Añadir `SessionRegistry` al core**
-      Hoy sólo hay `Harness` con **una** sesión activa y `loadSession` la sustituye, así que no hay nada que sostenga N sesiones simultáneas ni que las enumere por estado.
-      Done when: un test en `core/tests/session/` crea dos sesiones vivas sobre un mismo `Config` y `SessionStore`, corre un turno en cada una y verifica que ambas persisten y que la segunda no ve el history de la primera; `pnpm --filter @racso2609/core test` en verde.
-      Depends on: nada.
+## Historial
 
-- [ ] **Mover el turno a `runTurn()` en `core/src/session/turn.ts` con `IHarness` intacta**
-      El turno (bucle de stdin + `harness.ask` + traducción `ChatEvent`→`UiEvent`) vive en `cli/src/MainLoop.ts`, así que el gateway no puede reutilizarlo; va como función libre para no añadir una entrada pública al contrato (decisión 6).
-      Done when: `runTurn()` exportado desde `core/src/session/turn.ts` ejecuta un turno con un prompt y devuelve los eventos sin leer stdin ni escribir en stdout, `core/src/contract.ts` (`IHarness`) no cambia y `pnpm -r test` sigue en verde.
-      Depends on: añadir `SessionRegistry` al core.
-
-- [ ] **Atravesar el turno con un `AbortSignal`**
-      Hoy el `signal` sólo lo recibe el runner de hijos (`SpawnRunner.signal`), así que un turno en curso no se puede abortar desde fuera.
-      Done when: `runTurn()` acepta un `AbortSignal`, un test en `core/tests/session/` aborta a mitad de turno y verifica que `ask` termina y que la sesión queda persistida sin el turno a medias.
-      Depends on: mover el turno a `runTurn()` en `core/src/session/turn.ts` con `IHarness` intacta.
-
-### F2 — servidor HTTP + SSE (huecos 4, 5, 8 y 10)
-
-- [ ] **Serializar las escrituras del `SessionStore` con lease `<id>.lock` y tmp+rename**
-      `save` hace hoy `fs.writeFileSync` sobre el fichero entero sin lock ni escritura atómica, así que dos escritores sobre la misma sesión se pisan y un corte a mitad deja un JSON inválido.
-      Done when: existe un test en `core/tests/session/SessionStore.spec.ts` con dos `save` concurrentes sobre el mismo id que fija que no se pierde ninguna escritura y que el fichero final siempre es JSON válido, y `sessions/<id>.lock` aparece y se libera en la prueba.
-      Depends on: nada.
-
-- [ ] **Añadir el bloque `gateway` a `Config`**
-      El gateway necesita puerto, bind y política de aprobaciones por defecto como configuración, no como constantes.
-      Done when: `Config.gateway` existe con `enabled` (default `false`), `host`, `port` y la política de aprobaciones por defecto, aplicado en `applyDefaults` y validado en `validateConfig()`.
-      Depends on: nada.
-
-- [ ] **Añadir un `EventBuffer` circular por turno con sobre `{sessionId, turnId, seq}`**
-      `ChatEvent` no lleva `seq` ni `turnId` y `onSpawnEvent` es live-only, así que un cliente que se engancha a mitad de turno no puede reconstruir lo ya emitido (decisión 2).
-      Done when: un test en `gateway/tests/` arranca un turno, corta la conexión a mitad, reconecta con el último `seq` y recibe exactamente los eventos que faltaban, sin duplicados; el estado ya asentado se relee de `status()`/`conversation()`/`listSpawns()`.
-      Depends on: mover el turno a `runTurn()` en `core/src/session/turn.ts` con `IHarness` intacta.
-
-- [ ] **Exponer el servidor del gateway con `node:http` y SSE, no WebSocket**
-      Hoy no hay ninguna referencia a `node:http` en `core/` ni en `cli/`: no existe servidor donde colgar el stream ni la SPA, y el flujo es unidireccional, así que SSE basta (decisión 2).
-      Done when: el proceso `gateway` sirve un endpoint SSE que emite cada evento envuelto en `{sessionId, turnId, seq}` y atiende las acciones del usuario como peticiones HTTP normales, con un test de integración sobre un puerto efímero.
-      Depends on: añadir un `EventBuffer` circular por turno con sobre `{sessionId, turnId, seq}`.
-
-### F4 — aprobaciones (huecos 6 y 7)
-
-- [ ] **Llevar `sessionId` en `ApprovalRequest`**
-      Hoy `approveWith` instala un único handler global y la petición no dice de qué sesión viene, así que con N sesiones un `ask` no se puede atribuir.
-      Done when: `ApprovalRequest` incluye `sessionId` y un test en `core/tests/session/` verifica que dos sesiones con una petición abierta cada una reciben el `sessionId` correcto.
-      Depends on: añadir `SessionRegistry` al core.
-
-- [ ] **Persistir `approvals[]` en `SpawnHandle` y `SessionRecord`**
-      Ninguno de los dos lo tiene, así que la decisión sobre una tool no queda registrada junto al trabajo al que pertenece.
-      Done when: una aprobación concedida o denegada queda escrita en `approvals[]` del `SpawnHandle` y sobrevive al guardado y recarga de `SessionRecord` sin subir `SESSION_VERSION` (campos opcionales); test en `core/tests/session/`.
-      Depends on: llevar `sessionId` en `ApprovalRequest`.
-
-- [ ] **Implementar la `ApprovalQueue` por sesión con TTL de 120 s y `deny` por defecto**
-      `SessionManager.approve` deniega sin handler, así que una tool sujeta a aprobación mata el trabajo en silencio en vez de dejarlo registrado y rechazado (decisión 3).
-      Done when: un test dispara una tool bajo política `ask`, no responde, avanza el reloj 120 s y comprueba que la tool quedó denegada con `ToolResult.isError` y registrada en `approvals[]`; otro test con dos sesiones verifica que la respuesta de la A no resuelve la petición de la B.
-      Depends on: persistir `approvals[]` en `SpawnHandle` y `SessionRecord`.
-
-### F5 — cronjobs y webhooks (hueco 9)
-
-- [ ] **Crear `jobs.json` en `~/.racso-harness/` como almacenamiento de trabajos**
-      No existe hoy ningún sitio donde persistir programaciones ni sus ejecuciones: `SessionStore` debe seguir siendo la única pieza que toca disco para sesiones.
-      Done when: `jobs.json` con sus tipos y su lectura/escritura existe en el gateway, con test que lo crea, lo relee y comprueba que `SessionStore` no lo toca.
-      Depends on: crear el paquete `gateway/` en el workspace.
-
-- [ ] **Ejecutar cronjobs programados sobre `runTurn`**
-      Es la mitad del objetivo del gateway: trabajo recurrente sin usuario delante.
-      Done when: un trabajo con expresión cron registrado en `jobs.json` se ejecuta en el intervalo esperado (test con reloj falso) llamando a `runTurn` sobre una sesión existente o nueva, y deja rastro en `sessions/<id>.json`.
-      Depends on: implementar la `ApprovalQueue` por sesión con TTL de 120 s y `deny` por defecto.
-
-- [ ] **Recibir webhooks como disparadores del mismo camino**
-      La otra mitad: reaccionar a un evento externo disparando el turno sin polling.
-      Done when: un test hace `POST` al endpoint de webhook con un `id` registrado en `jobs.json`, dispara `runTurn` sobre la sesión asociada y otro `id` desconocido devuelve `404`.
-      Depends on: ejecutar cronjobs programados sobre `runTurn`.
-
-- [ ] **Persistir el estado de los trabajos entre reinicios**
-      Un cronjob que se salta la ejecución perdida al reiniciar rompe la promesa de "corre siempre", que es la razón de tener un proceso de larga vida.
-      Done when: matar el gateway a mitad de un trabajo y volver a arrancarlo restaura las programaciones de `jobs.json` y deja el trabajo interrumpido marcado como `error` en el historial, sin duplicar ejecuciones.
-      Depends on: ejecutar cronjobs programados sobre `runTurn`.
-
-- [ ] **Documentar el gateway en `CONTRACT.md`**
-      `CONTRACT.md` describe el SDK publicado; un paquete nuevo que consume la lib no existe para quien integra si no está ahí.
-      Done when: `CONTRACT.md` describe cómo arrancar `@racso2609/gateway`, qué rutas expone y qué importa del core más allá de `createHarness` (`runTurn`), dejando claro que `IHarness` no cambia.
-      Depends on: recibir webhooks como disparadores del mismo camino.
-
-### 10.1 orden sugerido
-
-La referencia del orden es `docs/ARCHITECTURE.md` (fases F0–F6); aquí sólo se lista qué tarea de arriba abre cada fase.
-
-1. F0 — el plan de publicación está cerrado en `docs/INSTALL.md` y sus tareas en `cli/TODO.md` §P4. El paquete `gateway/` necesita `@racso2609/core` publicado.
-2. F1 — `SessionRegistry`, `runTurn()` en `core/src/session/turn.ts` con `IHarness` intacta y el `AbortSignal` que atraviesa el turno.
-3. F2 — `SessionStore` con lease y tmp+rename, bloque `gateway` en `Config`, `EventBuffer` con sobre `{sessionId, turnId, seq}` y servidor `node:http` + SSE.
-4. F4 — `sessionId` en `ApprovalRequest`, `approvals[]` en `SpawnHandle`/`SessionRecord` y `ApprovalQueue` por sesión con TTL 120 s y `deny` por defecto. Va antes de los trabajos: un cronjob que dispara tools con efectos necesita una decisión que no dependa de una terminal abierta.
-5. F5 — `jobs.json`, cronjobs sobre `runTurn`, webhooks por el mismo camino, persistencia entre reinicios y `CONTRACT.md`.
-
-### Descartados de la sección 10
-
-- **«Diseñar el contrato del gateway» (`core/GATEWAY.md`)** — el diseño ya está cerrado en `docs/ARCHITECTURE.md` (decisiones 1–7 y huecos 1–10) → se sustituye por las tareas de F1, F2, F4 y F5, y lo que el consumidor necesita leer pasa a `CONTRACT.md` (tarea de F5).
-- **«Definir el almacenamiento de trabajos»** — el diseño decidió `jobs.json` junto a `SessionStore` (`docs/ARCHITECTURE.md`, `## Modelo de runtime`) → queda como tarea de implementación de F5.
-- **«Exponer un servidor HTTP con `spawn` y `status`»** — se reemplaza por el servidor `node:http` + SSE de F2, que sirve turnos y stream, no `spawn` suelto.
-- **«Proteger el gateway con token»** — ninguna fase de `docs/ARCHITECTURE.md` lo decide → pasa a `Preguntas abiertas` de esta sección en vez de quedar como tarea.
-- **«Definir la política de aprobaciones de un trabajo sin usuario»** — decidido: `ApprovalQueue` por sesión con TTL 120 s y `deny` por defecto (decisión 3) → queda como tarea de F4.
-
-## Preguntas abiertas de la sección 10
-
-- **¿Autentica el gateway las peticiones con un token?** Las fases F0–F6 de `docs/ARCHITECTURE.md` no lo deciden, y sin autenticación un puerto que ejecuta tools (`shell`) es ejecución remota en la máquina del usuario. No es tarea hasta que se decida: para cerrarla hay que fijar si el token vive en `config.gateway` y si toda ruta salvo `/health` lo exige.
-- **¿Los `.map` viajan en los tarballs?** Afecta al tamaño del paquete del gateway igual que al de los dos actuales; queda abierto en `docs/INSTALL.md` (`Preguntas abiertas`, punto 3) y se cierra con la misma decisión.
+- §9 — session reporting: cerrada salvo «Devolver los informes largos de un hijo como artefacto», [journal](../docs/journal/core/s8-s9-reporting.md)
+- §10 — gateway persistente: mudada a [gateway/TODO.md](../gateway/TODO.md)

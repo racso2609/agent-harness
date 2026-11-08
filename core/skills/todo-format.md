@@ -59,6 +59,37 @@ Write it in the language the project uses. Keep it short: one line per fact.
 8. **State the current state when it exists.** If the repo already has part of
    the feature (a type, a manager, an event), say so in the description — it
    prevents someone rebuilding what is done.
+9. **Measure the revert on the file as it is right now.** When you claim a test
+catches a mutation, apply the mutation, run it, and measure against `M = the
+number of cases in the file at that moment`; record which **named** case
+catches it. The name is what must stay true, not the count. Re-measure `M`
+every time a case is added or removed.
+
+## Where the history goes
+
+1. **The TODO holds the task; the journal holds the history.** Closed items
+leave their narrative in `docs/journal/<package>/<theme>.md` and keep only the
+task shape in the TODO.
+2. **Closed item shape:** title, one sentence, `Done when:`, `Depends on:`,
+and one `hecho:` line pointing at the journal:
+
+   ```markdown
+   hecho: <one sentence naming the key file> — ver [journal <theme>](docs/journal/<package>/<theme>.md)
+   ```
+
+   Nothing else.
+3. **The journal is a move, not a summary.** Copy the original body verbatim; a
+summary loses exactly the detail someone will need later.
+4. **Never invent a criterion.** A closed item that had no `Done when:` gets
+`Done when: no se fijó uno; el hecho está en el journal.` — literally, not a
+reconstructed guess.
+5. **`Done when:` and `Depends on:` are never rewritten** while moving things.
+Copy them.
+6. **A section whose items are all closed collapses to one line** under
+`## Historial`, linking its journal.
+7. **An open item with a long body (>12 lines) sends its narrative to
+`#### Notas`** at the end of its section; the item itself stays at most
+12 lines.
 
 ## Discarded vs open question
 
