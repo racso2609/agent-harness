@@ -98,6 +98,12 @@ describe("McpManager lazy discovery", () => {
     // Nothing was built and nothing was spawned after close().
     expect(createConnection).not.toHaveBeenCalled();
     expect(connections).toHaveLength(0);
+    // The invariant that keeps a closed manager closed: `close()` empties
+    // `state`, so there is nothing left to discover. This is what a `closed`
+    // flag used to guard, and the assertion that discriminates it: if `doClose`
+    // stopped emptying the state, the three calls above would have re-created
+    // the entry and this would see it again.
+    expect(mcp.servers()).toEqual([]);
   });
 
   it("connects once and lists once across two tools() calls", async () => {

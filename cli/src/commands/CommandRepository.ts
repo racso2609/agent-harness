@@ -1,4 +1,10 @@
-import type { IHarness, SkillSummary, SpawnHandle } from "@racso2609/core";
+import type {
+  IHarness,
+  McpServerSummary,
+  McpToolSummary,
+  SkillSummary,
+  SpawnHandle,
+} from "@racso2609/core";
 import type { Flows } from "@/flows";
 import { formatSessionList, formatSessionStatus } from "@/render/status";
 
@@ -11,6 +17,10 @@ export interface CommandOption {
 export interface CommandContext {
   harness: IHarness;
   flows: Flows;
+  // Whether config.mcp.enabled is on. `/mcp` needs it to explain an empty
+  // listing: with MCP off the servers are not even resolved, so the reason
+  // is the switch and not a broken definition. Undefined means not asked.
+  mcpEnabled?: boolean;
   exit: () => void;
   clear: () => void;
   notify: (message: string) => void;
@@ -178,6 +188,33 @@ const BUILT_IN_COMMANDS: CommandDefinition[] = [
     },
   },
   {
+    name: "mcp",
+    description: "List the MCP servers, or reload them: /mcp [reload]",
+    run: async (context, args) => {
+      const [action] = args;
+
+      if (!action) {
+        context.notify(formatMcpServers(context));
+        return;
+      }
+
+      if (action !== "reload") {
+        context.notify("Usage: /mcp | /mcp reload");
+        return;
+      }
+
+      let servers: McpServerSummary[];
+      try {
+        servers = await context.harness.reloadMcp();
+      } catch (err) {
+        context.notify(`MCP not reloaded: ${errorMessage(err)}`);
+        return;
+      }
+
+      context.notify(`MCP reloaded\n${formatMcpServers(context, servers)}`);
+    },
+  },
+  {
     name: "status",
     description: "Show session usage, cost and context",
     run: (context) => context.notify(formatSessionStatus(context.harness.status())),
@@ -249,6 +286,51 @@ const formatSkillList = (skills: SkillSummary[]) =>
         })
         .join("\n")
     : "No skills available";
+
+// Explains an empty listing: with the switch off no server is even resolved,
+// so the message names the switch instead of leaving the user with an empty
+// list. Both ways to turn MCP off are named, because the environment one
+// overrides the config.
+const MCP_DISABLED_NOTICE =
+  "MCP is disabled: set mcp.enabled to true in the config " +
+  "(RACSO_HARNESS_MCP_DISABLED also switches it off, whatever the config says)";
+
+// One line per server (id, transport, status, tool count, and the error of a
+// failed one), with the tools underneath. `servers` defaults to the session
+// listing, which never connects: `idle` means nothing tried yet.
+const formatMcpServers = (context: CommandContext, servers?: McpServerSummary[]) => {
+  if (context.mcpEnabled === false) return MCP_DISABLED_NOTICE;
+
+  const list = servers ?? context.harness.listMcpServers();
+  if (!list.length) return "No MCP servers configured";
+
+  const lines = list.map((server) => {
+    const count = `${server.toolCount} tool${server.toolCount === 1 ? "" : "s"}`;
+    const error = server.error ? ` - ${truncate(server.error, 200)}` : "";
+    return `- ${server.id} [${server.transport}] ${server.status}, ${count}${error}`;
+  });
+
+  for (const [serverId, tools] of groupMcpTools(context.harness.mcpTools())) {
+    lines.push(`    ${serverId}:`);
+    for (const tool of tools) {
+      lines.push(`        ${tool.name} - ${truncate(tool.description, 120)}`);
+    }
+  }
+
+  return lines.join("\n");
+};
+
+// Tools grouped by server, preserving the order the manager reported them in.
+const groupMcpTools = (tools: McpToolSummary[]) => {
+  const groups = new Map<string, McpToolSummary[]>();
+  for (const tool of tools) {
+    const group = groups.get(tool.serverId) ?? [];
+    group.push(tool);
+    groups.set(tool.serverId, group);
+  }
+
+  return groups;
+};
 
 const truncate = (text: string, max = 100) => (text.length > max ? `${text.slice(0, max)}…` : text);
 

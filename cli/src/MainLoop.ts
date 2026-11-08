@@ -192,7 +192,7 @@ class MainLoop {
       // Ink owns stdin, so the app pushes prompts into the same loop.
       (this.ui as TuiUiAdapter).start({
         onSubmit: (prompt) => this.enqueueFromUser(prompt),
-        onExit: () => this.shutdown(0),
+        onExit: () => void this.shutdown(0),
         // The draft decides whether a continuation may start: the box reports every
         // change, including the emptying that follows a send.
         onDraftChange: () => this.maybeContinue({ fromDraft: true }),
@@ -244,7 +244,7 @@ class MainLoop {
 
   // Ctrl-C triggers cleanup and exit.
   protected installKeyHandlers() {
-    process.on("SIGINT", () => this.shutdown(130));
+    process.on("SIGINT", () => void this.shutdown(130));
   }
 
   // Hands a prompt to the loop waiting for one. The entry is built even on the
@@ -472,7 +472,7 @@ class MainLoop {
     return {
       harness: this.harness,
       flows: this.flows,
-      exit: () => this.shutdown(0),
+      exit: () => void this.shutdown(0),
       clear: () => this.ui.render({ type: "reset" }),
       notify: (message) => this.ui.render({ type: "notice", message }),
       help: () => this.commands.helpText(),
@@ -491,13 +491,19 @@ class MainLoop {
     this.renderer?.close();
   }
 
-  // Persists the session, restores the terminal and exits.
-  protected shutdown(code: number) {
+  // Persists the session, closes its MCP servers, restores the terminal and
+  // exits.
+  //
+  // The harness shutdown is awaited before process.exit: an MCP server is a
+  // child process, and exiting first would leave it running. Shutdown is
+  // permissive (`Promise<void> | void`), so `await` is what tolerates both; a
+  // shutdown that throws is reported instead of leaving the exit to skip.
+  protected async shutdown(code: number): Promise<void> {
     if (this.closing) return;
     this.closing = true;
 
     try {
-      this.harness.shutdown();
+      await this.harness.shutdown();
     } catch (err) {
       this.ui.render({
         type: "notice",

@@ -31,6 +31,15 @@ export interface McpServerSummary {
   error?: string;
 }
 
+// One discovered remote tool, as a listing shows it: the composite name the
+// model sees, the server it came from, and its description already capped and
+// flattened to a single line.
+export interface McpToolSummary {
+  name: string;
+  serverId: string;
+  description: string;
+}
+
 export interface McpManagerOptions {
   // Budget for spawning a server and completing the handshake.
   startupTimeoutMs?: number;
@@ -199,8 +208,8 @@ export class McpManager {
 
   private state: ManagedServer[];
 
-  private closed = false;
-
+  // Settled close, so a second `close()` returns the same promise instead of
+  // closing the connections twice. Never reset: closing is terminal.
   private closing?: Promise<void>;
 
   // Names already reported as colliding, so a repeated `tools()` call does not
@@ -241,6 +250,22 @@ export class McpManager {
         ...(error ? { error } : {}),
       };
     });
+  }
+
+  // One entry per discovered tool, for the listings that show what a server
+  // actually offers. Reads the same state as `servers()` and never connects: a
+  // reload is what refreshes it.
+  toolSummaries(): McpToolSummary[] {
+    return this.state.flatMap((entry) =>
+      entry.tools.map((tool) => ({
+        name: tool.name,
+        serverId: entry.server.id,
+        // Already capped by `maxDescriptionChars` when the tool was built;
+        // only the newlines are collapsed here, which would break a one-line
+        // listing.
+        description: tool.description.replace(/\s+/g, " ").trim(),
+      })),
+    );
   }
 
   // Every tool discovered so far, in config order. Servers that were never
@@ -329,7 +354,15 @@ export class McpManager {
   }
 
   // Cuts every connection. Idempotent: the same promise is returned on every
-  // call, and a closed manager never starts a server again.
+  // call.
+  //
+  // A closed manager never starts a server again because `doClose` empties
+  // `state`, and `tools()`, `toolForName()`, `ready()` and `servers()` all walk
+  // that list: an empty one leaves nothing to discover. There is no separate
+  // `closed` flag, and none is needed, because the invariant is the empty state
+  // itself. `tests/mcp/mcpManager.spec.ts` pins it by calling `tools()`,
+  // `toolForName()` and `ready()` after `close()` and asserting that no
+  // connection was built and that `servers()` stays empty.
   close(): Promise<void> {
     this.closing ??= this.doClose();
 
@@ -337,8 +370,6 @@ export class McpManager {
   }
 
   private async doClose(): Promise<void> {
-    this.closed = true;
-
     const connections = this.state
       .map((entry) => entry.connection)
       .filter((connection): connection is McpConnection => connection !== undefined);
@@ -353,7 +384,7 @@ export class McpManager {
   // `servers()`: it is never retried on its own, only through `invalidate`, so a
   // dead server cannot make every `tools()` call spawn a process.
   private ensureDiscovery(entry: ManagedServer): void {
-    if (this.closed || entry.connection || entry.discovering) return;
+    if (entry.connection || entry.discovering) return;
 
     const { generation } = entry;
     const connection = this.createConnection(entry.server, {

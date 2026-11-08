@@ -105,6 +105,18 @@ class Harness implements IHarness {
     return this.session.setAgent(agentId);
   }
 
+  listMcpServers() {
+    return this.session.listMcpServers();
+  }
+
+  reloadMcp() {
+    return this.session.reloadMcp();
+  }
+
+  mcpTools() {
+    return this.session.mcpTools();
+  }
+
   approveWith(handler: ApprovalHandler) {
     this.session.approveWith(handler);
   }
@@ -145,9 +157,15 @@ class Harness implements IHarness {
     return this.session.compactSession();
   }
 
-  // Persists the session; process lifecycle belongs to the CLI.
-  shutdown() {
+  // Persists the session and closes every MCP connection; the process
+  // lifecycle stays with the CLI, which awaits this before process.exit.
+  //
+  // The close is awaited instead of fired and forgotten because an MCP server
+  // is a child process: exiting first would leave it running (re-parented to
+  // init), and nothing afterwards could reap it.
+  async shutdown(): Promise<void> {
     this.session.save();
+    await this.session.closeMcp();
   }
 }
 

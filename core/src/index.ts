@@ -33,7 +33,13 @@ export type {
 export type { AgentApproval, AgentDefinition, AgentSummary } from "./agents";
 export type { SessionRecord } from "./session/SessionStore";
 export type { Skill, SkillSummary } from "./skills/Skill";
-export type { McpServerConfig, McpTransportName, ResolvedMcpServer } from "./mcp";
+export type {
+  McpServerConfig,
+  McpServerSummary,
+  McpToolSummary,
+  McpTransportName,
+  ResolvedMcpServer,
+} from "./mcp";
 export { isMcpToolName, mcpToolName, parseMcpToolName, resolveMcpServers } from "./mcp";
 export type { SpawnHandle, SpawnStatus } from "./contract";
 export type { ApprovalDecision, ApprovalRequest } from "./tools";

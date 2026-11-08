@@ -12,6 +12,8 @@ import { Config, DEFAULT_PROVIDER_TYPE, ProviderDetail } from "@/configuration";
 import { OpenAiProvider } from "@/providers/openai";
 import { ensureSkillsDir, SkillLoader, SkillRegistry } from "@/skills";
 import type { SkillSummary } from "@/skills";
+import { McpManager } from "@/mcp";
+import type { McpServerSummary, McpToolSummary } from "@/mcp";
 import { createToolRegistry, ToolContext, ToolRegistry } from "@/tools";
 import type { ApprovalDecision, ApprovalRequest } from "@/tools";
 import {
@@ -117,6 +119,14 @@ interface SessionManager {
   setProvider: (name: string) => Promise<boolean>;
   // Swaps the model of the active provider.
   setModel: (model: string) => boolean;
+  // One entry per configured MCP server, with the state of its connection.
+  listMcpServers: () => McpServerSummary[];
+  // Every MCP tool discovered so far, as a listing shows it.
+  mcpTools: () => McpToolSummary[];
+  // Closes every MCP connection, forgets them and discovers again.
+  reloadMcp: () => Promise<McpServerSummary[]>;
+  // Closes every MCP connection. The harness calls it on shutdown.
+  closeMcp: () => Promise<void>;
   // Lists the agents available from the agents directory.
   listAgents: () => AgentSummary[];
   // Swaps the active agent, its tools and its persona.
@@ -161,6 +171,16 @@ class SessionManagerImpl implements SessionManager {
   agentRegistry = new AgentRegistry([builtInDefaultAgent()]);
   // Skill definitions loaded from config.skills.dirs; undefined when disabled.
   skillRegistry?: SkillRegistry;
+  // Owner of the MCP connections of this session tree. Always built, even
+  // when MCP is off: the constructor only reads the `mcp` block and spawns
+  // nothing, so it costs no process and no I/O. The gate on `mcp.enabled` and
+  // on RACSO_HARNESS_MCP_DISABLED lives in createToolRegistry, which is what
+  // decides whether the provider is installed at all.
+  //
+  // One per session tree, not one per registry: initialize, load, setAgent and
+  // the spawned children all reuse it, so the registries they rebuild never
+  // open a second connection to the same server.
+  mcp: McpManager;
   protected agentsLoaded = false;
   // Active provider instance, undefined until initialize() succeeds.
   provider?: Provider;
@@ -205,11 +225,15 @@ class SessionManagerImpl implements SessionManager {
   // drop it while the child stays settled.
   protected delivered = new Set<string>();
 
-  constructor(config = new Config(), store = new SessionStore()) {
+  constructor(config = new Config(), store = new SessionStore(), mcp?: McpManager) {
     this.config = config;
     this.store = store;
+    // A child session reuses the manager of its parent, so a whole tree
+    // shares one set of connections and closing the root closes them all.
+    this.mcp = mcp ?? new McpManager({ mcp: config.config?.mcp });
     this.tools = createToolRegistry(this.config, undefined, {
       skills: this.skillRegistry,
+      mcp: this.mcp,
     });
     this.createdAt = new Date().toISOString();
   }
@@ -229,6 +253,7 @@ class SessionManagerImpl implements SessionManager {
     this.agentId = agent.id;
     this.tools = createToolRegistry(this.config, agent.tools, {
       skills: this.skillRegistry,
+      mcp: this.mcp,
     });
 
     const providerName = agent.provider ?? this.config.config.defaultProvider;
@@ -276,6 +301,7 @@ class SessionManagerImpl implements SessionManager {
     this.agentId = agent.id;
     this.tools = createToolRegistry(this.config, agent.tools, {
       skills: this.skillRegistry,
+      mcp: this.mcp,
     });
 
     this.history = record.history ?? [];
@@ -474,6 +500,44 @@ class SessionManagerImpl implements SessionManager {
     return this.skillRegistry?.summaries() ?? [];
   }
 
+  // One entry per configured MCP server, with the state of its connection.
+  // Reading it never starts a server: `idle` is the state of one that was
+  // never connected.
+  listMcpServers(): McpServerSummary[] {
+    // When the switch is off nothing was resolved, so an empty listing is the
+    // honest answer: `/mcp` names the switch instead of showing idle servers.
+    if (this.config.config.mcp?.enabled !== true) return [];
+
+    return this.mcp.servers();
+  }
+
+  // Every MCP tool discovered so far, as a listing shows it.
+  mcpTools(): McpToolSummary[] {
+    return this.mcp.toolSummaries();
+  }
+
+  // Closes every MCP connection, forgets them and discovers again, returning
+  // the state of the servers afterwards.
+  //
+  // This is the only way to recover from a server that failed: the manager
+  // never retries on its own (a dead server would otherwise spawn a process on
+  // every `tools()` call), and `invalidate` is the primitive that drops the
+  // failure. It does NOT re-read config.json: the servers are the ones the
+  // config held when the session was built, so a server added to the file needs
+  // a restart.
+  async reloadMcp(): Promise<McpServerSummary[]> {
+    await this.mcp.invalidate();
+    await this.mcp.ready();
+
+    return this.mcp.servers();
+  }
+
+  // Closes every MCP connection of the session tree. Idempotent, and a no-op
+  // when nothing was ever connected. The harness calls it from shutdown().
+  closeMcp(): Promise<void> {
+    return this.mcp.close();
+  }
+
   // Re-scans the skills directories and recomposes the system prompt so a
   // reload is visible without restarting the session.
   reloadSkills(): SkillSummary[] {
@@ -529,6 +593,7 @@ class SessionManagerImpl implements SessionManager {
     this.agentId = agent.id;
     this.tools = createToolRegistry(this.config, agent.tools, {
       skills: this.skillRegistry,
+      mcp: this.mcp,
     });
     this.applySystemPrompt(true);
 
@@ -625,7 +690,7 @@ class SessionManagerImpl implements SessionManager {
       maxChildren: this.config.config.sessions?.maxChildren,
       timeoutMs: this.config.config.sessions?.childTimeoutMs,
       runner: async ({ sessionId, agentId, prompt, context, signal }) => {
-        const child = new SessionManagerImpl(this.config, this.store);
+        const child = new SessionManagerImpl(this.config, this.store, this.mcp);
         child.parentId = sessionId;
         await child.initialize({ agent: agentId, store: this.store });
         if (this.approvalHandler) child.approveWith(this.approvalHandler);

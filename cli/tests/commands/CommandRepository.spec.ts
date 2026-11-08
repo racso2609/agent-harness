@@ -85,6 +85,9 @@ const makeContext = (): CommandContext => ({
     waitSpawn: vi.fn(async () => undefined),
     collectSpawns: vi.fn(async () => []),
     compactSession: vi.fn(async () => true),
+    listMcpServers: vi.fn(() => []),
+    reloadMcp: vi.fn(async () => []),
+    mcpTools: vi.fn(() => []),
     shutdown: vi.fn(),
   } as unknown as CommandContext["harness"],
   flows: {
@@ -119,6 +122,7 @@ describe("CommandRepository", () => {
       "compact",
       "skills",
       "skill",
+      "mcp",
       "status",
       "spawn",
       "children",

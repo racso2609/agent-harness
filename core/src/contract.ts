@@ -1,6 +1,7 @@
 import type { AgentSummary } from "@/agents";
 import type { SkillSummary } from "@/skills";
 import type { Config, ProviderConfig, ProviderDetail } from "@/configuration";
+import type { McpServerSummary, McpToolSummary } from "@/mcp";
 import type { SpawnEvent, SpawnEventListener, SpawnHandle, SpawnStatus } from "@/session/spawn";
 import type { SessionStore } from "@/session/SessionStore";
 import type { ApprovalDecision, ApprovalRequest } from "@/tools";
@@ -107,6 +108,20 @@ export interface IHarness {
   reloadSkills(): SkillSummary[];
   setAgent(agentId: string): Promise<boolean>;
 
+  // --- mcp ---
+  // One entry per configured MCP server (id, transport, connection status,
+  // number of tools discovered, and the error when it failed). Reading it never
+  // starts a server: `idle` is the state of one that was never connected.
+  listMcpServers(): McpServerSummary[];
+  // Closes every MCP connection, forgets them and discovers again, returning
+  // the servers as they are afterwards. The only way back from a server that
+  // failed, since the manager never retries on its own. It does NOT re-read
+  // config.json: the servers are the ones the config held at boot.
+  reloadMcp(): Promise<McpServerSummary[]>;
+  // Every MCP tool discovered so far, as a listing shows it: the composite
+  // name the model sees, the server it comes from and its description.
+  mcpTools(): McpToolSummary[];
+
   // --- approvals ---
   approveWith(handler: ApprovalHandler): void;
 
@@ -129,8 +144,15 @@ export interface IHarness {
 
   // --- maintenance ---
   compactSession(): Promise<boolean>;
-  // Persists without exiting; the CLI owns process.exit.
-  shutdown(): void;
+  // Persists, then closes every MCP connection, without exiting: the CLI owns
+  // process.exit.
+  //
+  // Returns a promise because the connection close is asynchronous, and the
+  // spawned MCP servers must be dead before the process leaves (calling
+  // process.exit first would orphan them). A caller that does not await it
+  // still compiles; the CLI does await it, so the exit happens after the
+  // children are gone.
+  shutdown(): Promise<void>;
 }
 
 export type {
