@@ -213,11 +213,13 @@ describe("sweepOrphans", () => {
       await waitForDeath(parent.pid as number);
       expect(isAlive(grandchild)).toBe(true);
 
-      // What is asserted is the sweep's contract, the pid it reports in
-      // `orphans`: the death of the process is the effect of that same call, so
-      // asserting it afterwards would only restate what the sweep just did.
+      // Both halves of the sweep's contract are asserted: the orphan is reported,
+      // and it is really dead afterwards. The death is not a restatement of the
+      // report: with the SIGKILL removed from `sweepOrphans` the pid is still
+      // reported, and this second assertion is the only one that fails.
       const after = sweepOrphans(listProcesses(), tag);
       expect(after.orphans.map((process_) => process_.pid)).toContain(grandchild);
+      expect(await waitForDeath(grandchild)).toBe(true);
     } finally {
       parent.kill("SIGKILL");
       try {

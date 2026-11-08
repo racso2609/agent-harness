@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { KILL_GRACE_MS, defaultKillTreeDeps, killProcessTree } from "../../src/mcp/killTree";
+import { KILL_GRACE_MS, killProcessTree } from "../../src/mcp/killTree";
 import { logger } from "../../src/utils/logger";
 import { McpConnection } from "../../src/mcp/McpConnection";
 import type { ResolvedMcpServer } from "../../src/mcp/McpConfig";
@@ -624,26 +624,18 @@ describe("McpConnection grace period", () => {
   // instant and a process that only records the moment it dies looks identical
   // either way. These tests read what the processes wrote instead.
   //
-  // The tree is taken down through `killProcessTree`, the call `close()` makes
-  // on a failed connection and its only kill outside `connect`, with the grace
-  // period the product uses. Driving a real `McpConnection` through that route
-  // is not deterministic: `connect` captures the pid in its `finally` and a
-  // 20 ms watcher captures it even earlier, so a handshake that times out
-  // always kills its own tree before `close()` runs, and a connection that
-  // succeeds is never `failed`.
-
-  // Walks the tree of `root` the way a failed connection has to when it lost
-  // the pid of its server, and reports the pids it visited on the way.
-  const observedWalk = async (root: number, graceMs: number): Promise<number[]> => {
-    const visited: number[] = [];
-    const children = (pid: number): number[] => {
-      visited.push(pid);
-      return childrenOf(pid);
-    };
-
-    await killProcessTree(root, { ...defaultKillTreeDeps, children }, graceMs);
-    return visited;
-  };
+  // LIMITATION, not covered by any test: the end-to-end route
+  // `doClose() -> killProcess() -> killProcessTree(pid, undefined, KILL_GRACE_MS)`
+  // is not observable with this fixture. `doClose()` kills the tree first and
+  // only then calls `transport.close()`, which ends the server's stdin, and the
+  // fixture exits on `stdin end` before that grace period can be spent: over a
+  // full instrumented run, 8 of the 31 `killProcessTree` calls had a grace of
+  // 0-1 ms. With `graceMs = 0` in the `failed` branch of `doClose()` this file
+  // still passes, so nothing here pins that branch.
+  //
+  // What is pinned instead is `killProcessTree` itself, called the way the
+  // product calls it and with the product grace period (`KILL_GRACE_MS`),
+  // isolated from any connection: a probe process stands in for a server.
 
   // A probe standing in for a server: it spawns the grandchild whose records
   // are read below, hands over its pid, and stays up for the whole observation
@@ -669,7 +661,7 @@ describe("McpConnection grace period", () => {
       { stdio: "ignore", env: { ...process.env, [TAG_ENV_VAR]: FIXTURE_TAG } },
     );
 
-  it("gives the tree of a failed connection the full grace period after SIGTERM", async () => {
+  it("spends the product grace period between the SIGTERM and the SIGKILL of a whole tree", async () => {
     const dir = scratchDir();
     const pidFile = path.join(dir, "probe.grandchild.pid");
     const recordsFile = path.join(dir, "probe.records");
@@ -684,16 +676,12 @@ describe("McpConnection grace period", () => {
       expect(childrenOf(probe.pid as number)).toContain(grandchild);
       expect(isAlive(grandchild)).toBe(true);
 
-      // The walk starts from a pid that does not exist, which is the pid a failed
-      // connection ends up holding, and has to find its way to this tree.
-      // Deliberately the real pid, not a phantom of it: `ps` would re-parent a
-      // real process that was orphaned (which is what makes an orphan findable at
-      // all), but it does not invent a parent for a phantom, so a walk that starts
-      // from a pid nothing points to has nowhere to descend. What this pins is the
-      // walk itself (`killProcessTree` reaching the whole tree and signalling it in
-      // the grace-period order), and the grace period it spends on it.
-      const visited = await observedWalk(probe.pid as number, KILL_GRACE_MS);
-      expect(visited).toContain(grandchild);
+      // The walk starts from the live pid of the probe and uses the same defaults
+      // as the product: the real process table and `KILL_GRACE_MS`. What this pins
+      // is `killProcessTree` reaching every pid of the tree and giving it the
+      // product grace period; whether a connection ever reaches that call on its
+      // own is the limitation stated at the top of this describe.
+      await killProcessTree(probe.pid as number, undefined, KILL_GRACE_MS);
 
       // With `graceMs = 0` both records are missing: the SIGKILL lands in the same
       // tick as the SIGTERM and neither process gets to write anything. Records
@@ -702,8 +690,12 @@ describe("McpConnection grace period", () => {
         .trim()
         .split("\n")
         .map((line) => line.trim());
-      // Both processes got the signal and both lived long enough to say so. Who
-      // was scheduled first is up to the OS, so the order is not asserted.
+      // Both processes got the signal and both lived long enough to say so. The
+      // order is not asserted because it is a race, not because it is arbitrary:
+      // `killProcessTree` signals deepest-first, so the grandchild would come
+      // first, but the probe is only its parent once the child exists, and a walk
+      // that starts before that still reaches both and can signal them in either
+      // order.
       expect(records).toContain("probe-sigterm");
       expect(records).toContain("sigterm");
 
@@ -718,13 +710,15 @@ describe("McpConnection grace period", () => {
     }
   }, 10_000);
 
-  it("gives a successful connection's tree the same grace period on close()", async () => {
+  it("takes down the whole tree of a healthy connection on close()", async () => {
     const dir = scratchDir();
     const pidFile = path.join(dir, "grandchild.pid");
 
-    // Control, through the product and its own `close()`: a healthy connection
-    // that closes normally and takes its whole tree down with it. It stays green
-    // when the escalation above is broken, which is what makes it a control.
+    // The end-to-end half of the walk, through the product: a healthy connection
+    // that closes normally and takes its whole tree down with it. It says nothing
+    // about the grace period, which is unobservable from here with this fixture
+    // (see the limitation at the top of this describe): the server exits on
+    // `stdin end` before the period is spent.
     const connection = await connect(["--grandchild"], { env: { GRANDCHILD_PID_FILE: pidFile } });
     await connection.connect();
 

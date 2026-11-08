@@ -26,9 +26,6 @@
 //                     Spawns a grandchild that appends to <file> when it gets
 //                     SIGTERM and how long it stayed alive afterwards, so a
 //                     test can watch the escalation from the grandchild.
-// --consume-initialize Swallows `initialize`, waits a moment and exits, so a
-// client that closes the transport mid-handshake sees it
-// fail for real instead of being answered behind its back.
 
 import { spawn } from "node:child_process";
 import { renameSync, writeFileSync } from "node:fs";
@@ -54,7 +51,6 @@ const ENDLESS_PAGES = has("--endless-pages");
 const CODEX_PAGES = has("--codex-pages");
 const GRANDCHILD = has("--grandchild");
 const ABORT_PROOF = has("--abort-proof");
-const CONSUME_INITIALIZE = has("--consume-initialize");
 
 const CALL_DELAY_MS = Number(process.env.CALL_DELAY_MS ?? 5000);
 const GRANDCHILD_PID_FILE = process.env.GRANDCHILD_PID_FILE;
@@ -276,14 +272,6 @@ const handleMessage = (message) => {
 
   if (method === "initialize") {
     if (HANG) return;
-
-    // The client is expected to close the transport while this is pending,
-    // and the exit below makes the handshake fail for real instead of
-    // succeeding behind the client's back.
-    if (CONSUME_INITIALIZE) {
-      settle().then(() => process.exit(0));
-      return;
-    }
 
     settle().then(() =>
       respond(message.id, {
