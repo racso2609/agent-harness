@@ -19,6 +19,7 @@ Formato: skill todo-format. Historial: `docs/journal/core/`.
 - **Ejecutar tool calls en paralelo detrás de un flag** — §Herramientas · `Done when` en §Herramientas
 - **Conectar servidores MCP** — §Herramientas · `Done when` en §Herramientas
 - **Abortar el `fetch` en curso al alcanzar `childTimeoutMs`** — §Herramientas · `Done when` en §Herramientas
+- **Acotar el reviewer a un diff declarado, siempre** — §4 — Herramientas · `Done when` en §4 — Herramientas
 
 ## 4 — Herramientas
 
@@ -44,6 +45,10 @@ Done when: un `mcp.json` con un servidor declarado arranca, expone sus tools en 
 - [ ] **Abortar el `fetch` en curso al alcanzar `childTimeoutMs`**
 `SpawnManager.startTimeout` (`core/src/session/spawn.ts:243`) sí aborta el `AbortController`, pero el signal solo se chequea antes del `ask` (`SessionManager.ts:677`); el `fetch` en curso sigue vivo tras el timeout.
 Done when: un test aborta a mitad con `AbortSignal` y `ask` termina antes de `childTimeoutMs`, dejando la sesión persistida sin el turno a medias.
+
+- [ ] **Acotar el reviewer a un diff declarado, siempre**
+Hoy la skill `core/agents/code-reviewer.md` exige alcance pero el que llama puede omitirlo, y entonces la revisión barre el repo entero: lee `docs/MEMORY.md`, `docs/INSTALL.md` y módulos que el cambio no nombra. El fallo está en el llamador, no en el reviewer.
+Done when: existe una forma de lanzar la revisión que no dependa de que el llamador se acuerde de los paths, y un caso documentado la demuestra — o bien el prompt del reviewer empieza por un lector de alcance (`git diff --name-only <rango>`) que rellena los paths automáticamente, o bien el TODO/skill obliga a citar el rango en el propio prompt con un ejemplo copiable.
 
 ## 8 — Skills
 
