@@ -142,7 +142,7 @@
       nota (2026-11-02): `default` diverge además en algo funcional, no de texto: la copia de runtime dice `approval: auto` y el repo `ask`. Con `ask`, `git`/`pnpm`/`tsc`/`vitest` no piden permiso (`READ_ONLY_COMMANDS` en `tools/shellPolicy.ts`), pero cada `writeFile` sí — y en un hijo headless sin handler la respuesta es **deny**, no una pregunta (`SessionManager.ts:855`). Por eso `approval` no se toca en el ritual de agentes: se decide en una tarea propia.
 
 9. session reporting (lo que necesita la UI)
-   ESTADO: **§9 en curso** (7/8): cerrada la superficie que consume el histórico desde el CLI (`childHistory()`, pintada al reanudar en `cli/TODO.md` §P1); abierta la entrada 7 del orden sugerido (hijos asentados con resultado sin entregar).
+ ESTADO: **§9 con el orden sugerido completo (8/8)**: cerrada la superficie que consume el histórico desde el CLI (`childHistory()`, pintada al reanudar en `cli/TODO.md` §P1) y la entrada 7 (hijos asentados con resultado sin entregar, que desbloquea `cli/TODO.md` §P6). Sigue abierta la tarea «Devolver los informes largos de un hijo como artefacto, no como mensaje».
    Formato de esta sección: ver la skill `todo-format`. Las secciones 0–8 se dejan como están (histórico de decisiones).
    Contexto: el CLI va a una TUI de pantalla completa (ver `cli/TODO.md` §P0) que necesita saber _qué está corriendo ahora mismo_ y _qué pasó_. Hoy `SpawnManager` emite `started`/`settled` in-memory y `SessionManager` inyecta el resultado al padre en el turno siguiente, pero no hay forma pública de reconstruir el estado ni de recibir eventos sin acoplarse a `SessionManagerImpl`.
 
@@ -202,9 +202,12 @@
       hecho: `SpawnHandle.summary?: string` y `durationMs?: number`. Ambos los fija `SpawnManager.settle()` (spawn.ts), el punto único al que desemboca el `finally` de `run()`, así que éxito, error, timeout y cancel pasan por ahí; `finishedAt` se fija en el mismo sitio. `durationMs` = `Date.parse(finishedAt) - Date.parse(startedAt)` (clamp a 0 si el reloj va hacia atrás) y `summary` se deriva del propio hijo — su `result` o su `error`, aplanado a una línea y capado a 120 chars — para no inventar una llamada extra al modelo; un hijo sin texto deja `summary` en `undefined`. `snapshot()` los copia, así que `poll`/`list`/`wait`/`collect` y el evento `settled` los llevan, y `save()` persiste `spawnHistory` (que el listener de `settled` actualiza) por lo que `childHistory()` los devuelve al reanudar. Sin subir `SESSION_VERSION` (sigue en 4): son campos opcionales y un record viejo simplemente no los trae (`undefined`, nunca `NaN` ni `""`), igual que un hijo sin asentar. 4 tests nuevos en `tests/session/SessionManager.spec.ts` (duración + resumen en éxito, duración en error, supervivencia al guardado/recarga, y record antiguo sin los campos); el test que fija la forma del hijo en `running` ahora comprueba que los dos campos aún no están. `formatSpawnResult` y el texto inyectado en el padre no cambian. 233 tests (core) + 188 (cli) + lint + prettier + tsc verdes.
       Depends on: devolver estado consultable de los hijos.
 
-- [ ] **Exponer los hijos asentados con resultado sin entregar**
+- [x] **Exponer los hijos asentados con resultado sin entregar**
       Hoy el resultado del hijo se inyecta como mensaje `system` en el history del padre (`SessionManager.ts:592`) y desde fuera nadie puede saber si esa entrega ya ocurrió; el CLI necesita saberlo para continuar solo tras un `delegate`.
       Done when: una prueba en `core/tests/session/SessionManager.spec.ts` fija que un hijo asentado con el padre sin turno posterior sigue en la lista y solo desaparece cuando el padre ejecuta un turno que inyecta su resultado como mensaje system (el punto de inyección en SessionManager.ts), y que la lista vuelve vacía cuando ya no queda ningún hijo sin entregar.
+ hecho: `SessionManager` mantiene la cola `protected undelivered: SpawnHandle[] = []` (`src/session/SessionManager.ts:223`), que se llena en el listener de `settled` (L696-701, reemplazando cualquier entrada previa del mismo hijo para no encolarlo dos veces) y se vacía en `flushPendingSpawns()` (L712-731), llamado desde el turno (L795). El marcador de entrega es `protected delivered = new Set<string>()` (L241): el push al history añade el `spawnId` y `save()` lo persiste como `SessionRecord.deliveredSpawns` (L419-435), de modo que al reanudar (L335-339) solo se reencolan los hijos asentados que aún no se entregaron; un hijo todavía `running` no se encola y uno ya entregado no se repite. El acceso público es `pendingSpawns(): SpawnHandle[]` (L640-642), documentado como copia que no drena la cola, y está en el contrato (`contract.ts:128`, `IHarness.pendingSpawns`, delegado en `harness.ts:140-142`).
+ tests: 8 casos en `tests/session/SessionManager.spec.ts` — «reports a settled child until the parent runs the turn that delivers it» (L1358), «persists the delivered child result even when the turn then fails» (L1387), «delivers two settled children in settlement order» (L1430), «does not report a running child as pending» (L1463), «hands out a copy of the pending children, not its own array» (L1477), «queues a settled child that was never delivered when the session is resumed» (L1492), «does not queue a child already delivered before the resume» (L1527) y «does not queue a child that was still running when the process died» (L1572). Verificado ahora: `npx vitest run tests/session/SessionManager.spec.ts -t pending` → 5 passed; `-t resumed` → 2 passed; `-t "settled child until the parent runs the turn"` → 1 passed.
+ nota: `deliveredSpawns` no sube `SESSION_VERSION` (sigue en 4); un record anterior se lee como «nada entregado» y el peor caso es volver a entregar un resultado una vez (comentado en `SessionManager.ts:331-334` y `SessionStore.ts:78-83`).
       Consumidor: `cli/TODO.md` §P6, tarea «Arrancar un turno sin prompt cuando un hijo deja trabajo».
       Depends on: nada.
 
@@ -223,7 +226,7 @@ Depends on: nada.
 4. [x] Persistencia de handles + migración de `SessionStore`.
 5. [x] `ToolContext.onOutput` (shell vivo).
 6. [x] Resumen de cierre estructurado.
-7. [ ] Hijos asentados con resultado sin entregar (desbloquea `cli/TODO.md` §P6).
+7. [x] Hijos asentados con resultado sin entregar (desbloquea `cli/TODO.md` §P6) — `pendingSpawns()` (`SessionManager.ts:640`, `contract.ts:128`), cubierto por los 8 casos citados arriba.
 
 Nota: los puntos 1–2 desbloquean `cli/TODO.md` §P1; el 3 desbloquea §P3; el 7 desbloquea §P6.
 
@@ -239,6 +242,7 @@ Nota: los puntos 1–2 desbloquean `cli/TODO.md` §P1; el 3 desbloquea §P3; el 
       El gateway es un proceso de larga vida con su propio ciclo de release, así que no puede nacer dentro de `core/` ni de `cli/`.
       Done when: existe `gateway/package.json` con `name: "@racso2609/gateway"`, `private: false` y `@racso2609/core` como dependencia con rango publicado (no `workspace:*`), está listado en `pnpm-workspace.yaml` y `pnpm -r build` lo incluye.
       Depends on: publicar `@racso2609/core` (`cli/TODO.md` §P4).
+ pendiente: sigue bloqueado porque el prerrequisito no está cumplido: no existe el directorio `gateway/` y `pnpm-workspace.yaml` solo lista `core` y `cli`; `cli/TODO.md` §P4 declara que la publicación (F0 de `docs/ARCHITECTURE.md`) todavía no está hecha. Se desbloquea al cerrar `cli/TODO.md` §P4.
 
 ### F1 — `SessionRegistry` + `runTurn` (huecos 1–3)
 

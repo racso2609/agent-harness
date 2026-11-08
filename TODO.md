@@ -15,11 +15,11 @@ dependencias. Formato de cada lista: skill `core/skills/todo-format.md`.
 | Tema                                                       | Dónde vive                                           | Estado                                                       |
 | ---------------------------------------------------------- | ---------------------------------------------------- | ------------------------------------------------------------ |
 | Documentación de arquitectura e instalación                | `docs/ARCHITECTURE.md`, `docs/INSTALL.md`            | escritos, pendiente de revisión                              |
-| Split core/cli, tooling, agents, skills, session reporting | `core/TODO.md` §0–9                                  | histórico + pendientes                                       |
-| Gateway como paquete nuevo y proceso aparte (F1–F5)        | `core/TODO.md` §10, diseño en `docs/ARCHITECTURE.md` | nuevo, c3                                                    |
-| TUI de pantalla completa y feedback del turno              | `cli/TODO.md` §P0–P3                                 | P0–P3 cerrados salvo las tareas nuevas abiertas en §P1 y §P3 |
-| Empaquetado y publicación (F0): GitHub Packages + Releases | `cli/TODO.md` §P4, plan en `docs/INSTALL.md`         | nuevo, c3                                                    |
-| Continuación automática tras un hijo delegado              | `cli/TODO.md` §P6 + espejo en `core/TODO.md` §9      | nuevo, c3                                                    |
+| Split core/cli, tooling, agents, skills, session reporting | `core/TODO.md` §0–9 | histórico + pendientes: §9 cerrado (8/8); abiertas las tareas de skills (§8.1) y «Devolver los informes largos de un hijo como artefacto, no como mensaje» |
+| Gateway como paquete nuevo y proceso aparte (F1–F5) | `core/TODO.md` §10, diseño en `docs/ARCHITECTURE.md` | nuevo, c3; bloqueado por la publicación de `cli/TODO.md` §P4 y `gateway/` aún no existe |
+| TUI de pantalla completa y feedback del turno | `cli/TODO.md` §P0–P3, §P5 | `P0`, `P1`, `P3` y `P4.5` cerrados; queda un ítem abierto de `P2` («El aviso de cierre no muestra el informe del hijo») y la deuda del TUI en `P5` |
+| Empaquetado y publicación (F0): GitHub Packages + Releases | `cli/TODO.md` §P4, plan en `docs/INSTALL.md` | empaquetado hecho (scope `@racso2609`, `files`, `engines`, sin `private`, `workspace:^`, `.npmrc` por scope, `scripts/smoke-install.mjs`); pendiente publicar los dos paquetes, crear el release con los `.tgz` y documentar la instalación en el README — ver «Bloqueo actual» de `cli/TODO.md` §P4 |
+| Continuación automática tras un hijo delegado | `cli/TODO.md` §P6 + espejo en `core/TODO.md` §9 | §P6 implementado entero: contrato en el core (`pendingSpawns()`); arranque del turno sin prompt (`MainLoop.maybeContinue()`, solo en TUI, sin pisar el borrador del usuario); tope configurable (`config.sessions.maxAutoContinuations`, default 5); aviso de cierre (`CONTINUING_ALONE_NOTICE` en `cli/src/ui/outcome.ts`). Lo único pendiente es una prueba de humo end-to-end en una sesión real |
 
 ## Origen de las tareas nuevas
 
@@ -69,4 +69,12 @@ Una nota suelta más, añadida después, se cerró así:
 
   ## nuevo issue
 
-  cuando un delegate termine si aun hay trabajo que hacer la session debe seguir el trabajo que queda no esperar por mi
+- Nota original: «cuando un delegate termine si aun hay trabajo que hacer la session debe
+seguir el trabajo que queda no esperar por mi».
+- Vive en `cli/TODO.md` §P6, con su tarea de contrato espejo en `core/TODO.md` §9. §P6
+está implementado entero: contrato `pendingSpawns()` en el core, que dice qué hijo
+asentado dejó trabajo sin entregar; arranque del turno sin prompt con
+`MainLoop.maybeContinue()`, solo en TUI y sin pisar el borrador del usuario; tope
+`config.sessions.maxAutoContinuations` con default 5; y aviso de cierre
+`CONTINUING_ALONE_NOTICE` para que el usuario sepa que la sesión sigue sola. Lo único
+pendiente de §P6 es la prueba de humo end-to-end en una sesión real.

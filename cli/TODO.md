@@ -6,9 +6,11 @@ Dos renderers sobre un mismo contrato (`UiAdapter`/`UiEvent`), decidido en `P0`:
 `CliUiAdapter` (líneas, **default**) y `TuiUiAdapter` (ink, `--tui`). `MainLoop` no
 escribe a stdout: solo emite eventos, así que la lógica del turno es idéntica en ambos.
 
-Hecho hasta hoy: `P0`, `P1`, `P2`, `P3` y `P4.5` cerrados y el core (§9.1) completo.
-Quedan la publicación (`P4`, fase F0 de `docs/ARCHITECTURE.md`), la deuda del TUI (`P5`)
-y la continuación automática (`P6`).
+Hecho hasta hoy: `P0`, `P1`, `P3` y `P4.5` cerrados, el core (§9.1) completo, y `P4`
+(fase F0 de `docs/ARCHITECTURE.md`) cerrado **salvo publicar**, crear el release y
+documentar la instalación en el README. Abierto de verdad: un ítem de `P2` («El aviso de
+cierre no muestra el informe del hijo»), la sección de instalación del README, la deuda
+del TUI (`P5`), la continuación automática (`P6`, parcialmente hecha) y `P7`.
 
 Formato de este archivo: ver la skill `todo-format`.
 
@@ -183,6 +185,18 @@ Formato de este archivo: ver la skill `todo-format`.
       (`entries[0]` de un transcript de 62 → `{ line: "L2", absolute: 2, gap: GAP }`), y un test
       anterior que llamaba `gapBefore(window.start)` a mano era tautológico y se sustituyó. La
       suite queda en 15 ficheros / 185 tests.
+corrección (posterior a `P4.5`): el párrafo de arriba cita `App.tsx` con `VISIBLE = 60` y
+`windowOf(state.lines, VISIBLE)`, y eso **ya no existe**: `grep -n VISIBLE
+cli/src/ui/tui/App.tsx` solo devuelve `MENU_VISIBLE_ROWS`, y `App.tsx:516` pide la ventana
+a `visibleWindow({ heights, viewportLines, view })` de `cli/src/ui/tui/scroll.ts`, porque
+`P4.5` mide en líneas visuales y no en número de entradas. Sigue vigente lo que importa:
+la regla de espaciado (`GAP = 1` y `gapBefore` en `cli/src/ui/tui/layout.ts:105` y `:113`,
+con `windowOf` en `cli/src/ui/tui/entries.ts:93`) y el aire de la respuesta en modo líneas
+(`turnPrinted` en `cli/src/ui/CliUiAdapter.ts:78`, `:85`, `:93`, `:133`, `:137`).
+tests: 15 casos en `cli/tests/ui/layout.spec.ts` (`grep -c 'it('`) y 5 en
+`cli/tests/ui/tuiWindow.spec.ts` para `windowOf`, incluido el transcript desplazado que
+afirma `{ line: "L2", absolute: 2, gap: GAP }`; `cli/tests/ui/cliAdapter.spec.ts` cubre el
+aire de la respuesta en modo líneas.
       Done when: existe una regla de espaciado declarada (línea en blanco entre entradas,
       margen antes de heading/lista/código/tabla y aire antes/después de la respuesta
       final en modo líneas) y un test la fija.
@@ -194,64 +208,98 @@ Contexto: es la fase **F0** de `docs/ARCHITECTURE.md` y su plan completo vive en
 `docs/INSTALL.md` (decisiones de empaquetado, cambios por fichero, orden de
 publicación, tabla de roturas y notas de verificación): aquí solo van las tareas,
 no el contenido del plan. Hoy los dos paquetes se usan sólo desde el workspace
-(`@racso/cli` depende de `@racso/core` con `workspace:*`) y `cli/package.json`
-declara `private: true`, así que `@racso/cli` no se publica. Destino: **GitHub
+y el empaquetado ya está preparado (ver las tareas marcadas abajo), pero ningún
+paquete está publicado. Estado real medido: los dos `package.json` declaran
+`"name": "@racso2609/core"` y `"name": "@racso2609/cli"`, ninguno lleva `"private"`,
+el cli depende de `"@racso2609/core": "workspace:^"`, los dos traen `files` (`core`:
+`["dist","agents","skills"]`; `cli`: `["dist","bin","racso-logo.txt"]`) y `engines.node`
+(`>=20.11` en el core, `>=22` en el cli), y `grep -rn "@racso/core" cli/src cli/tests
+cli/bin` no devuelve nada. La raíz tiene un `.npmrc` con el registry por scope y el token
+fuera del repo. Lo que falta es **publicar** (`core`, después `cli`), crear el release y
+escribir la instalación en el README. Destino: **GitHub
 Packages con scope `@racso2609`** (la org `racso` no existe —`gh api orgs/racso` →
 404— y el dueño del repo es `racso2609`) **más los `.tgz` en GitHub Releases**
 como canal sin token; ya no es npm público `@racso`. F0 cierra cuando
 `pnpm -r build && pnpm -r lint && pnpm -r test` está en verde y un consumidor
 externo importa el core desde el registro, no desde el workspace.
 
-- [ ] **Renombrar el scope a `@racso2609` en los dos `package.json`**
+- [x] **Renombrar el scope a `@racso2609` en los dos `package.json`**
       GitHub Packages exige que el scope coincida con el dueño del paquete, y el dueño
       del repo es `racso2609`, no la inexistente org `racso`.
-      Done when: `grep '"name"' core/package.json cli/package.json` devuelve
+      hecho: `core/package.json:2` declara `"name": "@racso2609/core"` y
+`cli/package.json:2` declara `"name": "@racso2609/cli"`; no queda ningún
+`"name": "@racso/` en ninguno de los dos manifiestos.
+Done when: `grep '"name"' core/package.json cli/package.json` devuelve
       `@racso2609/core` y `@racso2609/cli`, y no queda ningún `"name": "@racso/`.
       Depends on: nada.
 
-- [ ] **Renombrar los imports de `@racso/core` a `@racso2609/core` en el cli**
+- [x] **Renombrar los imports de `@racso/core` a `@racso2609/core` en el cli**
 Es **requisito** del rename de scope, no una opción: `grep -rln "@racso/core"
 cli/src cli/tests cli/bin` devuelve 22 ficheros y `tsc && tsc-alias -f` no
 reescribe imports de paquetes (sólo los alias `@/*`), así que hoy `cli/dist/main.js`
 sigue emitiendo `import { setLoggerLevel } from "@racso/core"`. Con el paquete
 llamado `@racso2609/core`, un `dist` sin renombrar importa un paquete que no existe
 y el canal de Releases queda roto; hasta recompilar, el `dist` no es válido.
+hecho (código): `grep -rn "@racso/core" cli/src cli/tests cli/bin | wc -l` devuelve `0`:
+los ficheros que citaba esta tarea ya importan `@racso2609/core`.
+pendiente: la mitad que recompila (`pnpm --filter @racso2609/cli build` y `grep -c` sobre
+`cli/dist/main.js`) no se puede hacer aquí: `cli/dist/main.js` no existe sin build y un
+`grep` sobre un fichero inexistente no prueba nada.
 Done when: `grep -rn "@racso/core" cli/src cli/tests cli/bin` no devuelve nada y,
 tras `pnpm --filter @racso2609/cli build`, `grep -c "@racso2609/core"
 cli/dist/main.js` devuelve `1` o más.
 Depends on: renombrar el scope a `@racso2609` en los dos `package.json`.
 
-- [ ] **Añadir `files` explícito a los dos paquetes**
+- [x] **Añadir `files` explícito a los dos paquetes**
       Sin `files` el tarball del core mete 205 ficheros / 182 KB y el del cli 123 / 207 KB
       (`src/`, `tests/`, `TODO.md`, configs y los `.map` innecesarios).
-      Done when: `core/package.json` declara `files: ["dist", "agents", "skills"]` y
+      hecho: `core/package.json:16` declara `"files": ["dist", "agents", "skills"]` y
+`cli/package.json:10` declara `"files": ["dist", "bin", "racso-logo.txt"]`.
+pendiente: que el tarball deje fuera `src/`, `tests/` y `TODO.md` (el recuento de
+`tar -tzf`) se verifica en la tarea de auditar los dos tarballs, que sigue abierta.
+Done when: `core/package.json` declara `files: ["dist", "agents", "skills"]` y
       `cli/package.json` declara `files: ["dist", "bin", "racso-logo.txt"]`, con el logro
       verificado en la tarea de auditar los tarballs.
       Depends on: nada.
 
-- [ ] **Quitar `private: true` del cli y pasar la dependencia del core a `workspace:^`**
+- [x] **Quitar `private: true` del cli y pasar la dependencia del core a `workspace:^`**
       Con `private: true` `pnpm publish` aborta con `[EPRIVATE]`, y con `workspace:*` el
       tarball fija la versión exacta del core y obliga a republicar el cli en cada bump.
+hecho: (a) `cli/package.json` no tiene campo `private` (cero ocurrencias); (d)
+`cli/package.json:22` declara `"@racso2609/core": "workspace:^"`.
+pendiente: (b) y (c) se leen sobre el `package.json` **dentro del tarball**, así que piden
+`pnpm pack`: la expansión de `workspace:^` a `^1.0.0` y la ausencia de `"private"` sólo se
+confirman en la tarea de auditar los dos tarballs. Aquí queda fijado el manifiesto.
 Done when: (a) `grep -c '"private"' cli/package.json` devuelve `0`; (b) el
 `package.json` del tarball (`pnpm pack` y extraer) no contiene `"private"`; (c) ese
 mismo `package.json` deja `"@racso2609/core": "^1.0.0"` y ningún `workspace:`.
       Depends on: renombrar el scope a `@racso2609` en los dos `package.json`.
 
-- [ ] **Añadir `engines.node` a los dos paquetes**
+- [x] **Añadir `engines.node` a los dos paquetes**
       Sin `engines` nada impide instalar en un Node que no soporta las dependencias, y el
       fallo aparece en runtime en vez de en la instalación.
-      Done when: `core/package.json` declara `engines.node: ">=20.11"` (por
+      hecho: `core/package.json:17` declara `"engines": { "node": ">=20.11" }` y
+`cli/package.json:11` declara `"engines": { "node": ">=22" }`.
+pendiente: que `pnpm pack` conserve el campo en el `package.json` del tarball se comprueba
+en la tarea de auditar los tarballs, que sigue abierta.
+Done when: `core/package.json` declara `engines.node: ">=20.11"` (por
       `import.meta.dirname`) y `cli/package.json` declara `">=22"` (por `ink@8` y
       `terminal-image@5`), y `pnpm pack` de cada paquete deja ese campo en el
       `package.json` del tarball.
       Depends on: nada.
 
-- [ ] **Sacar `terminal-image` y `tsconfig-paths` de las dependencias de producción del core**
+- [x] **Sacar `terminal-image` y `tsconfig-paths` de las dependencias de producción del core**
       `grep -rn terminal-image core/src` no devuelve nada (sólo lo importa
       `cli/src/terminal/stdin.ts`), y `tsconfig-paths` no se importa en ningún sitio del
       core porque los alias `@/*` los resuelve `tsc-alias -f` en build-time; el SDK no
       debe arrastrar `jimp` ni un loader de paths que no usa.
-      Done when: `terminal-image` sale de `dependencies` del core (a `devDependencies` o
+      hecho: las `dependencies` del core son hoy `dotenv`, `pino` y `pino-pretty`
+(`node -e` sobre `core/package.json`), sin `terminal-image` ni `tsconfig-paths`;
+`terminal-image` sigue en el cli, que es quien lo importa desde `cli/src/terminal/stdin.ts`.
+pendiente: `pnpm-lock.yaml` todavía resuelve `terminal-image@5.0.1`; que el core deje de
+arrastrar `jimp` se confirma con un `pnpm install` en limpio, que no se corre desde aquí
+para no tocar el lockfile compartido.
+Done when: `terminal-image` sale de `dependencies` del core (a `devDependencies` o
       fuera) y `tsconfig-paths` deja de estar en `dependencies`, de modo que
       `pnpm --filter @racso2609/core build && pnpm --filter @racso2609/core test` sigue en
       verde y el `pnpm-lock.yaml` deja de resolver `jimp` para el core.
@@ -264,18 +312,34 @@ mismo `package.json` deja `"@racso2609/core": "^1.0.0"` y ningún `workspace:`.
       produce un `tar -tzf` con 135 entradas en el core (93 sin `.map`) y 61 en el cli, sin
       `package/src/`, `package/tests/` ni `package/TODO.md`, y el `package.json` del tarball
       del cli declara la dependencia del core con `^1.0.0` (no `workspace:*`) y sin `"private": true`.
+      La exclusión de `src/`, `tests/` y `TODO.md` ya está automatizada: el check
+      `core tarball excludes src/, tests/ and TODO.md` de `scripts/smoke-install.mjs:148`
+      (con `CORE_FORBIDDEN` en `:25`) falla si el tarball filtra cualquiera de los tres,
+      así que la auditoría manual solo tiene que confirmar el recuento de entradas.
       Depends on: añadir `files` explícito a los dos paquetes, quitar `private: true` del
  cli y pasar la dependencia del core a `workspace:^`, renombrar los imports de
 `@racso/core` a `@racso2609/core` en el cli.
 
-- [ ] **Añadir el `.npmrc` de publicación con el token por variable de entorno**
+- [x] **Añadir el `.npmrc` de publicación con el token fuera del repo**
       Sin registry por scope, `pnpm publish` va a `registry.npmjs.org`; el token nunca
       puede quedar en claro en el fichero.
-      Done when: `.npmrc` de la raíz declara
-      `@racso2609:registry=https://npm.pkg.github.com` y
-      `//npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}`, y `pnpm publish --dry-run
---no-git-checks` en `core/` anuncia el destino `https://npm.pkg.github.com`.
-      Depends on: renombrar el scope a `@racso2609` en los dos `package.json`.
+hecho: el `.npmrc` de la raíz declara `@racso2609:registry=https://npm.pkg.github.com` y
+documenta en comentarios cómo configurar el token una vez por máquina, fuera del repo.
+corrección del Done when: el criterio original pedía una línea
+`//npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}` **dentro del fichero versionado**, y el
+repo decidió lo contrario: pnpm no expande variables de entorno en un `.npmrc`
+versionado (para no filtrar el secreto a un registry atacable), así que esa línea no
+autenticaría nada y sólo dejaría el placeholder en git. Criterio real: registry por scope
+en el `.npmrc` versionado **más** el token fuera del repo con
+`pnpm config set "//npm.pkg.github.com/:_authToken" "$(gh auth token)"`.
+pendiente: `pnpm publish --dry-run --no-git-checks` en `core/` (el destino anunciado) no
+se corre aquí: sin token configurado no dice nada útil sobre el canal real.
+Done when: el `.npmrc` de la raíz declara
+`@racso2609:registry=https://npm.pkg.github.com`, no contiene ningún token ni la variable
+`GITHUB_TOKEN`, la configuración del PAT queda documentada en ese mismo `.npmrc` como
+`pnpm config set` fuera del repo, y `pnpm publish --dry-run --no-git-checks` en `core/`
+anuncia el destino `https://npm.pkg.github.com`.
+Depends on: renombrar el scope a `@racso2609` en los dos `package.json`.
 
 - [ ] **Publicar `@racso2609/core`**
       Es la lib base de los otros dos paquetes: sin core en el registry no hay nada que
@@ -302,15 +366,32 @@ antes de publicar.
       con la `version` publicada de los dos paquetes.
       Depends on: publicar `@racso2609/cli`.
 
-- [ ] **Convertir el guion de `docs/INSTALL.md` en un script de smoke test de instalación limpia**
+- [x] **Convertir el guion de `docs/INSTALL.md` en un script de smoke test de instalación limpia**
       Hoy no existe ningún script: el smoke test sólo está escrito como guion manual en
       `docs/INSTALL.md`, así que nadie lo ejecuta antes de publicar.
-      Done when: existe `scripts/smoke-install.mjs` en la raíz que crea un directorio
-      temporal, instala los dos `.tgz`, verifica `typeof createHarness === "function"`,
-      que `node_modules/.bin/racso-harness` existe y que un primer arranque con `HOME`
-      propio siembra `agents/*.md` (6) y `skills/*.md` (2); el script termina en verde
-      contra los `.tgz` recién empaquetados.
-      Depends on: construir y auditar los dos tarballs antes de publicar.
+hecho: existe `scripts/smoke-install.mjs` en la raíz (sólo builtins de Node) y su cabecera
+lo declara "clean-install smoke test (closing criterion of F0, docs/ARCHITECTURE.md)":
+empaqueta, instala los `.tgz` con `npm` en un proyecto de usar y tirar y rechaza
+manifiestos con `src/`, `tests/` o docs de repo. Se ejecuta desde la raíz:
+`node scripts/smoke-install.mjs`.
+pendiente: la ejecución real contra los `.tgz` recién empaquetados
+(`pnpm -r build && pnpm pack --pack-destination /tmp/rel` y luego el script) no se hace
+aquí: exige un build completo y acceso a red, y el `.tgz` no existe hasta entonces.
+Done when: existe `scripts/smoke-install.mjs` en la raíz que crea un directorio
+temporal, instala los dos `.tgz` con `npm` y el script termina en verde contra los `.tgz`
+recién empaquetados. Lo que comprueba hoy, verificado en el propio script: que el core
+instalado expone `createHarness` como función (check
+`import("@racso2609/core") exposes createHarness`, `:263`); que el binario instalado
+existe y responde —`npx --no-install racso-harness --version` (`:238`), check en `:247`,
+que es lo que resuelve `node_modules/.bin/racso-harness`; que el tarball del core trae
+`package/dist/` (`:126`), exactamente 6 ficheros `.md` bajo `package/agents/`
+(`EXPECTED_AGENTS = 6`, `:23`, check en `:131`) y al menos uno bajo `package/skills/`
+(`:140`, no exige 2); y que ese tarball excluye `src/`, `tests/` y `TODO.md` (`:148`).
+pendiente: el script **no** verifica que un primer arranque con `HOME` propio siembre los
+ficheros en `$HOME/.racso-harness/`, que es lo que prometía este `Done when`. Hoy sólo
+comprueba que el `HOME` real queda intacto (`:325`) y que los `.md` viajan en el tarball;
+que el arranque los escriba sigue sin cubrirse.
+Depends on: construir y auditar los dos tarballs antes de publicar.
 
 - [ ] **Documentar la instalación en el README con los dos canales**
       El README explica el diseño pero no cómo se instala ni qué crea el primer arranque,
@@ -320,6 +401,14 @@ antes de publicar.
       versión de Node requerida (`>=22` para el CLI, `>=20.11` para el SDK solo) y qué
       ficheros crea en `~/.racso-harness/`.
       Depends on: crear el release con los `.tgz` adjuntos.
+
+Bloqueo actual: el empaquetado está listo, pero falta **publicar** `@racso2609/core` y
+después `@racso2609/cli`, y **crear el release** con los `.tgz` adjuntos. Los dos pasos
+exigen un `GITHUB_TOKEN` con `write:packages` configurado fuera del repo:
+`pnpm config set "//npm.pkg.github.com/:_authToken" "$(gh auth token)"` (el `.npmrc`
+versionado no lleva el token). Prueba previa a publicar:
+`pnpm -r build && pnpm pack --pack-destination /tmp/rel` y después
+`node scripts/smoke-install.mjs`.
 
 ## P4.5 — Scroll del transcript y ruido del logger
 
@@ -637,30 +726,109 @@ Depends on: nada.
 
 ## P6 — Continuación automática tras un hijo
 
-Punto del usuario: «cuando un delegate termine si aun hay trabajo que hacer la session debe seguir el trabajo que queda no esperar por mi». Hoy no lo hace: `SessionManager` inyecta el resultado del hijo asentado como mensaje `system` en el history del padre (`SessionManager.ts:592`), pero el turno del padre ya había terminado, así que `MainLoop` vuelve a `nextPrompt()` y la sesión se queda esperando input humano. El mecanismo para arrancar un turno sin usuario ya existe (`queue`/`pending` en `MainLoop`); falta decidir cuándo usarlo.
+Punto del usuario: «cuando un delegate termine si aun hay trabajo que hacer la session debe seguir el trabajo que queda no esperar por mi». Ya se cumple: `SessionManager` encola el resultado del hijo asentado como mensaje `system` para el siguiente turno del padre y expone lo que sigue sin entregar (`pendingSpawns()`), y `MainLoop.maybeContinue()` arranca ese turno sin prompt cuando el hijo deja trabajo —solo en TUI, respetando el borrador del usuario y con un tope de continuaciones automáticas (5 por defecto)—. Las cuatro tareas de §P6 están cerradas; lo único que falta es una prueba de humo end-to-end del camino real contra los `.tgz` publicados, que hoy no existe (ver el `pendiente:` de §P4 sobre `scripts/smoke-install.mjs`).
 
-- [ ] **Exponer si un hijo asentado dejó trabajo sin entregar**
-      El CLI no puede decidir si continuar porque el core no dice si el resultado del hijo llegó antes o después del último turno del padre ni cuántos hijos quedaron sin entregar.
-      Done when: una prueba en `core/tests/session/SessionManager.spec.ts` verifica que la API nueva devuelve los `spawnId` asentados cuyo resultado aún no ha entrado en un turno del padre, y vuelve a devolver lista vacía una vez entregados.
-      Depends on: nada.
+- [x] **Exponer si un hijo asentado dejó trabajo sin entregar**
+      El core ya responde la pregunta: `pendingSpawns()` devuelve los hijos asentados
+      cuyo resultado aún no ha entrado en un turno del padre, y el CLI lo consume para
+      decidir si continuar. Antes de esto el CLI no podía decidir: el core no decía si el
+      resultado del hijo llegó antes o después del último turno del padre ni cuántos hijos
+      quedaron sin entregar.
+hecho (contrato): `IHarness.pendingSpawns` en `core/src/contract.ts:131`, documentado
+como vista de sólo lectura que no drena; la declaración interna está en
+`core/src/session/SessionManager.ts:158`.
+hecho (implementación): `SessionManager.pendingSpawns()` en
+`core/src/session/SessionManager.ts:640` devuelve una copia de `undelivered`, que sólo
+vacía `flushPendingSpawns()`; `core/src/harness.ts:140` delega con
+`return this.session.pendingSpawns()`.
+hecho (consumidor): `cli/src/MainLoop.ts` la usa dos veces —
+`this.harness.pendingSpawns()` dentro de `maybeContinue()` (`:303`) y en el cierre del
+turno, para comparar el lote ya entregado (`:434`).
+hecho (tests): los 8 casos de `core/tests/session/SessionManager.spec.ts`
+(`:1358-1600`): «reports a settled child until the parent runs the turn that delivers
+it», «persists the delivered child result even when the turn then fails», «delivers two
+settled children in settlement order», «does not report a running child as pending»,
+«hands out a copy of the pending children, not its own array», «queues a settled child
+that was never delivered when the session is resumed», «does not queue a child already
+delivered before the resume», «does not queue a child that was still running when the
+process died».
+      Depends on: nada; el consumidor del CLI quedó cableado en la tarea siguiente.
       Nota: el contrato vive como tarea espejo en `core/TODO.md` §9 («Exponer los hijos asentados con resultado sin entregar»).
 
-- [ ] **Arrancar un turno sin prompt cuando un hijo deja trabajo**
-      `MainLoop` debe encolar un turno de continuación (mismo camino que `enqueue`) cuando un `spawnSettled` trae trabajo pendiente y el usuario no está escribiendo.
-      Done when: existe un test (o, si el bucle no es montable en test, una guarda de fuente documentada igual que las de §P1) que fija que tras un `settled` con trabajo pendiente el CLI llama a `harness.ask` sin input del usuario y sin esperar a `nextPrompt`.
+- [x] **Arrancar un turno sin prompt cuando un hijo deja trabajo**
+      `MainLoop` encola un turno de continuación (mismo camino que `enqueue`) cuando un
+      `spawnSettled` trae trabajo pendiente y el usuario no está escribiendo.
+hecho (disparador): en `cli/src/MainLoop.ts:188`, dentro de `onSpawnEvent`, la
+suscripción `if (event.type === "settled") this.maybeContinue();`; el método
+`protected maybeContinue(...)` vive en `cli/src/MainLoop.ts:302` y el turno entra por
+`if (decision.continue) this.enqueue(CONTINUATION_PROMPT, "continuation", pending);`
+(`cli/src/MainLoop.ts:327`).
+hecho (guardas de fuente, porque el bucle no es montable en test): en
+`cli/tests/ui/spawnWiring.spec.ts`, el cuerpo de `maybeContinue` obtenido con
+`between("protected maybeContinue(", "protected isWaitingForPrompt()")` lo fijan cuatro
+casos —«asks the core what is still undelivered instead of trusting the event»,
+«only continues while the loop waits with nothing queued», «queues the continuation
+through enqueue, marked as such», «says it is waiting at most once per
+undelivered batch»—, más «evaluates the continuation after a child settles» sobre la
+suscripción y «feeds the draft signal the TUI reports» sobre `onDraftChange`. La
+decisión pura está cubierta en
+`cli/tests/ui/continuation.spec.ts` («continues when an undelivered child left a
+result», «does not continue for a child that failed», «does not continue with nothing
+undelivered», «keeps waiting while the loop is inside a turn»).
+      Decidir antes (resuelto): (i) solo aplica en TUI — lo fija «never continues in line
+      mode» en `spawnWiring.spec.ts`, y `nextPrompt()` en `cli/src/MainLoop.ts:359` contiene
+      `if (!this.isTui())`; (ii) el turno automático **no** pisa lo que el usuario escribe:
+      `continuationDecision` recibe `hasUserDraft` y devuelve `DRAFT_WAITING_NOTICE`, fijado
+      por «waits and says so when the user is typing» en `continuation.spec.ts`.
       Depends on: exponer si un hijo asentado dejó trabajo sin entregar.
-      Decidir antes: si aplica solo con `--tui` o también en modo líneas, y si el turno automático pisa una línea que el usuario está escribiendo.
 
-- [ ] **Acotar las continuaciones automáticas**
-      Sin tope, un hijo que deja trabajo cada vez encadena turnos infinitos y gasta tokens sin control.
-      Done when: existe un límite configurable (en `config.sessions`) con default documentado y una prueba fija que al alcanzarlo no se arranca otro turno y se avisa al usuario.
+- [x] **Acotar las continuaciones automáticas**
+      Sin tope, un hijo que deja trabajo cada vez encadena turnos infinitos y gasta tokens
+      sin control. Ya hay tope.
+hecho (config): `maxAutoContinuations?: number | false` en `SessionsConfig`
+(`core/src/configuration/index.ts:102`) y su default
+`config.sessions.maxAutoContinuations ??= 5` (`core/src/configuration/index.ts:174`),
+donde `0` y `false` significan deshabilitado.
+hecho (lectura y decisión): `protected maxAutoContinuations()` en
+`cli/src/MainLoop.ts:333` lee el valor de la config en cada decisión, y `maybeContinue`
+le pasa `budget: { used: this.autoContinuations, max: this.maxAutoContinuations() }`
+(`cli/src/MainLoop.ts:313`).
+hecho (aviso): `autoContinuationLimitNotice` en `cli/src/ui/continuation.ts:20`,
+emitido desde `continuationDecision` (`cli/src/ui/continuation.ts:115`).
+hecho (tests): en `cli/tests/ui/continuation.spec.ts`, los casos del bloque «automatic
+continuation cap» —«continues below the cap», «stops at the cap and says the number»,
+«takes the number in the notice from the cap, not from the text», «stays stopped once
+the cap is exceeded», «treats 0 as disabled», «treats false as disabled at any count»,
+«lets a human prompt open a new budget», «keeps the waiting notice when the user types
+on a spent budget», «says nothing about the cap when no child left work», «writes the
+cap notice in English with the interpolated number».
+      Decidir antes (resuelto): el default es **5**; el contador se resetea con input del
+      usuario — `enqueueFromUser` hace `this.autoContinuations = 0;`
+      (`cli/src/MainLoop.ts:283`), fijado por «opens a new budget whenever the user sends a
+      prompt» en `cli/tests/ui/spawnWiring.spec.ts`.
       Depends on: arrancar un turno sin prompt cuando un hijo deja trabajo.
-      Decidir antes: valor del default y si el contador se resetea con input del usuario.
 
-- [ ] **Contar el turno automático como continuación en el cierre del turno**
+- [x] **Contar el turno automático como continuación en el cierre del turno**
       El aviso de cierre (`formatTurnOutcome`) hoy describe el turno pasado; en una cadena automática debe indicar que la sesión sigue sola, para que el usuario no crea que el proceso quedó parado.
-      Done when: un test de `cli/tests/ui/outcome.spec.ts` fija el texto de un turno encadenado y el silencio del turno final.
-      Depends on: arrancar un turno sin prompt cuando un hijo deja trabajo.
+hecho (texto): `cli/src/ui/outcome.ts:8` exporta
+`CONTINUING_ALONE_NOTICE = "session continues on its own"`; `formatTurnOutcome`
+(`cli/src/ui/outcome.ts:58`) acepta un tercer parámetro `more = false`
+(`cli/src/ui/outcome.ts:64`) y añade el aviso al final del cierre cuando es verdadero
+(`cli/src/ui/outcome.ts:79`).
+hecho (cableado): `UiEvent` gana el campo opcional `continuation`
+(`cli/src/ui/UiAdapter.ts:45`); `MainLoop` lo marca en el `turnEnd`
+(`cli/src/MainLoop.ts:450`: `continuation: turn.continuation &&
+this.queue.some((entry) => entry.continuation)`) y los dos renderers lo pasan a
+`formatTurnOutcome` — `cli/src/ui/CliUiAdapter.ts:140` y
+`cli/src/ui/TuiUiAdapter.tsx:341` —, que ya no cierran en silencio un turno
+`completed` cuando la sesión sigue sola.
+hecho (tests): bloque `describe("formatTurnOutcome while the session continues alone")`
+en `cli/tests/ui/outcome.spec.ts:126-158`, 4 casos: el literal completo del turno
+encadenado (`… · session continues on its own`, `:127`), el silencio del turno
+`completed` automático (`:138`), el último turno de la cadena cerrando sin aviso (`:144`)
+y la estabilidad de `CONTINUING_ALONE_NOTICE` (`:155`). Los tres primeros son los que pide
+el `Done when:`.
+Depends on: arrancar un turno sin prompt cuando un hijo deja trabajo.
 
 ## Deuda de proceso
 
