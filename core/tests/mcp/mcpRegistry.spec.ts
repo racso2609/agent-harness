@@ -358,8 +358,8 @@ describe("createToolRegistry and MCP", () => {
     expect(registry.list().map((tool) => tool.name)).toEqual(["readFile"]);
   });
 
-  it("gives an agent with an allowlist exactly its list, and asks the manager without awaiting it", async () => {
-    const { manager } = makeManager();
+  it("never asks the manager for an agent whose allowlist names no MCP tool", async () => {
+    const { manager, connections } = makeManager();
     const toolsSpy = vi.spyOn(manager, "tools");
     const readySpy = vi.spyOn(manager, "ready");
 
@@ -372,11 +372,11 @@ describe("createToolRegistry and MCP", () => {
     );
 
     expect(registry.list().map((tool) => tool.name)).toEqual(["readFile"]);
-    // The invariant of option A, as the wiring can keep it: the provider is
-    // registered, so the manager is asked, and the allowlist is what keeps every
-    // mcp__ name out of the result. Discovery itself is never awaited here.
-    expect(toolsSpy).toHaveBeenCalled();
+    // Discovery spawns servers, and an agent that names no remote tool has nothing
+    // to gain from it: the provider is not installed at all.
+    expect(toolsSpy).not.toHaveBeenCalled();
     expect(readySpy).not.toHaveBeenCalled();
+    expect(connections).toEqual([]);
   });
 
   it("resolves an MCP tool an allowlist names, and only that one", async () => {
@@ -401,18 +401,16 @@ describe("createToolRegistry and MCP", () => {
     expect(registry.get("mcp__fixture__fail")).toBeUndefined();
     expect(connections).toHaveLength(1);
 
-    // The twin: an allowlist without the mcp__ name gets no remote tool, from a
-    // registry that does consult the manager.
+    // The twin: an allowlist without the mcp__ name gets no remote tool, and it
+    // does not even ask the manager, because discovery would spawn a server it
+    // cannot use.
     const toolsSpy = vi.spyOn(manager, "tools");
     const other = await createToolRegistry(makeConfig({ mcp: { enabled: true } }), ["readFile"], {
       mcp: manager,
     });
 
     expect(other.list().map((tool) => tool.name)).toEqual(["readFile"]);
-    expect(toolsSpy).toHaveBeenCalled();
-    expect((toolsSpy.mock.results[0]?.value as Tool[]).map((tool) => tool.name)).toContain(
-      "mcp__fixture__echo",
-    );
+    expect(toolsSpy).not.toHaveBeenCalled();
     expect(
       other.get("mcp__fixture__echo"),
       "the name is not in its allowlist, so the registry does not offer it",

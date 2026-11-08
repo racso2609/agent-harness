@@ -2,7 +2,7 @@
 // `mcp__<server>__<tool>` so it can never collide with a native tool name,
 // and the parts are sanitized to a character set the model and the OpenAI
 // function-calling schema accept.
-const MCP_PREFIX = "mcp__";
+export const MCP_PREFIX = "mcp__";
 
 // Matched against the composite name. The server id is greedy and the tool
 // name non-greedy, so an id that itself contains `__` (sanitized ids keep
