@@ -15,13 +15,7 @@
   "license": "ISC",
 "files": ["dist", "agents", "skills"],
 "engines": { "node": ">=20.11" },
-  "devEngines": {
-    "packageManager": {
-      "name": "pnpm",
-      "version": "^11.8.0",
-      "onFail": "download"
-    }
-  },
+ "packageManager": { "name": "pnpm", "version": "^11.8.0", "onFail": "download" },
   "type": "module",
   "devDependencies": {
     "@eslint/js": "^10.0.1",

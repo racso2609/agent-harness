@@ -9,6 +9,7 @@
   "main": "./dist/main.js",
 "files": ["dist", "bin", "racso-logo.txt"],
 "engines": { "node": ">=22" },
+  "packageManager": { "name": "pnpm", "version": "^11.8.0", "onFail": "download" },
   "scripts": {
     "start": "node ./dist/main.js",
     "dev": "tsx ./src/main.ts",

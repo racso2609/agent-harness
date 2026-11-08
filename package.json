@@ -12,13 +12,7 @@
     "format:check": "prettier --check .",
     "smoke:install": "node scripts/smoke-install.mjs"
   },
-  "devEngines": {
-    "packageManager": {
-      "name": "pnpm",
-      "version": "^11.8.0",
-      "onFail": "download"
-    }
-  },
+  "packageManager": { "name": "pnpm", "version": "^11.8.0", "onFail": "download" },
   "devDependencies": {
     "prettier": "^3.9.10"
   }

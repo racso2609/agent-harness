@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  CONTINUING_ALONE_NOTICE,
   formatSpawnOutcome,
   formatTurnOutcome,
   MAX_OUTCOME_CHARS,
@@ -143,7 +142,9 @@ describe("formatTurnOutcome while the session continues alone", () => {
 
   it("closes the last turn of the chain like any other turn", () => {
     // Nothing is queued after it, so announcing the session goes on would be a
-    // lie: the turn reports its state without the notice.
+    // lie. This text is the same one an intermediate turn produces, only
+    // without CONTINUING_ALONE_NOTICE: the difference is the notice, not
+    // the format.
     const text = formatTurnOutcome(
       { status: "incomplete", pending: ["summarize"], next: "Review the child report." },
       false,
@@ -152,7 +153,10 @@ describe("formatTurnOutcome while the session continues alone", () => {
     expect(text).toBe("turn incomplete · pending: summarize · next: Review the child report.");
   });
 
-  it("keeps the notice text stable", () => {
-    expect(CONTINUING_ALONE_NOTICE).toBe("session continues on its own");
+  it("says the session goes on after a failed turn too", () => {
+    // The notice is not tied to the incomplete status: it follows `more`.
+    const text = formatTurnOutcome({ status: "toolError", pending: ["shell"] }, true);
+
+    expect(text).toBe("turn failed · pending: shell · session continues on its own");
   });
 });
