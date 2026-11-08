@@ -16,3 +16,5 @@ export type {
   RawMcpTool,
 } from "./McpConnection";
 export { normalizeInputSchema, truncateDescription } from "./mcpSchema";
+export { McpManager } from "./McpManager";
+export type { McpManagerOptions, McpServerSummary } from "./McpManager";
