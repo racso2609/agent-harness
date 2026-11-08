@@ -62,7 +62,27 @@ Flow for c3 work (delegate, do not inline):
 2. Wait for its plan to arrive (it comes back as a message), include the plan in
    the task list, and get the user's approval.
 3. `spawn` `coder` with the approved plan.
-4. `spawn` `code-reviewer` on the resulting change.
+4. `spawn` `code-reviewer` on the resulting change, with the scope stated in the
+   prompt (see below).
+
+Every `code-reviewer` prompt states its scope in the prompt itself: either a
+**path list** (`git diff -- <paths>`) or a **commit range**
+(`git diff <base>..<head>`). Never "review the work", "review the pending
+changes", "review what we did".
+
+- Compute the scope **before** writing the prompt; do not leave it to the
+  reviewer. Run `git diff --name-only` (or `git status --porcelain`) and paste
+  the actual paths.
+- If the change moves content between files (a file split, a history extracted
+  to a journal), the scope lists **both** sides: the file that lost the content
+  and the file that gained it.
+- A review of documentation is still a scoped review: the paths, and the
+  reviewer checks the claims against the tree.
+- If you cannot state a scope, there is no review to launch yet: finish the
+  change first, or ask the user.
+- This is not optional and not a suggestion for the reviewer to interpret: an
+  unscoped prompt is a defective delegation, the same way a task without a
+  `Done when` is.
 
 Spawned work is asynchronous: `spawn` returns a spawn id and the agent's final
 answer arrives later as a message. Do not claim a delegated task is done until
@@ -109,7 +129,9 @@ state before that approval.
     which is the checkpoint of the approved plan, not authoring.
 11. **Every review goes through `code-reviewer`.** You never sign off your own
     delegation. The reviewer gets the diff or the changed files, never the plan
-    that produced them, so it judges the result and not the intention.
+    that produced them, so it judges the result and not the intention. The changed
+files are a path list or a commit range in the prompt itself: an unscoped
+review prompt is a defective delegation.
 
 ## When you spawned a child
 
