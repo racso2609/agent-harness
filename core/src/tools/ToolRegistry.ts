@@ -6,8 +6,16 @@ interface ToolRegistryOptions {
   maxOutputBytes?: number;
 }
 
+// Supplies tools that are not known when the registry is built. Called on every
+// lookup, so a tool that appears later (an MCP server that was still starting)
+// is found without rebuilding the registry.
+type ToolProvider = () => Tool[];
+
 class ToolRegistry {
   protected tools = new Map<string, Tool>();
+
+  protected providers: ToolProvider[] = [];
+
   protected maxOutputBytes: number;
 
   constructor(tools: Tool[] = [], options: ToolRegistryOptions = {}) {
@@ -20,12 +28,19 @@ class ToolRegistry {
     this.tools.set(tool.name, tool);
   }
 
+  // Adds a source of tools resolved at lookup time. Registered tools always win a
+  // name clash, and so does the first provider that offers a name: a provider
+  // cannot shadow a tool the caller registered explicitly.
+  addProvider(provider: ToolProvider) {
+    this.providers.push(provider);
+  }
+
   get(name: string) {
-    return this.tools.get(name);
+    return this.tools.get(name) ?? this.dynamic().find((tool) => tool.name === name);
   }
 
   list(): Tool[] {
-    return [...this.tools.values()];
+    return [...this.tools.values(), ...this.dynamic()];
   }
 
   // Specs sent to the model; never includes the implementation.
@@ -37,14 +52,14 @@ class ToolRegistry {
     }));
   }
 
-  // Dispatches a call. Never throws: failures become tool results so the
-  // model can see them and self-correct on the next iteration.
+  // Dispatches a call. Never throws: failures become tool results so the model
+  // can see them and self-correct on the next iteration.
   async execute(ctx: ToolContext, call: ToolCall): Promise<ToolResult> {
     if (call.parseError) {
       return { output: call.parseError, isError: true };
     }
 
-    const tool = this.tools.get(call.name);
+    const tool = this.get(call.name);
     if (!tool) {
       return { output: `Unknown tool: ${call.name}`, isError: true };
     }
@@ -57,6 +72,27 @@ class ToolRegistry {
         isError: true,
       };
     }
+  }
+
+  // Tools offered by the providers, minus the registered ones and minus the
+  // duplicates a later provider repeats. Recomputed on every call: a provider is
+  // free to return a different set each time.
+  protected dynamic(): Tool[] {
+    if (this.providers.length === 0) return [];
+
+    const seen = new Set(this.tools.keys());
+    const tools: Tool[] = [];
+
+    for (const provider of this.providers) {
+      for (const tool of provider()) {
+        if (seen.has(tool.name)) continue;
+
+        seen.add(tool.name);
+        tools.push(tool);
+      }
+    }
+
+    return tools;
   }
 
   protected truncate(result: ToolResult): ToolResult {
@@ -73,4 +109,4 @@ class ToolRegistry {
 }
 
 export { ToolRegistry };
-export type { ToolRegistryOptions };
+export type { ToolProvider, ToolRegistryOptions };
