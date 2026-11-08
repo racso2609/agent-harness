@@ -153,6 +153,12 @@ class Harness implements IHarness {
     return this.session.collectSpawns(spawnIds);
   }
 
+  // Closes every MCP connection, without persisting: the CLI keeps the save
+  // and the close on separate deadlines. Idempotent, as `McpManager.close()` is.
+  closeMcp(): Promise<void> {
+    return this.session.closeMcp();
+  }
+
   compactSession() {
     return this.session.compactSession();
   }
@@ -164,35 +170,35 @@ class Harness implements IHarness {
   // is a child process: exiting first would leave it running (re-parented to
   // init), and nothing afterwards could reap it.
   //
- // A save that throws does not skip the close: the servers are children of
- // this process, so leaving them alive because the conversation could not be
- // written would orphan them for good. The save error still reaches the
- // caller, which decides how to report it.
- //
- // The two halves are caught apart, and the error is rethrown once the close
- // is done: a `finally` awaits the close with the save error still in flight,
- // and when that await rejects too, JS drops the original exception. Catching
- // each one keeps both; the save is the one reported, because it is the
- // failure of the session the user was working on, while a close that fails
- // has already signalled its servers.
- async shutdown(): Promise<void> {
- let saveError: unknown;
- try {
- this.session.save();
- } catch (error) {
- saveError = error;
- }
+  // A save that throws does not skip the close: the servers are children of
+  // this process, so leaving them alive because the conversation could not be
+  // written would orphan them for good. The save error still reaches the
+  // caller, which decides how to report it.
+  //
+  // The two halves are caught apart, and the error is rethrown once the close
+  // is done: a `finally` awaits the close with the save error still in flight,
+  // and when that await rejects too, JS drops the original exception. Catching
+  // each one keeps both; the save is the one reported, because it is the
+  // failure of the session the user was working on, while a close that fails
+  // has already signalled its servers.
+  async shutdown(): Promise<void> {
+    let saveError: unknown;
+    try {
+      this.session.save();
+    } catch (error) {
+      saveError = error;
+    }
 
- let closeError: unknown;
- try {
- await this.session.closeMcp();
- } catch (error) {
- closeError = error;
- }
+    let closeError: unknown;
+    try {
+      await this.session.closeMcp();
+    } catch (error) {
+      closeError = error;
+    }
 
- const failure = saveError ?? closeError;
- if (failure !== undefined) throw failure;
- }
+    const failure = saveError ?? closeError;
+    if (failure !== undefined) throw failure;
+  }
 }
 
 export const createHarness = (deps: HarnessDeps = {}): IHarness => {

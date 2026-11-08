@@ -108,12 +108,12 @@ describe("McpManager lazy discovery", () => {
   // the entry, so the next `tools()` starts a second connection and `servers()`
   // reports the first one as `closed`.
   //
- // One connection was built before close(), and nothing is connected after it.
- // The count of `createConnection` does not discriminate on its own: a
- // connection rebuilt from an entry that was never emptied never reaches
- // `connect()`, because `doClose` left it closed, so the count is 1 either way.
- // What discriminates is the tool lookup below; the count only catches a close
- // that forgot to kill the server it dropped.
+  // One connection was built before close(), and nothing is connected after it.
+  // The count of `createConnection` does not discriminate on its own: a
+  // connection rebuilt from an entry that was never emptied never reaches
+  // `connect()`, because `doClose` left it closed, so the count is 1 either way.
+  // What discriminates is the tool lookup below; the count only catches a close
+  // that forgot to kill the server it dropped.
   it("builds no connection after close(), on a manager that had already connected", async () => {
     const { manager: mcp, connections, createConnection } = manager({ fixture: {} });
 
@@ -128,9 +128,9 @@ describe("McpManager lazy discovery", () => {
     await mcp.ready();
     expect(mcp.toolForName("mcp__fixture__echo")).toBeUndefined();
 
- // Not the discriminator: without the emptying in `doClose`, `state` still
- // holds the entry `tools()` walks and a connection is rebuilt, but it never
- // connects, so this stays 1. The lookup above is the one that turns red.
+    // Not the discriminator: without the emptying in `doClose`, `state` still
+    // holds the entry `tools()` walks and a connection is rebuilt, but it never
+    // connects, so this stays 1. The lookup above is the one that turns red.
     expect(createConnection).toHaveBeenCalledTimes(1);
     expect(connections).toHaveLength(1);
   });

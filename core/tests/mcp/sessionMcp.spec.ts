@@ -227,39 +227,39 @@ describe("IHarness.shutdown and MCP", () => {
   });
 
   // Both halves fail: the close of the manager and the write of the session.
- // A `finally` would lose the save error here, because the await of the close
- // rejects while the save error is still in flight and JS drops it. The save
- // is the one that has to arrive: it names the failure the user cares about.
- it("reports the save error when the close fails too", async () => {
- const config = makeConfig(makeMcpConfig(TAG, { fixture: {} }));
- const harness = createHarness({ config, store: makeStore() });
- const session = (harness as unknown as { session: SessionManager }).session;
- vi.spyOn(session, "save").mockImplementation(() => {
- throw new Error("disk full");
- });
- // The real close runs and the manager does shut down, yet the call still
- // rejects: this is the half that used to swallow the save error.
- const realClose = session.mcp.close.bind(session.mcp);
- const close = vi.fn(() => realClose());
+  // A `finally` would lose the save error here, because the await of the close
+  // rejects while the save error is still in flight and JS drops it. The save
+  // is the one that has to arrive: it names the failure the user cares about.
+  it("reports the save error when the close fails too", async () => {
+    const config = makeConfig(makeMcpConfig(TAG, { fixture: {} }));
+    const harness = createHarness({ config, store: makeStore() });
+    const session = (harness as unknown as { session: SessionManager }).session;
+    vi.spyOn(session, "save").mockImplementation(() => {
+      throw new Error("disk full");
+    });
+    // The real close runs and the manager does shut down, yet the call still
+    // rejects: this is the half that used to swallow the save error.
+    const realClose = session.mcp.close.bind(session.mcp);
+    const close = vi.fn(() => realClose());
 
- vi.spyOn(session, "closeMcp").mockImplementation(async () => {
- await close();
- throw new Error("close exploded");
- });
+    vi.spyOn(session, "closeMcp").mockImplementation(async () => {
+      await close();
+      throw new Error("close exploded");
+    });
 
- session.tools.list();
- await ready(session);
+    session.tools.list();
+    await ready(session);
 
- await expect(harness.shutdown()).rejects.toThrow("disk full");
+    await expect(harness.shutdown()).rejects.toThrow("disk full");
 
- // The close was not skipped because the save threw first, and it did
- // reach the manager.
- expect(close).toHaveBeenCalledTimes(1);
- expect(session.mcp.isClosed()).toBe(true);
- expect(pids()).toEqual([]);
- });
+    // The close was not skipped because the save threw first, and it did
+    // reach the manager.
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(session.mcp.isClosed()).toBe(true);
+    expect(pids()).toEqual([]);
+  });
 
- it("closes the MCP servers before it resolves", async () => {
+  it("closes the MCP servers before it resolves", async () => {
     const config = makeConfig(makeMcpConfig(TAG, { fixture: {} }));
     const harness = createHarness({ config, store: makeStore() });
 

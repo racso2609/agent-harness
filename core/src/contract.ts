@@ -153,6 +153,10 @@ export interface IHarness {
   // still compiles; the CLI does await it, so the exit happens after the
   // children are gone.
   shutdown(): Promise<void>;
+  // Closes every MCP connection and resolves once the spawned servers are dead,
+  // without persisting: the CLI keeps the save and the close on separate
+  // deadlines, because only the close can hang. Idempotent.
+  closeMcp(): Promise<void>;
 }
 
 export type {
