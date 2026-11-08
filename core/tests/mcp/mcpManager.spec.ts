@@ -83,8 +83,9 @@ describe("McpManager lazy discovery", () => {
   });
 
   it("opens no connection once the manager is closed", async () => {
-    // A manager that never discovered anything, so the guard under test is the
-    // only thing that can stop the spawn: without it, tools() would open one.
+    // A manager that never discovered anything: this one pins the lazy case, not
+    // the invariant that keeps a closed manager closed. That one needs a manager
+    // that had already connected, and is pinned by the case below.
     const { manager: mcp, connections, createConnection } = manager({ fixture: {} });
 
     expect(createConnection).not.toHaveBeenCalled();
@@ -98,12 +99,53 @@ describe("McpManager lazy discovery", () => {
     // Nothing was built and nothing was spawned after close().
     expect(createConnection).not.toHaveBeenCalled();
     expect(connections).toHaveLength(0);
-    // The invariant that keeps a closed manager closed: `close()` empties
-    // `state`, so there is nothing left to discover. This is what a `closed`
-    // flag used to guard, and the assertion that discriminates it: if `doClose`
-    // stopped emptying the state, the three calls above would have re-created
-    // the entry and this would see it again.
     expect(mcp.servers()).toEqual([]);
+  });
+
+  // The invariant of `close()`: `doClose` empties `state`, and that is the only
+  // thing keeping a closed manager closed. A manager that already connected is
+  // what makes the mutation visible: without the emptying, `state` still holds
+  // the entry, so the next `tools()` starts a second connection and `servers()`
+  // reports the first one as `closed`.
+  //
+  // One connection was built before close(), and nothing is built after it: the
+  // count is what discriminates the invariant of `doClose` (it empties `state`)
+  // from a close that only kills the processes.
+  it("builds no connection after close(), on a manager that had already connected", async () => {
+    const { manager: mcp, connections, createConnection } = manager({ fixture: {} });
+
+    // The handshake is over once `ready()` resolves: the connection has a status.
+    await mcp.ready();
+    expect(connections[0]?.status).toBe("ready");
+
+    await mcp.close();
+
+    // Every entry point that would wake a server.
+    mcp.tools();
+    await mcp.ready();
+    expect(mcp.toolForName("mcp__fixture__echo")).toBeUndefined();
+
+    // The discriminating assertion: without the emptying in `doClose`, `state`
+    // still holds the entry `tools()` walks, so this is 2.
+    expect(createConnection).toHaveBeenCalledTimes(1);
+    expect(connections).toHaveLength(1);
+  });
+
+  // The listing of the same manager. Without the emptying, `doClose` only kills
+  // the connection and `servers()` keeps reporting the entry, as `closed` with
+  // the tools it had discovered.
+  it("lists no server after close(), on a manager that had already connected", async () => {
+    const { manager: mcp } = manager({ fixture: {} });
+
+    await mcp.ready();
+    expect(mcp.servers()).toEqual([
+      { id: "fixture", transport: "stdio", status: "ready", toolCount: 3 },
+    ]);
+
+    await mcp.close();
+
+    expect(mcp.servers()).toEqual([]);
+    expect(mcp.isClosed()).toBe(true);
   });
 
   it("connects once and lists once across two tools() calls", async () => {
@@ -157,7 +199,6 @@ describe("McpManager lazy discovery", () => {
     // handshake is in flight.
     mcp.tools();
     expect(mcp.servers()[0]?.status).toBe("starting");
-
     await mcp.ready();
 
     expect(connections).toHaveLength(2);

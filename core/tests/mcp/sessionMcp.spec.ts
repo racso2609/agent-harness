@@ -137,6 +137,25 @@ describe("SessionManager MCP wiring", () => {
     await session.closeMcp();
   });
 
+  it("answers an empty reload for a closed session instead of restarting it", async () => {
+    const session = makeSession();
+
+    session.tools.list();
+    await ready(session);
+    const pid = pids()[0] as number;
+    expect(pid).toBeGreaterThan(0);
+
+    await session.closeMcp();
+    expect(await waitForDeath(pid)).toBe(true);
+
+    // A reload after the close must not bring a server back: close() is terminal
+    // (shutdown calls it), and a process spawned here would be orphaned by the
+    // exit that follows.
+    expect(await session.reloadMcp()).toEqual([]);
+    expect(pids()).toEqual([]);
+    expect(session.listMcpServers()).toEqual([]);
+  });
+
   it("closeMcp leaves no server process alive", async () => {
     const session = makeSession();
 
@@ -154,7 +173,59 @@ describe("SessionManager MCP wiring", () => {
   });
 });
 
+// A reload after close() must not wake a server: close() is what shutdown()
+// calls a moment before the process leaves, and a reload landing in between
+// would spawn it back and orphan it.
+//
+// What this pins is the outcome, not the `isClosed()` guard in `reloadMcp`:
+// removing that guard leaves this file green, because `doClose()` empties the
+// state the manager discovers from. A test that watched the guard itself would
+// have to make a closed manager keep its state, which is not reachable from
+// outside.
+it("reloadMcp answers empty and starts nothing once the session closed MCP", async () => {
+  const session = makeSession();
+
+  session.tools.list();
+  await ready(session);
+  expect(pids()).toHaveLength(1);
+
+  await session.closeMcp();
+  expect(session.mcp.isClosed()).toBe(true);
+  expect(pids()).toEqual([]);
+
+  // The outcome under test: no server is discovered again, so nothing is left
+  // for process.exit to kill unreported.
+  expect(await session.reloadMcp()).toEqual([]);
+  expect(pids()).toEqual([]);
+});
+
 describe("IHarness.shutdown and MCP", () => {
+  // A session that cannot be written must not take the servers with it: they are
+  // children of this process, and an exit right after the failure would orphan
+  // them. The harness reports the save error, and the close still happens.
+  it("closes the MCP servers even when saving the session throws", async () => {
+    const config = makeConfig(makeMcpConfig(TAG, { fixture: {} }));
+    const harness = createHarness({ config, store: makeStore() });
+    const session = (harness as unknown as { session: SessionManager }).session;
+    // The write that shutdown() runs, made to fail: it is session.save(), not
+    // the store, the one whose failure has to be survivable here.
+    vi.spyOn(session, "save").mockImplementation(() => {
+      throw new Error("disk full");
+    });
+
+    session.tools.list();
+    await ready(session);
+
+    const pid = pids()[0] as number;
+    expect(pid).toBeGreaterThan(0);
+
+    await expect(harness.shutdown()).rejects.toThrow("disk full");
+
+    // The failure of the save reached the caller, and the server died anyway.
+    expect(await waitForDeath(pid)).toBe(true);
+    expect(pids()).toEqual([]);
+  });
+
   it("closes the MCP servers before it resolves", async () => {
     const config = makeConfig(makeMcpConfig(TAG, { fixture: {} }));
     const harness = createHarness({ config, store: makeStore() });

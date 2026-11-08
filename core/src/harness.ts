@@ -163,9 +163,17 @@ class Harness implements IHarness {
   // The close is awaited instead of fired and forgotten because an MCP server
   // is a child process: exiting first would leave it running (re-parented to
   // init), and nothing afterwards could reap it.
+  //
+  // A save that throws does not skip the close (`finally`): the servers are
+  // children of this process, so leaving them alive because the conversation
+  // could not be written would orphan them for good. The save error still
+  // reaches the caller, which decides how to report it.
   async shutdown(): Promise<void> {
-    this.session.save();
-    await this.session.closeMcp();
+    try {
+      this.session.save();
+    } finally {
+      await this.session.closeMcp();
+    }
   }
 }
 

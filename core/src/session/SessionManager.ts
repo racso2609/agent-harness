@@ -525,7 +525,21 @@ class SessionManagerImpl implements SessionManager {
   // failure. It does NOT re-read config.json: the servers are the ones the
   // config held when the session was built, so a server added to the file needs
   // a restart.
+  //
+  // A closed manager answers `[]` and is left alone: close() is terminal
+  // (shutdown() calls it), and discovering again would spawn the servers a
+  // moment before the process leaves, which is exactly what close() prevents.
+  //
+  // The `isClosed()` check below is a belt, not the mechanism: a closed manager
+  // already answers `[]` on its own, because `doClose()` empties the state every
+  // reader walks. What the guard buys is the invariant surviving a `doClose` that
+  // stops emptying it, and it is not what any test pins: drop it and the suite
+  // stays green. The behaviour the tests hold is the outcome, an empty list and
+  // no process, not the branch that produces it.
   async reloadMcp(): Promise<McpServerSummary[]> {
+    // Not needed today (see above), kept so a reload cannot resurrect a close.
+    if (this.mcp.isClosed()) return [];
+
     await this.mcp.invalidate();
     await this.mcp.ready();
 

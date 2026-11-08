@@ -357,16 +357,24 @@ export class McpManager {
   // call.
   //
   // A closed manager never starts a server again because `doClose` empties
-  // `state`, and `tools()`, `toolForName()`, `ready()` and `servers()` all walk
-  // that list: an empty one leaves nothing to discover. There is no separate
-  // `closed` flag, and none is needed, because the invariant is the empty state
-  // itself. `tests/mcp/mcpManager.spec.ts` pins it by calling `tools()`,
-  // `toolForName()` and `ready()` after `close()` and asserting that no
-  // connection was built and that `servers()` stays empty.
+  // `state` and every reader of the manager (`tools()`, `toolForName()`,
+  // `ready()`, `servers()`, `toolSummaries()`) walks that list: an empty one
+  // leaves nothing to discover. The invariant comes from that empty state, not
+  // from a flag, so it rests entirely on `doClose` keeping the assignment: drop
+  // it and a manager that already connected keeps its entries, and the next
+  // `tools()` call starts its servers over. `isClosed()` answers "closed" from
+  // the closing promise instead of duplicating that state in a second field.
   close(): Promise<void> {
     this.closing ??= this.doClose();
 
     return this.closing;
+  }
+
+  // Whether `close()` was ever called. Derived from the closing promise, never
+  // reset, so there is no second field to keep in sync. Callers about to start a
+  // server (`reloadMcp`) ask this instead of waking a closed manager.
+  isClosed(): boolean {
+    return this.closing !== undefined;
   }
 
   private async doClose(): Promise<void> {
