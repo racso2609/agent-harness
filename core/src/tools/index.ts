@@ -23,9 +23,10 @@ interface ToolRegistryWiring {
 // When allowedTools is given, only those tools are registered; an empty list
 // disables tools entirely.
 //
-// use_skill and the MCP tools are only offered to agents that declare no
-// allowlist: an agent that lists its tools gets exactly those, so enable them on
-// it by naming them in its definition instead of adding them behind its back.
+// use_skill is only offered to agents that declare no allowlist, and so is any
+// MCP tool an allowlist does not name. An agent that lists its tools gets
+// exactly those: an mcp__<server>__<tool> it names is resolved, the rest of the
+// server stays out.
 //
 // LIMITATION, MCP with an allowlist: naming an mcp__<server>__<tool> there works,
 // but nothing warns when the name does not exist yet. The remote tools are
@@ -44,8 +45,10 @@ export const createToolRegistry = (
     allowedTools === undefined &&
     config.config.skills?.enabled !== false &&
     (skills?.list().length ?? 0) > 0;
-  const mcpUsable =
-    allowedTools === undefined && config.config.mcp?.enabled === true && !mcpDisabledByEnv();
+  // Three independent gates: no allowlist (option A: an agent that lists its tools
+  // gets exactly those and nothing else), mcp.enabled in the config, and the
+  // environment kill-switch. Any of them off and the manager is never asked.
+  const mcpUsable = config.config.mcp?.enabled === true && !mcpDisabledByEnv();
 
   const all = [
     new ShellTool({
@@ -59,20 +62,6 @@ export const createToolRegistry = (
     ...(skillsUsable ? [new UseSkillTool()] : []),
   ];
 
-  if (allowedTools !== undefined) {
-    const allowed = new Set(allowedTools);
-    for (const name of allowed) {
-      if (!all.some((tool) => tool.name === name)) {
-        logger.warn(`Agent requested unknown tool: ${name}`);
-      }
-    }
-
-    return new ToolRegistry(
-      all.filter((tool) => allowed.has(tool.name)),
-      { maxOutputBytes: tools?.maxOutputBytes },
-    );
-  }
-
   const registry = new ToolRegistry(all, { maxOutputBytes: tools?.maxOutputBytes });
 
   // The manager never knows the native tools: they are handed over so a remote
@@ -80,6 +69,34 @@ export const createToolRegistry = (
   if (mcpUsable && mcp) {
     const occupied = new Set(all.map((tool) => tool.name));
     registry.addProvider(() => mcp.tools(occupied));
+  }
+
+  if (allowedTools !== undefined) {
+    const allowed = new Set(allowedTools);
+    for (const name of allowed) {
+      // An mcp__ name is not native: only warn when MCP is off, so naming a
+      // remote tool in an agent definition does not warn on every build.
+      if (mcpUsable && name.startsWith("mcp__")) continue;
+      if (!all.some((tool) => tool.name === name)) {
+        logger.warn(`Agent requested unknown tool: ${name}`);
+      }
+    }
+
+    const registry = new ToolRegistry(
+      all.filter((tool) => allowed.has(tool.name)),
+      { maxOutputBytes: tools?.maxOutputBytes },
+    );
+
+    // Option A: the allowlist is the whole list, so the native tools are the only
+    // ones it can offer. The provider is installed anyway, which is what lets a
+    // named mcp__<server>__<tool> resolve while every other remote tool stays
+    // out: the lookup goes through `registry.get()` by name.
+    if (mcpUsable && mcp) {
+      const occupied = new Set(all.map((tool) => tool.name));
+      registry.addProvider(() => mcp.tools(occupied).filter((tool) => allowed.has(tool.name)));
+    }
+
+    return registry;
   }
 
   return registry;

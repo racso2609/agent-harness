@@ -70,13 +70,57 @@ const approvalKind = (
   return "write";
 };
 
+// Keys whose value is replaced by REDACTED in the preview: credentials that
+// should never reach a transcript, a log or the approval prompt.
+const SENSITIVE_KEY = /token|secret|passw|api[-_]?key|authorization|credential|bearer/i;
+const REDACTED = "***";
+
+// Replaces the value of every sensitive key, at the top level and one level
+// down (the shapes an MCP call actually uses: a flat argument object, or a
+// nested one behind a single "params"/"options" key). Arrays are walked too;
+// deeper objects are serialized as they are.
+//
+// BEST EFFORT, not a guarantee: it only redacts the keys it recognizes, so a
+// secret hidden under an innocent-looking name still reaches the preview.
+const redactArgs = (args: unknown): unknown => {
+  if (Array.isArray(args)) return args.map(redactArgs);
+
+  // A JSON string the caller already stringified: parse it so its keys can be
+  // inspected, and fall back to the text when it does not parse.
+  if (typeof args === "string") {
+    try {
+      return redactArgs(JSON.parse(args));
+    } catch {
+      return args;
+    }
+  }
+
+  if (args === null || typeof args !== "object") return args;
+
+  const redacted: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(args)) {
+    if (SENSITIVE_KEY.test(key)) {
+      redacted[key] = REDACTED;
+    } else if (value !== null && typeof value === "object") {
+      redacted[key] = redactArgs(value);
+    } else {
+      redacted[key] = value;
+    }
+  }
+
+  return redacted;
+};
+
 // Short, single-line rendering of the arguments for the approval prompt: the
-// full JSON is unreadable there, and control characters break the layout.
+// full JSON is unreadable there, and control characters break the layout. The
+// recognized secrets are redacted first, so truncating cannot bring them back.
 const previewArgs = (args: unknown): string => {
   let text: string;
   try {
-    text = typeof args === "string" ? args : (JSON.stringify(args ?? {}) ?? String(args));
+    text = JSON.stringify(redactArgs(args ?? {})) ?? String(args);
   } catch {
+    // Circular or otherwise unserializable: never echo the raw object, which
+    // would print whatever it holds.
     text = String(args);
   }
 

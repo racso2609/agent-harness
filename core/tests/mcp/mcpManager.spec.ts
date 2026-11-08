@@ -82,6 +82,24 @@ describe("McpManager lazy discovery", () => {
     ]);
   });
 
+  it("opens no connection once the manager is closed", async () => {
+    // A manager that never discovered anything, so the guard under test is the
+    // only thing that can stop the spawn: without it, tools() would open one.
+    const { manager: mcp, connections, createConnection } = manager({ fixture: {} });
+
+    expect(createConnection).not.toHaveBeenCalled();
+
+    await mcp.close();
+
+    expect(mcp.tools()).toEqual([]);
+    await mcp.ready();
+    expect(mcp.toolForName("mcp__fixture__echo")).toBeUndefined();
+
+    // Nothing was built and nothing was spawned after close().
+    expect(createConnection).not.toHaveBeenCalled();
+    expect(connections).toHaveLength(0);
+  });
+
   it("connects once and lists once across two tools() calls", async () => {
     const listSpy = vi.spyOn(McpConnection.prototype, "listTools");
     const { manager: mcp, connections } = manager({ fixture: {} });
@@ -289,6 +307,71 @@ describe("McpManager approvals", () => {
 
     expect(result).toEqual({ output: "Tool mcp__fixture__echo was denied", isError: true });
     expect(callSpy).not.toHaveBeenCalled();
+  });
+
+  it("redacts the credentials of the arguments in the approval prompt", async () => {
+    const { manager: mcp } = manager({ fixture: {} });
+    await mcp.ready();
+
+    const { ctx, approvals } = makeContext();
+    const token = "sk-live-0123456789";
+    const result = await mcp
+      .toolForName("mcp__fixture__echo")
+      ?.execute(ctx, { token, password: "hunter2", text: "hello" });
+
+    // Redacting only the preview keeps the call itself intact.
+    expect(result).toEqual({ output: "hello", isError: false });
+
+    const subject = approvals[0]?.subject ?? "";
+    expect(subject).toBe('mcp__fixture__echo: {"token":"***","password":"***","text":"hello"}');
+    expect(subject).not.toContain(token);
+    expect(subject).not.toContain("hunter2");
+    // An innocent key is not redacted.
+    expect(subject).toContain('"text":"hello"');
+  });
+
+  it("redacts a credential nested one level down", async () => {
+    const { manager: mcp } = manager({ fixture: {} });
+    await mcp.ready();
+
+    const { ctx, approvals } = makeContext();
+    const apiKey = "AKIA-secret-value";
+    await mcp.toolForName("mcp__fixture__echo")?.execute(ctx, {
+      params: { apiKey, query: "select 1" },
+    });
+
+    const subject = approvals[0]?.subject ?? "";
+    expect(subject).toContain('"apiKey":"***"');
+    expect(subject).not.toContain(apiKey);
+    expect(subject).toContain('"query":"select 1"');
+  });
+
+  it("redacts a credential inside an array of objects", async () => {
+    const { manager: mcp } = manager({ fixture: {} });
+    await mcp.ready();
+
+    const { ctx, approvals } = makeContext();
+    await mcp.toolForName("mcp__fixture__echo")?.execute(ctx, {
+      headers: [{ Authorization: "Bearer abcdef" }, { name: "x-tenant" }],
+    });
+
+    const subject = approvals[0]?.subject ?? "";
+    expect(subject).toContain('"Authorization":"***"');
+    expect(subject).not.toContain("abcdef");
+    expect(subject).toContain('"name":"x-tenant"');
+  });
+
+  it("keeps the preview short even when the secrets sit before the cut", async () => {
+    const { manager: mcp } = manager({ fixture: {} });
+    await mcp.ready();
+
+    const { ctx, approvals } = makeContext();
+    const token = "sk-live-a-very-long-token-value";
+    await mcp.toolForName("mcp__fixture__echo")?.execute(ctx, { token, text: "x".repeat(400) });
+
+    const subject = approvals[0]?.subject ?? "";
+    expect(subject).not.toContain(token);
+    expect(subject).toContain("…");
   });
 
   it("runs the call when the decision is always", async () => {
