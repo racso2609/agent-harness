@@ -36,7 +36,8 @@ Consecuencias concretas, no teóricas:
 4. **No hay memoria de proyecto.** El `workspaceRoot()` (`SessionManager.ts:910`) se anuncia en el
    system prompt (`core/src/agents/defaults.ts:29`) pero no se recuerda nada de lo aprendido ahí.
 
-El hueco está abierto y sin decisión en `core/TODO.md:108-111`:
+El hueco está abierto y sin decisión en `TO_INVESTIGATE.md`, fila «memoria» («¿Con qué provider se
+implementa la memoria?»):
 
 ```
 8. memory
@@ -44,11 +45,8 @@ El hueco está abierto y sin decisión en `core/TODO.md:108-111`:
 - select memory provider (postgress, enmgram, etc)
 ```
 
-Y el punto 6 del mismo TODO (`core/TODO.md:113`, `mcp connections`) sigue sin hacer: **el harness no
-tiene cliente MCP**. Eso condiciona el diseño (ver §3.4 y §7, F-M5, diferido). Aviso de lectura: la numeración
-de `core/TODO.md` es inconsistente — la memoria es el **8** (`:108`), MCP el **6** (`:113`) y después
-reaparece un `8. skills` (`:117`) —, así que esos números no indican orden real ni prioridad: cita por
-línea, no por número.
+Y la tarea «Conectar servidores MCP» de `core/TODO.md` §4 — Herramientas sigue sin hacer: **el harness no
+tiene cliente MCP**. Eso condiciona el diseño (ver §3.4 y §7, F-M5, diferido).
 
 ### Restricciones que mandan
 
@@ -56,7 +54,7 @@ línea, no por número.
 |---|---|---|
 | R1 | La memoria es un **conector plug-and-play** (MCP, HTTP o local), no un acoplamiento a un producto | El seam es una interfaz propia; Engram/mem0/Zep son *implementaciones*, nunca el modelo de datos |
 | R2 | `core/package.json` es un paquete **publicado**; hoy sólo tiene `dotenv`, `pino`, `pino-pretty` | Cero dependencias nuevas obligatorias. Todo lo pesado va detrás de `import()` dinámico o de un binario externo |
-| R3 | No hay cliente MCP | MCP **sale de la tanda**: es una feature propia (`core/TODO.md:113`), no el camino del MVP |
+| R3 | No hay cliente MCP | MCP **sale de la tanda**: es una feature propia (la tarea «Conectar servidores MCP» de `core/TODO.md` §4 — Herramientas), no el camino del MVP |
 | R4 | Dos procesos (CLI corto + gateway de larga vida) que comparten estado **sólo por disco** (`docs/ARCHITECTURE.md:7-36`) | La memoria no puede ser un singleton en memoria del proceso; el backend tiene que ser un fichero o un servicio externo, nunca estado en RAM |
 | R5 | Baseline 446 tests en verde y el prompt del sistema es **byte-idéntico** sin skills (`agents/defaults.ts:31-34`) | La memoria arranca **apagada por defecto**; con `memory.enabled = false` el comportamiento no cambia ni un byte |
 
@@ -100,8 +98,8 @@ un provider local sin proceso externo, un provider HTTP, y una tool `recall` par
   key) y una dependencia nativa. El MVP léxico resuelve "¿qué decidimos sobre el login?" cuando el
   usuario y el agente escriben en el mismo idioma. Se deja la puerta abierta (§7, F-M7) pero no se paga
   ahora.
-- **RAG sobre el workspace** (indexar los ficheros del repo). Es otro problema (`core/TODO.md:115`,
-  `RAG integration??`) y otro presupuesto de tokens. Mezclarlo con memoria haría el seam ambiguo.
+- **RAG sobre el workspace** (indexar los ficheros del repo). Es otro problema (la fila «¿Merece la pena RAG?» de `TO_INVESTIGATE.md`;
+  «RAG integration??») y otro presupuesto de tokens. Mezclarlo con memoria haría el seam ambiguo.
 - **Resolución de conflictos** (`memory_relations` de Engram, `mem_judge`). Requiere un modelo juzgando;
   es un producto encima de la memoria, no la memoria.
 - **Sincronización entre máquinas.** El backend HTTP la da gratis si el usuario la quiere; el local no
@@ -461,7 +459,7 @@ En este orden, y con este reparto de responsabilidades:
    tanda de fases: es lo que convierte "plug-and-play" en verdad y lo que permite decir "si ya usas
    Engram, apunta `memory.url` y listo".
 4. **`McpMemoryProvider` sale de la tanda.** Depende del cliente MCP, que no existe
-(`core/TODO.md:113`) y que es una feature propia, no de memoria. El seam ya lo admite sin cambios: el
+(la tarea «Conectar servidores MCP» de `core/TODO.md` §4 — Herramientas) y que es una feature propia, no de memoria. El seam ya lo admite sin cambios: el
 día que exista el cliente, es un adaptador más de ~80 líneas.
 
 ### Alternativas
@@ -626,12 +624,12 @@ igual. Más `scripts/memory-smoke.mjs` (documentado, no en CI) que corre contra 
 ### F-M5 — (diferido) Cliente MCP + `McpMemoryProvider`
 
 **No entra en esta tanda.** Depende de una feature que no existe: el harness no tiene cliente MCP
-(`core/TODO.md:113`, punto 6, sin hacer). Escribir `McpMemoryProvider` exige antes un cliente JSON-RPC
+(la tarea «Conectar servidores MCP» de `core/TODO.md` §4 — Herramientas, sin hacer). Escribir `McpMemoryProvider` exige antes un cliente JSON-RPC
 2.0 sobre stdio (`initialize` → `tools/list` → `tools/call`, con `id` incremental, timeout y `close()`),
-y ese cliente **no es específico de memoria**: sirve para todas las conexiones MCP del punto 6. Meterlo
+y ese cliente **no es específico de memoria**: sirve para todas las conexiones MCP de esa tarea. Meterlo
 aquí duplicaría el trabajo cuando llegue esa feature.
 
-**Criterio de entrada:** que exista `core/src/mcp/client.ts` como feature propia (punto 6 del TODO) y
+**Criterio de entrada:** que exista `core/src/mcp/client.ts` como feature propia («Conectar servidores MCP», `core/TODO.md` §4 — Herramientas) y
 esté en uso por al menos un consumidor que no sea memoria.
 
 **Cuando exista, la entrega es:** `core/src/memory/McpMemoryProvider.ts` mapeando `mem_search`,
@@ -664,13 +662,13 @@ de búsquedas que FTS5 falló.
 
 ### Diferido explícitamente
 
-- RAG sobre el workspace (`core/TODO.md:115`).
+- RAG sobre el workspace (la fila «¿Merece la pena RAG?» de `TO_INVESTIGATE.md`).
 - Resolución de conflictos / `memory_relations`.
 - Sincronización entre máquinas.
 - Borrado duro y exportación GDPR.
 - Memoria procedimental (es skills).
 - UI de memoria en el frontal web (F3 de `docs/ARCHITECTURE.md`).
-- Cliente MCP y `McpMemoryProvider` (F-M5): depende del punto 6 de `core/TODO.md:113`, que no existe.
+- Cliente MCP y `McpMemoryProvider` (F-M5): depende de la tarea «Conectar servidores MCP» de `core/TODO.md` §4 — Herramientas, que no existe.
 
 ### Orden y dependencias
 
@@ -699,7 +697,7 @@ recuerda entre sesiones sin instalar nada. F-M4 es lo que hace verdad el "plug-a
 | 7 | **Lock-in al modelo de un producto** (Engram `observations`, mem0 `memories`) | El seam es nuestro y el esquema local también. `MemoryObservation` es un superconjunto mínimo; el adaptador traduce. Cambiar de backend = cambiar `memory.provider`, no migrar código |
 | 8 | **El hueco léxico de Engram se descubre tarde** | `capabilities().semantic = false` es visible desde F-M4 y `/memory` lo imprime. Documentado en §5 con las dos pruebas que fallan. Un usuario que necesite semántica usa `local` + F-M7, no Engram |
 | 9 | **`forget()` miente en Engram** (soft-delete) | El adaptador devuelve `false` cuando la respuesta trae `hard_delete: false`, y `/memory` lo reporta como "borrado lógico". No se promete lo que el backend no hace |
-| 10 | **El cliente MCP se come el presupuesto** | F-M5 sale de la tanda: depende del punto 6 de `core/TODO.md:113`, que es una feature propia. La memoria no espera a MCP; local y HTTP cubren el MVP |
+| 10 | **El cliente MCP se come el presupuesto** | F-M5 sale de la tanda: depende de la tarea «Conectar servidores MCP» de `core/TODO.md` §4 — Herramientas, que es una feature propia. La memoria no espera a MCP; local y HTTP cubren el MVP |
 | 11 | **Regresión del prompt byte-idéntico** | `memory.enabled = false` por defecto y la inyección es un mensaje aparte, nunca dentro de `composeSystemPrompt` (`agents/defaults.ts:20`). Test de regresión en F-M2, donde existe la inyección y el test puede discriminar; en F-M0 no hay ruta de memoria activa que pudiera tocar el prompt |
 
 ## Notas de verificación

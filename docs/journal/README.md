@@ -23,10 +23,11 @@ paquete. Es una mudanza: el cuerpo de cada ítem se copia **literal** del TODO o
 | 2026-11-06 | cli | [P5 `/resume`](cli/p5-resume.md) | Reanudar una sesión repinta el transcript en los dos renderers | `0413bf2`, `4ef6dd0` |
 | 2026-11-04 | cli | [P5 tests](cli/p5-renderer-tests.md) | Aserciones tautológicas cambiadas por literales exactos, con barrido de revert | `729f621` |
 | 2026-11-02 | cli | [P6](cli/p6-auto-continuation.md) | `pendingSpawns()`, turno sin prompt, tope de continuaciones, aviso en el cierre | `9afaab0`, `c48b9a1` |
+| 2026-11-07 | core | [0–8](core/0-8-mvp.md) | split core/cli, session manager, agentes, tooling §4.1–4.3, MVP lazy de skills | — |
 | 2026-11-07 | core | [§8–§9](core/s8-s9-reporting.md) | Contrato de spawn público, listener, estado consultable, persistencia, progreso, `onOutput`, cierre | `baf5b93`, `267d271`, `c48b9a1`, `d92b818` |
 
 ## Convención
 
 1. Un fragmento por **tema/fase**, nunca por ítem; si pasa de 120 líneas se parte por fase con sufijo (`p4-packaging.md` / `p4-publish.md`).
 2. Cada ítem entra como `### <Título exacto del TODO>` seguido de su cuerpo original **literal**: esto es un sumidero, no un resumen.
-3. El TODO vivo no enlaza cada fragmento desde cada ítem: este índice es la única puerta.
+3. El TODO vivo no enlaza cada fragmento desde cada ítem: este índice es el mapa; el TODO enlaza el fragmento de cada sección.
