@@ -26,6 +26,27 @@ import type { UiAdapter } from "@/ui/UiAdapter";
 // Message of the bare `--resume` that finds no persisted session at all.
 const NO_SESSIONS_TO_RESUME = "no hay sesiones que reanudar";
 
+// How long shutdown() waits for the harness before giving up. Closing an MCP
+// server means signalling a child and waiting for it to go, and that wait can
+// hang (a server that ignores SIGTERM, a transport that never settles). Past
+// this the loop stops waiting and leaves anyway: a terminal left in ink mode
+// with the process still alive is the worse failure, and the signals the close
+// already sent keep going on their own.
+export const SHUTDOWN_TIMEOUT_MS = 3_000;
+
+// Resolved by the timer of `bounded()` when the wait ran out, so a caller can
+// tell a timeout from a promise that resolved with `undefined`.
+const TIMED_OUT = Symbol("timed out");
+
+// Waits for `promise`, or for `ms` milliseconds, whichever comes first.
+const bounded = <T>(promise: Promise<T> | T, ms: number): Promise<T | typeof TIMED_OUT> => {
+  const timeout = new Promise<typeof TIMED_OUT>((resolve) => {
+    setTimeout(() => resolve(TIMED_OUT), ms).unref();
+  });
+
+  return Promise.race([promise, timeout]);
+};
+
 // Emits the children persisted in the session (previous runs) so the strip
 // starts with what the session launched instead of empty. Only the core knows
 // whether a load happened, so the loop asks instead of guessing.
@@ -498,16 +519,29 @@ class MainLoop {
   // child process, and exiting first would leave it running. Shutdown is
   // permissive (`Promise<void> | void`), so `await` is what tolerates both; a
   // shutdown that throws is reported instead of leaving the exit to skip.
+  //
+  // The wait is bounded by SHUTDOWN_TIMEOUT_MS: a close that never resolves (a
+  // server that ignores SIGTERM, a transport that hangs) would otherwise keep the
+  // process alive with ink mounted, and a second Ctrl-C cannot re-enter because
+  // `closing` is already true.
   protected async shutdown(code: number): Promise<void> {
     if (this.closing) return;
     this.closing = true;
 
     try {
-      await this.harness.shutdown();
+      const outcome = await bounded(this.harness.shutdown(), SHUTDOWN_TIMEOUT_MS);
+
+      if (outcome === TIMED_OUT) {
+        this.ui.render({
+          type: "notice",
+          message: `closing the MCP servers is taking longer than ${SHUTDOWN_TIMEOUT_MS} ms: exiting anyway, the signal was already sent`,
+        });
+      }
     } catch (err) {
+      // The harness names the half that failed, so the notice can name it too.
       this.ui.render({
         type: "notice",
-        message: `failed to persist session on shutdown: ${String(err)}`,
+        message: `shutdown failed: ${String(err)}`,
       });
     }
 
