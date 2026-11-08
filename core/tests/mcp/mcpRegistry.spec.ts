@@ -417,6 +417,44 @@ describe("createToolRegistry and MCP", () => {
     ).toBeUndefined();
   });
 
+  it("reads an allowlist entry as the composite the manager offers", async () => {
+    // An allowlist is written by hand and compared against the composite the
+    // manager builds, so the entry is read with the same parser that reads those
+    // names. `mcp__fixture__echo` is the shape the agent has to write.
+    const { manager } = makeManager();
+    const registry = await createToolRegistry(
+      makeConfig({ mcp: { enabled: true } }),
+      ["readFile", "mcp__fixture__echo"],
+      {
+        mcp: manager,
+      },
+    );
+
+    await manager.ready();
+
+    expect(registry.get("mcp__fixture__echo")).toBeDefined();
+    expect(registry.list().map((tool) => tool.name)).toEqual(["readFile", "mcp__fixture__echo"]);
+  });
+
+  it("does not ask the manager for an allowlist entry that is not a composite", async () => {
+    // `mcp__fixture` is not mcp__<server>__<tool>, so nothing could ever resolve it
+    // and discovery would spawn a server for nothing.
+    const { manager, connections } = makeManager();
+    const toolsSpy = vi.spyOn(manager, "tools");
+
+    const registry = await createToolRegistry(
+      makeConfig({ mcp: { enabled: true } }),
+      ["readFile", "mcp__fixture"],
+      {
+        mcp: manager,
+      },
+    );
+
+    expect(registry.list().map((tool) => tool.name)).toEqual(["readFile"]);
+    expect(toolsSpy).not.toHaveBeenCalled();
+    expect(connections).toEqual([]);
+  });
+
   it("lets a tool registered after the wiring keep the name a remote tool wants", async () => {
     // The call the wiring makes into the manager, from a registry wired the way a
     // session wires it.

@@ -7,7 +7,12 @@ import { ListDirTool } from "./listDir";
 import { ReadFileTool } from "./readFile";
 import { ShellTool } from "./shell";
 import { SpawnTool } from "./spawn";
-import { MCP_PREFIX } from "@/mcp/mcpNaming";
+import {
+  mcpToolName,
+  parseMcpToolName,
+  sanitizeRemoteToolName,
+  sanitizeServerId,
+} from "@/mcp/mcpNaming";
 import { ToolRegistry } from "./ToolRegistry";
 import { UseSkillTool } from "./useSkill";
 import { WriteFileTool } from "./writeFile";
@@ -19,6 +24,23 @@ interface ToolRegistryWiring {
   // mcp__<server>__<tool> tools.
   mcp?: McpManager;
 }
+
+// Maps a name written in an allowlist to the composite the manager offers.
+// Hand-written names are not sanitized (`mcp__GitHub__create_issue`) while
+// every tool the manager hands over is, so the two are compared in the same
+// space. Anything that is not mcp__<server>__<tool> yields undefined.
+//
+// `mcp__Fixture_Echo__Echo` is rebuilt as `mcp__fixture_echo__echo`: the server
+// id lowercases and keeps its underscores, the tool name collapses them, which
+// is exactly what the manager's own names look like.
+export const compositeName = (name: string): string | undefined => {
+  const parts = parseMcpToolName(name);
+  if (!parts) return undefined;
+
+  // The parts come back as they were written, so they are sanitized again on the
+  // way out: the composite parser only accepts lowercase [a-z0-9_] parts.
+  return mcpToolName(sanitizeServerId(parts.serverId), sanitizeRemoteToolName(parts.toolName));
+};
 
 // Builds the registry wired with the tools enabled for this harness version.
 // When allowedTools is given, only those tools are registered; an empty list
@@ -54,7 +76,11 @@ export const createToolRegistry = (
   const mcpAllowed =
     allowedTools === undefined
       ? undefined
-      : new Set(allowedTools.filter((name) => name.startsWith(MCP_PREFIX)));
+      : new Set(
+          allowedTools
+            .map((allow) => compositeName(allow))
+            .filter((entry): entry is string => entry !== undefined),
+        );
 
   const all = [
     new ShellTool({
@@ -67,6 +93,10 @@ export const createToolRegistry = (
     new SpawnTool(),
     ...(skillsUsable ? [new UseSkillTool()] : []),
   ];
+
+  // One source for the names a remote tool must not take: every native name,
+  // including the ones this agent did not ask for.
+  const nativeNames = new Set(all.map((tool) => tool.name));
 
   const offered =
     allowedTools === undefined ? all : all.filter((tool) => allowedTools.includes(tool.name));
@@ -92,13 +122,11 @@ export const createToolRegistry = (
   // tool can never shadow one of them.
   const wantsMcp = mcpAllowed === undefined || mcpAllowed.size > 0;
   if (mcpUsable && mcp && wantsMcp) {
-    const occupied = new Set(all.map((tool) => tool.name));
     registry.addProvider(() => {
-      const remote = mcp.tools(occupied);
+      const remote = mcp.tools(nativeNames);
       return mcpAllowed === undefined ? remote : remote.filter((tool) => mcpAllowed.has(tool.name));
     });
   }
-
   return registry;
 };
 
