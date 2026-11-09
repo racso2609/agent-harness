@@ -96,6 +96,9 @@ const makeContext = (): CommandContext => ({
       projectSource: "git",
     })),
     searchMemory: vi.fn(async () => []),
+    listMcpServers: vi.fn(() => []),
+    reloadMcp: vi.fn(async () => []),
+    mcpTools: vi.fn(() => []),
     shutdown: vi.fn(),
   } as unknown as CommandContext["harness"],
   flows: {
@@ -155,6 +158,7 @@ describe("CommandRepository", () => {
       "skills",
       "skill",
       "memory",
+      "mcp",
       "status",
       "spawn",
       "children",

@@ -49,10 +49,14 @@ export type AgentResponse = {
 };
 
 export type JsonSchemaProperty = {
-  type: "string" | "number" | "integer" | "boolean" | "array" | "object";
+  type?: "string" | "number" | "integer" | "boolean" | "array" | "object";
   description?: string;
   items?: JsonSchemaProperty;
   enum?: (string | number | boolean)[];
+  // Default value advertised by the source schema; forwarded verbatim.
+  default?: unknown;
+  // Nested properties, present when `type` is "object".
+  properties?: Record<string, JsonSchemaProperty>;
 };
 
 export type JsonSchema = {

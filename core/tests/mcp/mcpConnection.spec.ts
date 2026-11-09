@@ -1,0 +1,734 @@
+import { execFileSync, spawn } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { KILL_GRACE_MS, killProcessTree } from "../../src/mcp/killTree";
+import { logger } from "../../src/utils/logger";
+import { McpConnection } from "../../src/mcp/McpConnection";
+import type { ResolvedMcpServer } from "../../src/mcp/McpConfig";
+import { listProcesses, sweepOrphans, type TaggedProcess } from "./processTable";
+
+const fixture = path.join(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "fixtures",
+  "minimalServer.mjs",
+);
+
+// Carried by every server this file spawns. The fixture hands the same value
+// to each grandchild both as the `FIXTURE_TAG` environment variable and as the
+// `fixture-grandchild:<tag>` process title, which is what makes a leaked one
+// findable even after its parent exited and it was re-parented to init.
+const FIXTURE_TAG = `mcp-connection-${process.pid}-${Date.now()}`;
+const TAG_ENV_VAR = "FIXTURE_TAG";
+
+// Every connection a test creates, closed in afterEach so the suite never
+// leaves a server process behind.
+const opened: McpConnection[] = [];
+
+const makeServer = (args: string[] = [], env: Record<string, string> = {}): ResolvedMcpServer => ({
+  id: "fixture",
+  transport: "stdio",
+  command: process.execPath,
+  args: [fixture, ...args],
+  env: { [TAG_ENV_VAR]: FIXTURE_TAG, ...env },
+  untrusted: false,
+});
+
+const connect = async (
+  args: string[] = [],
+  options: { startupTimeoutMs?: number; callTimeoutMs?: number; env?: Record<string, string> } = {},
+): Promise<McpConnection> => {
+  const connection = new McpConnection(makeServer(args, options.env), {
+    startupTimeoutMs: options.startupTimeoutMs ?? 5000,
+    callTimeoutMs: options.callTimeoutMs ?? 2000,
+  });
+  opened.push(connection);
+
+  return connection;
+};
+
+const isAlive = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+// Polls until the process is gone, so a SIGTERM that lands late does not make
+// the assertion flaky. `false` means "still alive after polling for
+// `timeoutMs`", so the timeout is always explicit: it is the observation
+// window, and 0 would quietly reduce it to a plain liveness check.
+const waitForDeath = async (pid: number, timeoutMs = 2000): Promise<boolean> => {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!isAlive(pid)) return true;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+
+  return !isAlive(pid);
+};
+
+// Direct children of a live pid, read from `ps` so it does not rely on the
+// implementation under test.
+const childrenOf = (pid: number): number[] => {
+  const output = execFileSync("ps", ["-A", "-o", "pid=", "-o", "ppid="], { encoding: "utf8" });
+  return output
+    .split("\n")
+    .map((line) => line.trim().split(/\s+/).map(Number))
+    .filter(([childPid, parentPid]) => parentPid === pid && childPid > 0)
+    .map(([childPid]) => childPid);
+};
+
+// Polls until a fixture has written something to the file a test is waiting
+// for, so a handshake that times out in 1 ms does not race the grandchild's
+// pid file. Empty content is not "ready": it is the state a reader catches
+// when it sees the file before its content has landed.
+const waitForFile = async (file: string, timeoutMs = 5000): Promise<string> => {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const content = readFileSync(file, "utf8");
+      if (content.trim()) return content;
+    } catch {
+      // Not created yet.
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+
+  throw new Error(`timed out waiting for ${file}`);
+};
+
+// Pid handed over through a file by a fixture. Read through `waitForFile` so
+// an empty file is never parsed as pid 0, and asserted here instead of at
+// every call site: every assertion below depends on it being a live pid.
+const readPidFile = async (file: string): Promise<number> => {
+  const pid = Number((await waitForFile(file)).trim());
+  expect(pid).toBeGreaterThan(0);
+
+  return pid;
+};
+
+// Temporary directory for fixtures that need to hand state back through a
+// file (the pid of a grandchild of the server).
+const scratchDirs: string[] = [];
+
+const scratchDir = (): string => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "racso-mcp-"));
+  scratchDirs.push(dir);
+  return dir;
+};
+
+// The belt for what neither `close()` nor the fixture can clean up: a server
+// killed with SIGKILL by a test never runs its own handlers, so the
+// grandchild it spawned is re-parented to init and nothing else in the suite
+// will ever reap it.
+//
+// The sweep itself lives in `processTable.ts` so it can be tested on its own
+// (`processTable.spec.ts`), instead of only ever running here where a broken
+// sweep would look exactly like a clean run.
+const sweepTagged = (): { swept: TaggedProcess[]; parented: TaggedProcess[] } => {
+  const { orphans, parented } = sweepOrphans(listProcesses(), FIXTURE_TAG);
+  return { swept: orphans, parented };
+};
+
+// Why the suite lets a leaked process fail the file instead of only sweeping
+// it: `expect` inside `afterEach` fails the run and does not swallow the
+// failure of the test that leaked it.
+afterEach(async () => {
+  await Promise.all(opened.splice(0).map((connection) => connection.close()));
+  for (const dir of scratchDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+
+  const { swept, parented } = sweepTagged();
+  const describe_ = (found: TaggedProcess[]): string =>
+    found.map((process_) => `${process_.pid} (ppid ${process_.ppid})`).join(", ");
+
+  expect(
+    swept,
+    `processes tagged ${FIXTURE_TAG} outlived their server and had to be swept: ${describe_(swept)}`,
+  ).toEqual([]);
+  expect(
+    parented,
+    `processes tagged ${FIXTURE_TAG} were still running under a live parent after close(): ${describe_(parented)}`,
+  ).toEqual([]);
+});
+
+describe("McpConnection handshake", () => {
+  it("connects and lists the tools of the server", async () => {
+    const connection = await connect();
+    await connection.connect();
+
+    expect(connection.status).toBe("ready");
+
+    const tools = await connection.listTools();
+    expect(tools.map((tool) => tool.name)).toEqual(["echo", "fail", "slow"]);
+
+    const echo = tools.find((tool) => tool.name === "echo");
+    expect(echo?.description).toBe("Echoes back the given text");
+    expect(echo?.annotations?.readOnlyHint).toBe(true);
+    expect(echo?.inputSchema).toMatchObject({
+      type: "object",
+      required: ["text"],
+    });
+
+    const slow = tools.find((tool) => tool.name === "slow");
+    expect(slow?.annotations?.destructiveHint).toBe(true);
+  });
+
+  it("follows the cursor through paginated tools/list", async () => {
+    const connection = await connect(["--all-pages"]);
+    await connection.connect();
+
+    const tools = await connection.listTools();
+    expect(tools.map((tool) => tool.name)).toEqual(["echo", "fail", "slow"]);
+  });
+
+  it("returns the text of a successful call", async () => {
+    const connection = await connect();
+    await connection.connect();
+
+    const result = await connection.callTool("echo", { text: "hello harness" });
+    expect(result).toEqual({ output: "hello harness", isError: false });
+  });
+
+  it("reports isError for a failing tool without throwing", async () => {
+    const connection = await connect();
+    await connection.connect();
+
+    const result = await connection.callTool("fail", {});
+    expect(result.isError).toBe(true);
+    expect(result.output).toContain("tool failed on purpose");
+  });
+});
+
+describe("McpConnection aborts", () => {
+  it("answers an already aborted call without touching the connection", async () => {
+    const connection = await connect(["--slow-call"], { callTimeoutMs: 10_000 });
+    await connection.connect();
+
+    const controller = new AbortController();
+    controller.abort();
+
+    const started = Date.now();
+    const result = await connection.callTool("slow", {}, { signal: controller.signal });
+
+    expect(result).toEqual({ output: 'Tool "slow" was cancelled', isError: true });
+    expect(Date.now() - started).toBeLessThan(1000);
+    expect(connection.status).toBe("ready");
+    expect(connection.lastError).toBeUndefined();
+  });
+
+  it("answers an aborted call in flight without waiting for the call timeout", async () => {
+    const connection = await connect(["--slow-call"], { callTimeoutMs: 10_000 });
+    await connection.connect();
+
+    const controller = new AbortController();
+    const started = Date.now();
+    const pending = connection.callTool("slow", {}, { signal: controller.signal });
+    setTimeout(() => controller.abort(), 50);
+
+    const result = await pending;
+
+    expect(result).toEqual({ output: 'Tool "slow" was cancelled', isError: true });
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(connection.status).toBe("ready");
+  });
+
+  it("does not wait for the call timeout when a server ignores the cancellation", async () => {
+    // The server drops cancellations, so the SDK handler only goes away when
+    // the transport closes. That must not turn into a stuck call.
+    const connection = await connect(["--slow-call", "--abort-proof"], {
+      callTimeoutMs: 300,
+    });
+    await connection.connect();
+
+    const controller = new AbortController();
+    const started = Date.now();
+    const pending = connection.callTool("slow", {}, { signal: controller.signal });
+    controller.abort();
+
+    const result = await pending;
+
+    expect(result.output).toBe('Tool "slow" was cancelled');
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(connection.status).toBe("ready");
+  });
+
+  it("keeps the server usable after an abort", async () => {
+    const connection = await connect(["--slow-call"], { callTimeoutMs: 10_000 });
+    await connection.connect();
+
+    // Aborted while the call is on the wire, which is what has to leave the
+    // server usable.
+    const controller = new AbortController();
+    const pending = connection.callTool("slow", {}, { signal: controller.signal });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    controller.abort();
+    expect((await pending).isError).toBe(true);
+
+    // The process is still there, so the next call must work: the connection
+    // stays `ready` and never becomes a lie.
+    expect(connection.status).toBe("ready");
+    const pid = connection.processId as number;
+    expect(isAlive(pid)).toBe(true);
+
+    const after = await connection.callTool("echo", { text: "still here" });
+    expect(after).toEqual({ output: "still here", isError: false });
+  });
+});
+
+describe("McpConnection environment", () => {
+  it("passes only the declared env plus the SDK whitelist to the server", async () => {
+    // A variable the test owns: if the child inherited process.env, it would
+    // be visible to the server.
+    process.env.RACSO_TEST_SECRET = "do-not-leak";
+    const previousPath = process.env.PATH;
+
+    try {
+      const connection = await connect([], { env: { MY_VAR: "x" } });
+      await connection.connect();
+
+      const result = await connection.callTool("env", {});
+      expect(result.isError).toBe(false);
+
+      const names = result.output.split(",");
+      expect(names).toContain("MY_VAR");
+      expect(names).not.toContain("RACSO_TEST_SECRET");
+      // The SDK whitelist is what the server is supposed to see, so PATH (set
+      // for this process) must be there even though the config never asked.
+      if (previousPath !== undefined) expect(names).toContain("PATH");
+      expect(names).not.toContain("OMNIROUTE_API_KEY");
+    } finally {
+      delete process.env.RACSO_TEST_SECRET;
+      if (previousPath === undefined) delete process.env.PATH;
+    }
+  });
+});
+
+describe("McpConnection failure paths", () => {
+  it("fails the handshake on timeout and kills the server", async () => {
+    const connection = await connect(["--hang"], { startupTimeoutMs: 400 });
+
+    const started = Date.now();
+    await expect(connection.connect()).rejects.toThrow(/did not finish the handshake/);
+    expect(Date.now() - started).toBeLessThan(3000);
+
+    expect(connection.status).toBe("failed");
+    expect(connection.lastError).toMatch(/did not finish the handshake/);
+
+    const pid = connection.processId;
+    expect(pid).toBeDefined();
+    expect(await waitForDeath(pid as number)).toBe(true);
+    expect(() => process.kill(pid as number, 0)).toThrow(/ESRCH/);
+  });
+
+  it("does not hang when the server exits before the handshake", async () => {
+    const connection = await connect(["--exit-on-start"], { startupTimeoutMs: 3000 });
+
+    await expect(connection.connect()).rejects.toThrow();
+    expect(connection.status).toBe("failed");
+  });
+
+  it("marks the connection failed when the server dies, without hanging calls", async () => {
+    const connection = await connect();
+    await connection.connect();
+
+    const pid = connection.processId as number;
+    process.kill(pid, "SIGKILL");
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    expect(connection.status).toBe("failed");
+    expect(connection.lastError).toContain("exited");
+
+    const result = await connection.callTool("echo", { text: "dead" });
+    expect(result.isError).toBe(true);
+    expect(result.output).toContain("unavailable");
+  });
+
+  it("aborts a slow call and stays closable", async () => {
+    const connection = await connect(["--slow-call"], { callTimeoutMs: 10_000 });
+    await connection.connect();
+
+    const controller = new AbortController();
+    const started = Date.now();
+    const pending = connection.callTool("slow", {}, { signal: controller.signal });
+    controller.abort();
+
+    const result = await pending;
+    expect(result.isError).toBe(true);
+    expect(Date.now() - started).toBeLessThan(2000);
+
+    const pid = connection.processId as number;
+    await connection.close();
+    expect(connection.status).toBe("closed");
+    expect(await waitForDeath(pid)).toBe(true);
+  });
+
+  it("times out a call that never answers", async () => {
+    const connection = await connect(["--slow-call"], { callTimeoutMs: 300 });
+    await connection.connect();
+
+    const result = await connection.callTool("slow", {});
+    expect(result.isError).toBe(true);
+    expect(connection.status).toBe("ready");
+  });
+});
+
+describe("McpConnection close", () => {
+  it("is idempotent and leaves no process alive", async () => {
+    const connection = await connect();
+    await connection.connect();
+
+    const pid = connection.processId as number;
+    expect(isAlive(pid)).toBe(true);
+
+    await connection.close();
+    await connection.close();
+
+    expect(connection.status).toBe("closed");
+    expect(isAlive(pid)).toBe(false);
+  });
+
+  it("stops a fresh connection that never got to connect", async () => {
+    const connection = await connect();
+    await connection.close();
+
+    expect(connection.status).toBe("closed");
+    await expect(connection.connect()).rejects.toThrow(/cannot connect while closed/);
+  });
+});
+
+describe("McpConnection process tree", () => {
+  it("kills the grandchildren of the server on close", async () => {
+    const dir = scratchDir();
+    const pidFile = path.join(dir, "grandchild.pid");
+
+    const connection = await connect(["--grandchild"], {
+      env: { GRANDCHILD_PID_FILE: pidFile },
+    });
+    await connection.connect();
+
+    const serverPid = connection.processId as number;
+    const grandchild = Number(readFileSync(pidFile, "utf8"));
+    expect(grandchild).toBeGreaterThan(0);
+    expect(childrenOf(serverPid)).toContain(grandchild);
+    expect(isAlive(grandchild)).toBe(true);
+
+    await connection.close();
+
+    expect(await waitForDeath(serverPid)).toBe(true);
+    expect(await waitForDeath(grandchild)).toBe(true);
+  });
+
+  // Documented limit, not a bug to be fixed here. A server killed with SIGKILL
+  // never runs `process.on("exit")`, so the grandchild it spawned is
+  // re-parented to init while it is still alive. Nothing in this process can
+  // bring it down: `close()` walks the tree of a pid that no longer exists, and
+  // following the orphan would mean a supervisor of its own around every
+  // server. What the suite guarantees instead, and what this test pins, is
+  // that the leak is never silent: the `afterEach` sweep finds the orphan,
+  // reports it, and fails the file. That sweep runs right after this test.
+  it("leaves no grandchild behind when the server is SIGKILLed", async () => {
+    const dir = scratchDir();
+    const pidFile = path.join(dir, "grandchild.pid");
+
+    const connection = await connect(["--grandchild"], {
+      env: { GRANDCHILD_PID_FILE: pidFile },
+    });
+    await connection.connect();
+
+    const serverPid = connection.processId as number;
+    const grandchild = await readPidFile(pidFile);
+    expect(isAlive(grandchild)).toBe(true);
+
+    // The same kill a crashed or OOM-killed server gets: no handler of its own
+    // ever runs, which is the whole point.
+    process.kill(serverPid, "SIGKILL");
+    expect(await waitForDeath(serverPid)).toBe(true);
+
+    // The system does not clean this up: the grandchild is still running, and
+    // the sweep sees it as an orphan it has to reap. The same function the
+    // `afterEach` runs is called here, so this test fails if the sweep stops
+    // detecting the leak instead of only if the leak itself disappears.
+    expect(await waitForDeath(grandchild, 250)).toBe(false);
+    const { orphans } = sweepOrphans(listProcesses(), FIXTURE_TAG);
+    expect(orphans.map((process_) => process_.pid)).toContain(grandchild);
+    expect(await waitForDeath(grandchild)).toBe(true);
+  });
+
+  // The grace period is only observable from the grandchild's side. With
+  // `graceMs = 0` the SIGTERM and the SIGKILL are sent in the same instant and
+  // the grandchild dies before it can record anything, so a test that only
+  // waits for its death passes either way. This one reads what the grandchild
+  // wrote: it saw the SIGTERM and stayed alive for a while afterwards, which is
+  // impossible unless the tree really got a full grace period.
+  //
+  // The tree is killed by the `catch` of `connect`, not by `close()`:
+  // `recordPid()` runs in the `finally` of `connect`, before it rethrows, so the
+  // connection already knows the pid of the server when it marks itself failed
+  // and walks the tree. That kill is what this test pins, and it does not race
+  // `close()` to get it.
+  it("gives the tree of a failed connection the full grace period before SIGKILL", async () => {
+    const dir = scratchDir();
+    const pidFile = path.join(dir, "grandchild.pid");
+    const recordsFile = path.join(dir, "grandchild.records");
+
+    const connection = await connect(
+      ["--hang", "--grandchild", "--grandchild-records-sigterm", recordsFile],
+      { startupTimeoutMs: 400, env: { GRANDCHILD_PID_FILE: pidFile } },
+    );
+
+    await expect(connection.connect()).rejects.toThrow(/did not finish the handshake/);
+    expect(connection.status).toBe("failed");
+
+    const serverPid = connection.processId as number;
+    const grandchild = await readPidFile(pidFile);
+    // The grandchild announces itself before it can be signalled, so a missing
+    // record below means "it never saw the SIGTERM", not "it never started".
+    expect(await waitForFile(recordsFile)).toContain("started");
+
+    // `connect` killed the tree itself, before it rejected, and the status stays
+    // `failed` afterwards: nothing here goes through `close()`.
+    expect(await waitForDeath(serverPid)).toBe(true);
+    expect(await waitForDeath(grandchild)).toBe(true);
+
+    const records = readFileSync(recordsFile, "utf8");
+    expect(records).toContain("sigterm");
+
+    // It lived on after the SIGTERM. The window is bounded by the fixture's own
+    // escalation (the server SIGKILLs its children 100 ms after its own
+    // SIGTERM), so the grandchild reports a few heartbeats and then dies. With
+    // `graceMs = 0` the connection's SIGKILL lands in the same tick as the
+    // SIGTERM and the file holds no heartbeat at all.
+    const heartbeats = records
+      .split("\n")
+      .filter((line) => line.startsWith("alive "))
+      .map((line) => Number(line.slice("alive ".length)));
+    expect(heartbeats.length).toBeGreaterThanOrEqual(2);
+    expect(Math.max(...heartbeats)).toBeGreaterThanOrEqual(40);
+  });
+
+  it("kills the grandchildren of a server that never finished the handshake", async () => {
+    const dir = scratchDir();
+    const pidFile = path.join(dir, "grandchild.pid");
+
+    const connection = await connect(["--grandchild", "--hang"], {
+      startupTimeoutMs: 400,
+      env: { GRANDCHILD_PID_FILE: pidFile },
+    });
+
+    await expect(connection.connect()).rejects.toThrow(/did not finish the handshake/);
+
+    const serverPid = connection.processId as number;
+    const grandchild = Number(readFileSync(pidFile, "utf8"));
+
+    expect(await waitForDeath(serverPid)).toBe(true);
+    expect(await waitForDeath(grandchild)).toBe(true);
+  });
+});
+
+describe("McpConnection close after a failure", () => {
+  it("releases calls still in flight instead of waiting for the call timeout", async () => {
+    const connection = await connect(["--hang", "--slow-call"], {
+      startupTimeoutMs: 300,
+      callTimeoutMs: 10_000,
+    });
+
+    // `connect` rejects on the handshake timeout while the server keeps
+    // running, which is exactly the `failed` state that used to leak calls.
+    // `connect` owns the kill, so close() racing it is not what is tested.
+    await expect(connection.connect()).rejects.toThrow(/did not finish the handshake/);
+    expect(connection.status).toBe("failed");
+
+    const started = Date.now();
+    await connection.close();
+
+    expect(connection.status).toBe("closed");
+    expect(Date.now() - started).toBeLessThan(3000);
+  });
+
+  it("closes a failed connection without hanging when a call is in flight", async () => {
+    const connection = await connect(["--slow-call"], { callTimeoutMs: 10_000 });
+    await connection.connect();
+
+    const pending = connection.callTool("slow", {});
+    const started = Date.now();
+    await connection.close();
+
+    const result = await pending;
+    expect(result.isError).toBe(true);
+    expect(Date.now() - started).toBeLessThan(3000);
+  });
+});
+
+describe("McpConnection concurrency", () => {
+  it("rejects a second connect while the first is starting", async () => {
+    const connection = await connect();
+    const first = connection.connect();
+
+    await expect(connection.connect()).rejects.toThrow(/cannot connect while starting/);
+
+    await first;
+    expect(connection.status).toBe("ready");
+
+    const result = await connection.callTool("echo", { text: "one" });
+    expect(result).toEqual({ output: "one", isError: false });
+
+    // Exactly one server exists: the second connect failed before spawning,
+    // and the connection has a single pid.
+    expect(childrenOf(process.pid).filter((pid) => pid === connection.processId)).toHaveLength(1);
+  });
+});
+
+describe("McpConnection listTools", () => {
+  it("stops at the page cap and warns instead of dropping tools silently", async () => {
+    const warnings: string[] = [];
+    const spy = vi.spyOn(logger, "warn").mockImplementation((message: string) => {
+      warnings.push(message);
+    });
+
+    try {
+      const connection = await connect(["--endless-pages"]);
+      await connection.connect();
+
+      const tools = await connection.listTools();
+
+      expect(tools).toEqual([]);
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toMatch(/still had tools after 50 pages/);
+      expect(connection.status).toBe("ready");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("de-duplicates a tool name repeated across pages, keeping the first", async () => {
+    const connection = await connect(["--codex-pages"]);
+    await connection.connect();
+
+    const tools = await connection.listTools();
+
+    expect(tools.map((tool) => tool.name)).toEqual(["echo", "fail"]);
+    // The first definition wins, not the one from the later page.
+    expect(tools[0].description).toBe("Echoes back the given text");
+  });
+});
+
+describe("McpConnection grace period", () => {
+  // The grace period is only observable from the process that receives the
+  // SIGTERM: with `graceMs = 0` the SIGTERM and the SIGKILL go out in the same
+  // instant and a process that only records the moment it dies looks identical
+  // either way. These tests read what the processes wrote instead.
+  //
+  // LIMITATION, not covered by any test: the end-to-end route
+  // `doClose() -> killProcess() -> killProcessTree(pid, undefined, KILL_GRACE_MS)`
+  // is not observable with this fixture. `doClose()` kills the tree first and
+  // only then calls `transport.close()`, which ends the server's stdin, and the
+  // fixture exits on `stdin end` before that grace period can be spent: over a
+  // full instrumented run, 8 of the 31 `killProcessTree` calls had a grace of
+  // 0-1 ms. With `graceMs = 0` in the `failed` branch of `doClose()` this file
+  // still passes, so nothing here pins that branch.
+  //
+  // What is pinned instead is `killProcessTree` itself, called the way the
+  // product calls it and with the product grace period (`KILL_GRACE_MS`),
+  // isolated from any connection: a probe process stands in for a server.
+
+  // A probe standing in for a server: it spawns the grandchild whose records
+  // are read below, hands over its pid, and stays up for the whole observation
+  // window.
+  const spawnProbe = (pidFile: string, recordsFile: string): ReturnType<typeof spawn> =>
+    spawn(
+      process.execPath,
+      [
+        "-e",
+        `const { spawn } = require("node:child_process");` +
+          `const { appendFileSync, renameSync, writeFileSync } = require("node:fs");` +
+          `const [pidFile, recordsFile] = process.argv.slice(1);` +
+          `const script = "process.on('SIGTERM', () => { require('node:fs').appendFileSync(process.argv[1], 'sigterm\\\\n'); process.exit(0); }); setInterval(() => {}, 1000);";` +
+          `const child = spawn(process.execPath, ["-e", script, recordsFile], { stdio: "ignore", env: { ...process.env } });` +
+          `const staged = pidFile + ".tmp";` +
+          `writeFileSync(staged, String(child.pid));` +
+          `renameSync(staged, pidFile);` +
+          `process.on("SIGTERM", () => appendFileSync(recordsFile, "probe-sigterm\\n"));` +
+          `setInterval(() => {}, 1000);`,
+        pidFile,
+        recordsFile,
+      ],
+      { stdio: "ignore", env: { ...process.env, [TAG_ENV_VAR]: FIXTURE_TAG } },
+    );
+
+  it("spends the product grace period between the SIGTERM and the SIGKILL of a whole tree", async () => {
+    const dir = scratchDir();
+    const pidFile = path.join(dir, "probe.grandchild.pid");
+    const recordsFile = path.join(dir, "probe.records");
+
+    const probe = spawnProbe(pidFile, recordsFile);
+    probe.once("error", () => {});
+
+    try {
+      const grandchild = await readPidFile(pidFile);
+      // The tree is whole when the walk starts, which is the precondition of
+      // everything below: a walk that found nothing would pass vacuously.
+      expect(childrenOf(probe.pid as number)).toContain(grandchild);
+      expect(isAlive(grandchild)).toBe(true);
+
+      // The walk starts from the live pid of the probe and uses the same defaults
+      // as the product: the real process table and `KILL_GRACE_MS`. What this pins
+      // is `killProcessTree` reaching every pid of the tree and giving it the
+      // product grace period; whether a connection ever reaches that call on its
+      // own is the limitation stated at the top of this describe.
+      await killProcessTree(probe.pid as number, undefined, KILL_GRACE_MS);
+
+      // With `graceMs = 0` both records are missing: the SIGKILL lands in the same
+      // tick as the SIGTERM and neither process gets to write anything. Records
+      // that are there are records of a SIGTERM that was really given time.
+      const records = readFileSync(recordsFile, "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => line.trim());
+      // Both processes got the signal and both lived long enough to say so. The
+      // order is not asserted because it is a race, not because it is arbitrary:
+      // `killProcessTree` signals deepest-first, so the grandchild would come
+      // first, but the probe is only its parent once the child exists, and a walk
+      // that starts before that still reaches both and can signal them in either
+      // order.
+      expect(records).toContain("probe-sigterm");
+      expect(records).toContain("sigterm");
+
+      // The grace period then ends, and the SIGKILL lands: both are gone. Their
+      // death alone proves nothing, since it happens with or without a grace
+      // period, so it is only asserted once the records above said the period was
+      // really spent.
+      expect(await waitForDeath(probe.pid as number)).toBe(true);
+      expect(await waitForDeath(grandchild)).toBe(true);
+    } finally {
+      probe.kill("SIGKILL");
+    }
+  }, 10_000);
+
+  it("takes down the whole tree of a healthy connection on close()", async () => {
+    const dir = scratchDir();
+    const pidFile = path.join(dir, "grandchild.pid");
+
+    // The end-to-end half of the walk, through the product: a healthy connection
+    // that closes normally and takes its whole tree down with it. It says nothing
+    // about the grace period, which is unobservable from here with this fixture
+    // (see the limitation at the top of this describe): the server exits on
+    // `stdin end` before the period is spent.
+    const connection = await connect(["--grandchild"], { env: { GRANDCHILD_PID_FILE: pidFile } });
+    await connection.connect();
+
+    const serverPid = connection.processId as number;
+    const grandchild = await readPidFile(pidFile);
+    expect(childrenOf(serverPid)).toContain(grandchild);
+
+    await connection.close();
+
+    expect(await waitForDeath(serverPid)).toBe(true);
+    expect(await waitForDeath(grandchild)).toBe(true);
+  }, 10_000);
+});

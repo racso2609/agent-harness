@@ -26,6 +26,39 @@ import type { UiAdapter } from "@/ui/UiAdapter";
 // Message of the bare `--resume` that finds no persisted session at all.
 const NO_SESSIONS_TO_RESUME = "no hay sesiones que reanudar";
 
+// How long shutdown() waits for the MCP servers to close before giving up.
+// Closing one means signalling a child and waiting for it to go, and that wait
+// can hang (a server that ignores SIGTERM, a transport that never settles).
+// Past this the loop stops waiting and leaves anyway: a terminal left in ink
+// mode with the process still alive is the worse failure.
+//
+// Saving the session is deliberately outside this deadline: it is a
+// `writeFileSync`, which cannot hang, can only take time proportional to the
+// size of `session.json`, and cutting it half way with a timeout would leave a
+// truncated file behind.
+export const SHUTDOWN_TIMEOUT_MS = 3_000;
+
+// Resolved by the timer of `bounded()` when the wait ran out, so a caller can
+// tell a timeout from a promise that resolved with `undefined`.
+const TIMED_OUT = Symbol("timed out");
+
+// Waits for `promise`, or for `ms` milliseconds, whichever comes first.
+const bounded = async <T>(promise: Promise<T> | T, ms: number): Promise<T | typeof TIMED_OUT> => {
+  let timer: NodeJS.Timeout | undefined;
+
+  const timeout = new Promise<typeof TIMED_OUT>((resolve) => {
+    timer = setTimeout(() => resolve(TIMED_OUT), ms).unref();
+  });
+
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    // The promise that won leaves a pending timer behind: clear it, so a
+    // resolved wait does not keep the loop alive until the deadline.
+    if (timer) clearTimeout(timer);
+  }
+};
+
 // Emits the children persisted in the session (previous runs) so the strip
 // starts with what the session launched instead of empty. Only the core knows
 // whether a load happened, so the loop asks instead of guessing.
@@ -192,7 +225,7 @@ class MainLoop {
       // Ink owns stdin, so the app pushes prompts into the same loop.
       (this.ui as TuiUiAdapter).start({
         onSubmit: (prompt) => this.enqueueFromUser(prompt),
-        onExit: () => this.shutdown(0),
+        onExit: () => void this.shutdown(0),
         // The draft decides whether a continuation may start: the box reports every
         // change, including the emptying that follows a send.
         onDraftChange: () => this.maybeContinue({ fromDraft: true }),
@@ -243,8 +276,23 @@ class MainLoop {
   }
 
   // Ctrl-C triggers cleanup and exit.
+  //
+  // The first one runs shutdown(); a second one during the wait means the user
+  // will not wait any longer, so it releases the terminal and exits without
+  // entering shutdown() again (`closing` is already set). The servers the first
+  // one was still closing are children of this process: the exit kills what is
+  // left of them.
   protected installKeyHandlers() {
-    process.on("SIGINT", () => this.shutdown(130));
+    process.on("SIGINT", () => {
+      if (this.closing) {
+        this.ui.close();
+        process.exit(130);
+
+        return;
+      }
+
+      void this.shutdown(130);
+    });
   }
 
   // Hands a prompt to the loop waiting for one. The entry is built even on the
@@ -473,7 +521,7 @@ class MainLoop {
       harness: this.harness,
       flows: this.flows,
       config: this.config,
-      exit: () => this.shutdown(0),
+      exit: () => void this.shutdown(0),
       clear: () => this.ui.render({ type: "reset" }),
       notify: (message) => this.ui.render({ type: "notice", message }),
       help: () => this.commands.helpText(),
@@ -492,17 +540,56 @@ class MainLoop {
     this.renderer?.close();
   }
 
-  // Persists the session, restores the terminal and exits.
-  protected shutdown(code: number) {
+  // Persists the session, closes its MCP servers, restores the terminal and
+  // exits.
+  //
+  // The close is awaited before process.exit: an MCP server is a child process,
+  // and exiting first would leave it running. A close that throws is reported
+  // instead of leaving the exit to skip.
+  //
+  // The two halves are driven apart on purpose, which is why this does not call
+  // `harness.shutdown()`: saving is a synchronous write that cannot hang, and a
+  // deadline over it could truncate `session.json`; the close is the half that
+  // can hang, so only it is raced against SHUTDOWN_TIMEOUT_MS. A failed save is
+  // reported and the close is attempted anyway.
+  //
+  // A second Ctrl-C during the wait leaves without waiting (see
+  // installKeyHandlers), so a hanging close costs at most one deadline.
+  protected async shutdown(code: number): Promise<void> {
     if (this.closing) return;
     this.closing = true;
 
+    // Painted before the wait, so the terminal does not look frozen between the
+    // Ctrl-C and the deadline: closing the framework and its servers is not
+    // instant even when nothing hangs.
+    this.ui.render({ type: "notice", message: "closing the MCP servers..." });
+
     try {
-      this.harness.shutdown();
+      this.harness.save();
     } catch (err) {
+      // The session of this run is lost; the close below still runs.
       this.ui.render({
         type: "notice",
         message: `failed to persist session on shutdown: ${String(err)}`,
+      });
+    }
+
+    try {
+      const outcome = await bounded(this.harness.closeMcp(), SHUTDOWN_TIMEOUT_MS);
+
+      if (outcome === TIMED_OUT) {
+        // Not "the signal was already sent": the SIGKILL of the escalation runs
+        // behind a sleep, on the path this stopped waiting for, so a server that
+        // ignores the signal can outlive the process.
+        this.ui.render({
+          type: "notice",
+          message: `closing the MCP servers is taking longer than ${SHUTDOWN_TIMEOUT_MS} ms: exiting anyway, a server that ignores the signal may outlive this process`,
+        });
+      }
+    } catch (err) {
+      this.ui.render({
+        type: "notice",
+        message: `failed to close the mcp servers: ${String(err)}`,
       });
     }
 

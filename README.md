@@ -253,7 +253,8 @@ Orden pensado para tener algo funcional cuanto antes y no perderse:
 5. **Registry genérico de tools** — schemas + validación de argumentos.
 6. **Un canal (Telegram)** por bus de eventos, desacoplado del loop.
 7. **Cron / recordatorios.**
-8. ~~**Skills** (SKILL.md + discovery)~~ ✅ hecho — ver [Skills](#skills-recetas-en-markdown); queda **MCP**.
+8. ~~**Skills** (SKILL.md + discovery)~~ ✅ hecho — ver [Skills](#skills-recetas-en-markdown);
+   ~~**MCP** (servidores stdio)~~ ✅ hecho — ver [MCP](#mcp).
 9. **Multi-proveedor** — openai-compat + anthropic messages.
 
 ## Dónde investigar
@@ -499,6 +500,119 @@ queda escrita en el agente y no se mete nada por detrás. `senior-architect`,
   de 32k de las tools sigue aplicando por encima.
 - El índice crece con el número de skills: por eso cada descripción se recorta a
   `maxIndexChars`.
+
+## MCP
+
+Un servidor [MCP](https://modelcontextprotocol.io) expone tools que el agente
+llama **como cualquier otra**: mismo loop, mismos resultados, misma política de
+aprobación. Cada tool remota llega con el nombre compuesto
+`mcp__<server>__<tool>` (server y tool saneados a `[a-z0-9_]`), así que nunca
+puede pisar una tool nativa.
+
+### Cómo se configura
+
+Todo vive en el bloque `mcp` de `config.json`. Está **apagado por defecto**
+(`enabled: false`): sin pedirlo, el harness no arranca ningún proceso.
+
+```json
+{
+  "mcp": {
+    "enabled": true,
+    "startupTimeoutMs": 10000,
+    "callTimeoutMs": 60000,
+    "maxDescriptionChars": 300,
+    "maxConcurrentCalls": 4,
+    "servers": {
+      "filesystem": {
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-filesystem", "/Users/yo/proyectos"],
+        "env": {},
+        "description": "Lee y escribe ficheros en mi carpeta de proyectos"
+      }
+    }
+  }
+}
+```
+
+| Campo                 | Qué hace                                                        |
+| --------------------- | --------------------------------------------------------------- |
+| `enabled`             | Interruptor maestro. Solo un `true` literal arranca servidores. |
+| `startupTimeoutMs`    | Presupuesto para lanzar el servidor y completar el handshake.   |
+| `callTimeoutMs`       | Presupuesto para un `tools/call` de ida y vuelta.               |
+| `maxDescriptionChars` | Recorte de cada descripción remota (van al prompt).             |
+| `maxConcurrentCalls`  | Llamadas en vuelo por servidor; el resto hace cola.             |
+
+Por servidor: `command` (obligatorio), `args`, `env`, `cwd`, `description`,
+`enabled` (para dejar una definición sin arrancarla) y `untrusted` (ver
+aprobaciones). Un servidor de GitHub, por ejemplo:
+
+```json
+{
+  "mcp": {
+    "enabled": true,
+    "servers": {
+      "github": {
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-github"],
+        "env": { "GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_..." }
+      }
+    }
+  }
+}
+```
+
+Un servidor inválido nunca rompe el arranque: se avisa por log y se ignora.
+
+### Cómo se apaga
+
+- `mcp.enabled: false` en la config — es el valor por defecto.
+- `RACSO_HARNESS_MCP_DISABLED=1` en el entorno (`1`, `true` o `yes`): apaga MCP
+  **aunque la config lo encienda**. Pensado para contenedores y CI, donde editar
+  la config no es una opción.
+
+### Cómo se usa desde el CLI
+
+- `/mcp` — lista cada servidor con transporte, estado (`idle`, `ready`, `failed`)
+  y número de tools, y debajo las tools descubiertas. Leer la lista **no arranca
+  nada**: la conexión es perezosa, se abre en el primer turno que necesita tools.
+- `/mcp reload` — cierra todas las conexiones, las olvida y vuelve a descubrir.
+  Es la única forma de recuperar un servidor que falló, porque el manager no
+  reintenta solo. **No relee `config.json`**: los servidores son los que había al
+  construir la sesión, así que uno añadido al fichero necesita reiniciar el CLI.
+
+### Aprobaciones
+
+Cada llamada remota pasa por el mismo gate de aprobación que las nativas, con la
+clase de efecto que el servidor declara de sí mismo:
+
+| Lo que declara la tool                 | Clase   |
+| -------------------------------------- | ------- |
+| el servidor es `untrusted`             | `exec`  |
+| `readOnlyHint: true`                   | `read`  |
+| `destructiveHint: true`                | `exec`  |
+| sin anotaciones (o ninguna de las dos) | `write` |
+
+Las pistas son autodeclaradas por el servidor, así que solo pueden **relajar** el
+gate, nunca endurecerlo: un servidor marcado `untrusted` es siempre `exec`
+anuncie lo que anuncie. El prompt enseña un resumen de los argumentos con los
+valores de claves sensibles (`token`, `secret`, `password`, `apiKey`…) tapados;
+es mejor esfuerzo, no una garantía.
+
+### Alcance
+
+Hoy MCP es **solo transporte stdio** (el campo `transport` existe para que los
+ficheros escritos ahora sigan siendo válidos cuando llegue HTTP) y **solo
+tools**: resources, prompts, sampling, elicitation, roots, logging y completions
+quedaron fuera por decisión de diseño. Las limitaciones conocidas —y las deudas
+abiertas— están registradas en `core/TODO.md` §11.
+
+### Aviso práctico
+
+`command` debe ser **el ejecutable solo**; los argumentos van en `args`. Un
+`command` con espacios (`"npx -y @modelcontextprotocol/server-filesystem"`, el
+copy-paste típico de otros clientes) se rechaza con un mensaje explícito que dice
+qué mover a `args`, porque aceptarlo solo fallaría más tarde con un `ENOENT`
+opaco. Los ejecutables cuya **ruta** lleva espacios tampoco se admiten todavía.
 
 ## Renderers, teclas y logs
 
