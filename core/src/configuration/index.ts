@@ -61,6 +61,34 @@ interface SkillsConfig {
   preload?: string[];
 }
 
+interface MemoryConfig {
+  // Master switch. Off by default: with false the prompt and the history are
+  // byte-identical to a build without memory.
+  enabled?: boolean;
+  // "none" | "local" | "http" | "mcp". Selects the implementation.
+  provider?: string;
+  // Default scope for what is written and searched.
+  project?: string;
+  // --- http ---
+  url?: string;
+  apikey?: string;
+  // --- mcp ---
+  command?: string;
+  args?: string[];
+  // --- local ---
+  path?: string;
+  // --- injection ---
+  injectOnStart?: boolean;
+  maxContextChars?: number;
+  maxHitChars?: number;
+  // --- capture ---
+  captureOnCompact?: boolean;
+  // --- tool ---
+  recallTool?: boolean;
+  // --- network ---
+  timeoutMs?: number;
+}
+
 interface SessionsConfig {
   // Master switch for spawning background child agents.
   spawnEnabled?: boolean;
@@ -121,6 +149,7 @@ interface HarnessConfig {
   skills?: SkillsConfig;
   // Remote MCP servers exposed as extra tools. Off unless enabled.
   mcp?: McpConfig;
+  memory?: MemoryConfig;
   ui?: UiConfig;
 }
 
@@ -162,6 +191,16 @@ const applyDefaults = (config: HarnessConfig): HarnessConfig => {
   config.mcp.startupTimeoutMs ??= 10_000;
   config.mcp.callTimeoutMs ??= 60_000;
   config.mcp.maxConcurrentCalls ??= 4;
+  config.memory ??= {};
+  config.memory.enabled ??= false;
+  config.memory.provider ??= "local";
+  config.memory.injectOnStart ??= true;
+  config.memory.maxContextChars ??= 2000;
+  config.memory.maxHitChars ??= 1200;
+  config.memory.captureOnCompact ??= true;
+  config.memory.recallTool ??= true;
+  config.memory.timeoutMs ??= 5000;
+  config.memory.path ??= path.join(harnessHome(), "memory.db");
   config.ui ??= {};
   config.ui.theme ??= {};
   config.ui.theme.user ??= { color: "cyan" };
@@ -315,6 +354,7 @@ export type {
   AgentsConfig,
   HarnessConfig,
   McpConfig,
+  MemoryConfig,
   UiConfig,
   UiRoleStyle,
   UiTheme,

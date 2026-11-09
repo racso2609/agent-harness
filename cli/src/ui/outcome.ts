@@ -47,14 +47,16 @@ export const formatSpawnOutcome = (handle: {
 };
 
 // Closing line of a turn. A completed turn says nothing: the answer is the
-// summary and the transcript stays clean. Anything else reports the status,
-// what is still pending and the concrete next step.
+// summary and the transcript stays clean. That holds with `more` and without
+// it, because the answer already tells what happened and the next turn closes
+// in its place.
 //
-// `more` is true when the session will run another turn on its own (nobody is
-// waiting for the user): the close says so instead of leaving a still screen
-// that reads as a stopped process. A completed turn stays silent either way,
-// because the answer already says what happened and the next turn closes in
-// its place.
+// Anything else reports the status, what is still pending and the concrete
+// next step. `more` is the only thing that adds CONTINUING_ALONE_NOTICE to
+// that close: the function has no notion of "the last turn of the chain"
+// versus "an intermediate turn". Both close with exactly the same text; the
+// notice is the only difference, and whether it appears is decided by whoever
+// calls the function, not by the format itself.
 export const formatTurnOutcome = (
   outcome?: {
     status: string;

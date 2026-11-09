@@ -5,6 +5,7 @@ import type { SkillRegistry } from "@/skills";
 import { logger } from "@/utils/logger";
 import { ListDirTool } from "./listDir";
 import { ReadFileTool } from "./readFile";
+import { RecallTool } from "./recall";
 import { ShellTool } from "./shell";
 import { SpawnTool } from "./spawn";
 import {
@@ -46,8 +47,8 @@ export const compositeName = (name: string): string | undefined => {
 // When allowedTools is given, only those tools are registered; an empty list
 // disables tools entirely.
 //
-// use_skill is only offered to agents that declare no allowlist. MCP is
-// different: an agent that lists its tools gets exactly the remote names it
+// use_skill and recall are only offered to agents that declare no allowlist. MCP
+// is different: an agent that lists its tools gets exactly the remote names it
 // names, and nothing else, because the provider filters by that list.
 //
 // LIMITATION, MCP with an allowlist: a named mcp__<server>__<tool> resolves only
@@ -81,6 +82,10 @@ export const createToolRegistry = (
             .map((allow) => compositeName(allow))
             .filter((entry): entry is string => entry !== undefined),
         );
+  const recallUsable =
+    allowedTools === undefined &&
+    config.config.memory?.enabled === true &&
+    config.config.memory?.recallTool !== false;
 
   const all = [
     new ShellTool({
@@ -92,6 +97,7 @@ export const createToolRegistry = (
     new ListDirTool(),
     new SpawnTool(),
     ...(skillsUsable ? [new UseSkillTool()] : []),
+    ...(recallUsable ? [new RecallTool()] : []),
   ];
 
   // One source for the names a remote tool must not take: every native name,
@@ -130,8 +136,7 @@ export const createToolRegistry = (
   return registry;
 };
 
-export { ToolRegistry, UseSkillTool };
-export type { ToolProvider, ToolRegistryOptions } from "./ToolRegistry";
+export { RecallTool, ToolRegistry, UseSkillTool };
 export type { ToolRegistryWiring };
 export type {
   ApprovalDecision,

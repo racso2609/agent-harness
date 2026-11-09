@@ -1,4 +1,8 @@
-import { describe, expect, it, vi } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { Config } from "@racso2609/core";
 import {
   CommandDefinition,
   CommandContext,
@@ -85,6 +89,13 @@ const makeContext = (): CommandContext => ({
     waitSpawn: vi.fn(async () => undefined),
     collectSpawns: vi.fn(async () => []),
     compactSession: vi.fn(async () => true),
+    memoryStatus: vi.fn(async () => ({
+      provider: "local",
+      ok: true,
+      project: "racso2609/agent-harness",
+      projectSource: "git",
+    })),
+    searchMemory: vi.fn(async () => []),
     listMcpServers: vi.fn(() => []),
     reloadMcp: vi.fn(async () => []),
     mcpTools: vi.fn(() => []),
@@ -98,10 +109,34 @@ const makeContext = (): CommandContext => ({
     changeAgent: vi.fn(async () => true),
     changeSession: vi.fn(async () => true),
   },
+  config: tempConfig(),
   exit: vi.fn(),
   clear: vi.fn(),
   notify: vi.fn(),
   help: () => "/help — List available commands",
+});
+
+let dir: string;
+
+const configPath = () => path.join(dir, "config.json");
+
+// Config reads RACSO_HARNESS_CONFIG_LOCATION once, at import time, so the env
+// var alone does not reach it here: the location is pointed at the temp dir on
+// the instance, which is what writeConfig() uses.
+const tempConfig = () => {
+  const config = new Config();
+  config.configLocation = configPath();
+  return config;
+};
+
+beforeEach(() => {
+  dir = fs.mkdtempSync(path.join(os.tmpdir(), "racso-cli-memory-"));
+  vi.stubEnv("RACSO_HARNESS_CONFIG_LOCATION", configPath());
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+  fs.rmSync(dir, { recursive: true, force: true });
 });
 
 describe("CommandRepository", () => {
@@ -122,6 +157,7 @@ describe("CommandRepository", () => {
       "compact",
       "skills",
       "skill",
+      "memory",
       "mcp",
       "status",
       "spawn",
@@ -440,5 +476,110 @@ describe("CommandRepository", () => {
     new CommandRepository().find("skill")?.run(context, []);
 
     expect(context.notify).toHaveBeenCalledWith("Usage: /skill <id> | /skill reload");
+  });
+
+  it("reports a down memory backend without throwing", async () => {
+    const context = makeContext();
+    // Pinned: must not depend on this machine's config.json.
+    context.config.config.memory = { enabled: false };
+    vi.mocked(context.harness.memoryStatus).mockResolvedValueOnce({
+      provider: "http",
+      ok: false,
+      detail: "ECONNREFUSED",
+    });
+
+    await expect(new CommandRepository().find("memory")?.run(context, [])).resolves.toBeUndefined();
+    expect(context.notify).toHaveBeenCalledWith(
+      "Memory: http (down)\nDetail: ECONNREFUSED\nEnabled: off",
+    );
+  });
+
+  it("reports an up memory backend with its project", async () => {
+    const context = makeContext();
+    // Pinned: must not depend on this machine's config.json.
+    context.config.config.memory = { enabled: false };
+
+    await new CommandRepository().find("memory")?.run(context, []);
+
+    expect(context.notify).toHaveBeenCalledWith(
+      "Memory: local (ok)\nProject: racso2609/agent-harness (git)\nEnabled: off",
+    );
+  });
+
+  it("searches memory without calling the model or opening a turn", async () => {
+    const context = makeContext();
+    const askCalls = vi.mocked(context.harness.ask).mock.calls.length;
+    const statusCalls = vi.mocked(context.harness.status).mock.calls.length;
+
+    await new CommandRepository().run("/memory search deploy", context);
+
+    expect(context.harness.searchMemory).toHaveBeenCalledWith("deploy");
+    // A turn would call the model and re-read the session status; neither may
+    // happen, which is what "no history entry" means from the CLI side.
+    expect(context.harness.ask).toHaveBeenCalledTimes(askCalls);
+    expect(vi.mocked(context.harness.status).mock.calls.length).toBe(statusCalls);
+    expect(context.notify).toHaveBeenCalledWith('No memories found for: "deploy"');
+  });
+
+  it("formats the memory hits one bullet per hit", async () => {
+    const context = makeContext();
+    vi.mocked(context.harness.searchMemory).mockResolvedValueOnce([
+      {
+        id: "mem-1",
+        kind: "decision",
+        scope: "project",
+        title: "Deploy flow",
+        content: "Releases go through the tag pipeline.",
+      },
+    ]);
+
+    await new CommandRepository().run("/memory search deploy", context);
+
+    expect(context.notify).toHaveBeenCalledWith(
+      "- [decision] **Deploy flow**: Releases go through the tag pipeline.",
+    );
+  });
+
+  it("explains the memory search usage when called with no query", async () => {
+    const context = makeContext();
+
+    await new CommandRepository().run("/memory search", context);
+
+    expect(context.notify).toHaveBeenCalledWith("Usage: /memory search <query>");
+    expect(context.harness.searchMemory).not.toHaveBeenCalled();
+  });
+
+  it("turns memory off and persists it to the config file", async () => {
+    const context = makeContext();
+    context.config = tempConfig();
+
+    await new CommandRepository().run("/memory off", context);
+
+    expect(context.config.config.memory.enabled).toBe(false);
+    const written = JSON.parse(fs.readFileSync(configPath(), "utf8"));
+    expect(written.memory.enabled).toBe(false);
+    expect(context.notify).toHaveBeenCalledWith("Memory off (takes effect on the next session)");
+  });
+
+  it("turns memory on and persists it to the config file", async () => {
+    const context = makeContext();
+    context.config = tempConfig();
+
+    await new CommandRepository().run("/memory on", context);
+
+    expect(context.config.config.memory.enabled).toBe(true);
+    const written = JSON.parse(fs.readFileSync(configPath(), "utf8"));
+    expect(written.memory.enabled).toBe(true);
+    expect(context.notify).toHaveBeenCalledWith("Memory on (takes effect on the next session)");
+  });
+
+  it("explains the memory usage for an unknown action", async () => {
+    const context = makeContext();
+
+    await new CommandRepository().run("/memory nope", context);
+
+    expect(context.notify).toHaveBeenCalledWith(
+      "Usage: /memory | /memory search <query> | /memory on|off",
+    );
   });
 });

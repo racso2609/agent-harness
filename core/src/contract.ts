@@ -1,4 +1,5 @@
 import type { AgentSummary } from "@/agents";
+import type { MemoryHit } from "@/memory";
 import type { SkillSummary } from "@/skills";
 import type { Config, ProviderConfig, ProviderDetail } from "@/configuration";
 import type { McpServerSummary, McpToolSummary } from "@/mcp";
@@ -107,6 +108,12 @@ export interface IHarness {
   // Re-scans the skills directories and refreshes the system prompt.
   reloadSkills(): SkillSummary[];
   setAgent(agentId: string): Promise<boolean>;
+
+  // --- memory ---
+  // Health of the configured memory backend, for diagnostics.
+  memoryStatus(): Promise<{ provider: string; ok: boolean; detail?: string }>;
+  // Searches the persistent memory. Empty when memory is off or down.
+  searchMemory(query: string, limit?: number): Promise<MemoryHit[]>;
 
   // --- mcp ---
   // One entry per configured MCP server (id, transport, connection status,

@@ -29,6 +29,17 @@ ask **one** question ("which paths, or which range?") and **stop**. Do not
 guess, do not inspect the working tree to infer it, and do not fall back to
 "everything that changed".
 
+Documentation changes, mass renames and moved files must not reopen the scope.
+For a documentation-only change the scope is still the path list: the review
+checks the claims inside those files against the tree — do the cited symbols
+exist, do the links resolve, is the number in the text the number in the code —
+and nothing else, not even when no context seems to make sense without it. When
+the change moves content between files (a file split, a history extracted to a
+journal) the scope is **both** sides: the file that lost the content and the
+file that gained it — exactly two paths, not the repo. A review that cannot be
+given a path list or a range is not a review: ask the one question, stop, and
+say in the report that no scope was provided.
+
 ### Reading budget — per level
 
 - Read the diff of the scope.

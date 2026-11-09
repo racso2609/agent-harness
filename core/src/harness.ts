@@ -105,6 +105,14 @@ class Harness implements IHarness {
     return this.session.setAgent(agentId);
   }
 
+  memoryStatus() {
+    return this.session.memoryStatus();
+  }
+
+  searchMemory(query: string, limit?: number) {
+    return this.session.searchMemory(query, limit);
+  }
+
   listMcpServers() {
     return this.session.listMcpServers();
   }
@@ -163,8 +171,9 @@ class Harness implements IHarness {
     return this.session.compactSession();
   }
 
-  // Persists the session and closes every MCP connection; the process
-  // lifecycle stays with the CLI, which awaits this before process.exit.
+  // Persists the session, then closes every MCP connection and the memory
+  // backend; the process lifecycle stays with the CLI, which awaits this
+  // before process.exit.
   //
   // The close is awaited instead of fired and forgotten because an MCP server
   // is a child process: exiting first would leave it running (re-parented to
@@ -196,7 +205,18 @@ class Harness implements IHarness {
       closeError = error;
     }
 
-    const failure = saveError ?? closeError;
+    // Memory holds a database handle and an HTTP pool: both are released here,
+    // after the MCP servers, and a failure to release them does not stop the
+    // other two halves from running. It is the last of the three reported: a
+    // leaked handle costs less than a lost session or an orphaned server.
+    let memoryError: unknown;
+    try {
+      await this.session.closeMemory();
+    } catch (error) {
+      memoryError = error;
+    }
+
+    const failure = saveError ?? closeError ?? memoryError;
     if (failure !== undefined) throw failure;
   }
 }
