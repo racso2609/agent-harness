@@ -20,6 +20,7 @@ dependencias. Formato de cada lista: skill `core/skills/todo-format.md`.
 | TUI de pantalla completa y feedback del turno              | `cli/TODO.md` §P0–P3                                 | P0–P3 cerrados salvo las tareas nuevas abiertas en §P1 y §P3 |
 | Empaquetado y publicación (F0): GitHub Packages + Releases | `cli/TODO.md` §P4, plan en `docs/INSTALL.md`         | nuevo, c3                                                    |
 | Continuación automática tras un hijo delegado              | `cli/TODO.md` §P6 + espejo en `core/TODO.md` §9      | nuevo, c3                                                    |
+| MCP: servidores de tools por stdio                         | `core/TODO.md` §11, límites y deudas en §11.1        | MVP cerrado, deudas abiertas                                 |
 
 ## Origen de las tareas nuevas
 

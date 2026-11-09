@@ -110,7 +110,7 @@
 - define how the memory will work
 - select memory provider (postgress, enmgram, etc)
 
-6. mcp connections
+6. mcp connections — ✅ hecho: §11 (stdio y tools), deudas abiertas en §11.1.
 
 7. RAG integration??
 
@@ -209,11 +209,11 @@
       Depends on: nada.
 
 - [ ] **Devolver los informes largos de un hijo como artefacto, no como mensaje**
-`formatSpawnResult` (`SessionManager.ts:690`) trunca el resultado del hijo antes de inyectarlo en el history del padre con `truncateText` (`SessionManager.ts:75`), que corta a `sessions.childResultMaxChars` (default 2000) y añade `…`; medido en una sesión real, un hijo devolvió **4360 caracteres** y el padre recibió **2000**, así que los informes de agentes revisores (hallazgos con severidad y `fichero:línea`) no caben y el padre decide sobre un texto cortado a mitad de frase.
-El texto íntegro **no se pierde**: se persiste en `~/.racso-harness/sessions/<id>.json` → `spawns[].result`, pero el padre no lo ve.
-Done when: un hijo cuyo resultado supere `childResultMaxChars` deja el texto íntegro en un fichero (bajo el directorio de la sesión o en la ruta que el propio hijo declare; el padre la conoce), el mensaje `system` inyectado en el padre contiene esa ruta más un resumen de como máximo N caracteres, y un test en `core/tests/session/SessionManager.spec.ts` fija ambos hechos (texto completo recuperable desde la ruta + mensaje del padre acotado a N).
-Alternativa descartada: subir `childResultMaxChars` sólo mueve el problema (más contexto consumido por cada hijo, y con `maxChildren: 4` el coste se multiplica), no lo resuelve.
-Depends on: nada.
+      `formatSpawnResult` (`SessionManager.ts:690`) trunca el resultado del hijo antes de inyectarlo en el history del padre con `truncateText` (`SessionManager.ts:75`), que corta a `sessions.childResultMaxChars` (default 2000) y añade `…`; medido en una sesión real, un hijo devolvió **4360 caracteres** y el padre recibió **2000**, así que los informes de agentes revisores (hallazgos con severidad y `fichero:línea`) no caben y el padre decide sobre un texto cortado a mitad de frase.
+      El texto íntegro **no se pierde**: se persiste en `~/.racso-harness/sessions/<id>.json` → `spawns[].result`, pero el padre no lo ve.
+      Done when: un hijo cuyo resultado supere `childResultMaxChars` deja el texto íntegro en un fichero (bajo el directorio de la sesión o en la ruta que el propio hijo declare; el padre la conoce), el mensaje `system` inyectado en el padre contiene esa ruta más un resumen de como máximo N caracteres, y un test en `core/tests/session/SessionManager.spec.ts` fija ambos hechos (texto completo recuperable desde la ruta + mensaje del padre acotado a N).
+      Alternativa descartada: subir `childResultMaxChars` sólo mueve el problema (más contexto consumido por cada hijo, y con `maxChildren: 4` el coste se multiplica), no lo resuelve.
+      Depends on: nada.
 
 ### 9.1 orden sugerido
 
@@ -340,6 +340,73 @@ La referencia del orden es `docs/ARCHITECTURE.md` (fases F0–F6); aquí sólo s
 - **«Exponer un servidor HTTP con `spawn` y `status`»** — se reemplaza por el servidor `node:http` + SSE de F2, que sirve turnos y stream, no `spawn` suelto.
 - **«Proteger el gateway con token»** — ninguna fase de `docs/ARCHITECTURE.md` lo decide → pasa a `Preguntas abiertas` de esta sección en vez de quedar como tarea.
 - **«Definir la política de aprobaciones de un trabajo sin usuario»** — decidido: `ApprovalQueue` por sesión con TTL 120 s y `deny` por defecto (decisión 3) → queda como tarea de F4.
+
+11. MCP (servidores de tools por stdio) — ✅ MVP cerrado, deudas anotadas
+
+ESTADO: **§11 cerrado como MVP** (fase 5 de 5, solo documentación). MCP está
+funcionalmente completo: config, conexión stdio, tools con aprobaciones, API
+pública (`listMcpServers`, `reloadMcp`, `mcpTools`, `closeMcp` en `IHarness`),
+`/mcp` y `/mcp reload` en el CLI y cierre limpio al salir. Lo que queda abierto
+son límites de alcance y deudas medidas, no trabajo a medias.
+
+- [x] **tipos + config** — `mcp/McpConfig.ts` (`McpConfig`, `McpServerConfig`, `ResolvedMcpServer`) y los siete campos con sus defaults (`enabled`, `servers`, `maxDescriptionChars`, `maxToolsIndexChars`, `startupTimeoutMs`, `callTimeoutMs`, `maxConcurrentCalls`). `resolveMcpServers` nunca lanza: un servidor inválido se avisa y se ignora, y solo un `enabled: true` literal arranca algo.
+- [x] **nombres compuestos** — `mcp/mcpNaming.ts` (`mcp__<server>__<tool>`, saneado a `[a-z0-9_]` y colapso de `_` en el nombre remoto para que el parseo sea reversible). Tests en `tests/mcp/mcpNaming.spec.ts`.
+- [x] **conexión stdio** — `mcp/McpConnection.ts` sobre `@modelcontextprotocol/sdk`: handshake con `startupTimeoutMs`, `tools/list` paginado y deduplicado, `tools/call` con `callTimeoutMs`, `AbortSignal`, progreso y cierre del transporte en el camino de fallo.
+- [x] **kill del árbol de procesos** — `mcp/killTree.ts`: SIGTERM a cada pid del árbol (recorrido con `ps`, porque el transport no usa `detached`) y SIGKILL a los que sigan vivos tras `KILL_GRACE_MS`.
+- [x] **manager y tools** — `mcp/McpManager.ts`: una conexión perezosa por servidor, descubrimiento asíncrono con dedupe por `generation`, `invalidate()` para recargar, `CallLimiter` por servidor y `close()` terminal e idempotente. Cada tool remota se ofrece como `Tool` del harness con el gate de aprobación dentro de `execute`.
+- [x] **proveedor en el registry** — `ToolRegistry.addProvider()` y `createToolRegistry` instalan un solo proveedor MCP, con el filtro de allowlist y los nombres nativos para que una tool remota no pueda pisar una de casa.
+- [x] **superficie pública** — `IHarness.listMcpServers()`, `reloadMcp()`, `mcpTools()` y `closeMcp()`, más el cierre en `shutdown()` y en el guardado fallido del CLI.
+- [x] **CLI** — `/mcp` (servidores y tools, sin arrancar nada) y `/mcp reload`; el apagado del proceso espera al cierre con tope de tiempo.
+- [x] **kill-switch por entorno** — `RACSO_HARNESS_MCP_DISABLED` (`1`/`true`/`yes`) apaga MCP aunque la config lo encienda.
+- [x] **tests** — `tests/mcp/` (config, naming, schema, env, killTree, connection contra un fixture stdio escrito a mano, manager, registry y sesión), con el barrido de huérfanos al final de la suite.
+
+11.1 límites y deudas abiertas
+
+- [ ] **Soportar transports remotos (HTTP / SSE / streamable HTTP)**
+- Solo existe stdio: el tipo `McpTransportName` y el campo `transport` se escribieron con un único miembro justamente para que los `config.json` de hoy sigan valiendo cuando se añada el resto.
+- Done when: un `config.json` con `transport: "http"` y una `url` arranca una conexión contra un servidor HTTP de prueba y `resolveMcpServers` deja de descartarlo con `unsupported transport`, con test en `tests/mcp/McpConfig.spec.ts` y otro en `tests/mcp/mcpConnection.spec.ts`.
+
+- [ ] **Añadir resources, prompts y el resto de primitivas MCP**
+- Hoy solo se habla `tools/*`: resources, prompts, sampling, elicitation, roots, logging y completions quedaron fuera por decisión de diseño.
+- Done when: `McpConnection` expone `resources/list` y `prompts/list`, el CLI los muestra y un test lo fija contra el fixture; antes hay que decidir si resources y prompts se ofrecen como tools o como contexto inyectado.
+
+- [ ] **Releer `config.json` en `reloadMcp`**
+- `reloadMcp` invalida conexiones y redescubre, pero los servidores son los que la config tenía al construir la sesión: un servidor añadido al fichero obliga a reiniciar el CLI.
+- Done when: añadir un servidor a `config.json` con la sesión abierta y ejecutar `/mcp reload` lo lista y lo arranca, con test en `tests/mcp/sessionMcp.spec.ts` que fije que el manager se reconstruye desde el fichero.
+
+- [ ] **Fijar la gracia de `KILL_GRACE_MS` en el camino real de `doClose()`**
+- El fixture sale al cerrarse su stdin, así que `doClose() → killProcess() → killProcessTree` nunca llega a gastar la gracia y la única evidencia es el test que llama a `killProcessTree` con el mismo `KILL_GRACE_MS`, documentado como tal en `tests/mcp/mcpConnection.spec.ts`.
+- Done when: un servidor de prueba que ignora el final de stdin y no muere con SIGTERM deja medir el hueco entre el SIGTERM y el SIGKILL a través de `close()`, y un test lo fija sin llamar a `killProcessTree` directamente.
+
+- [ ] **Hacer que el guard `isClosed()` de `reloadMcp` discrimine**
+- Hoy es decorativo: `doClose()` vacía `state`, así que un manager cerrado ya devuelve `[]`, ningún test distingue quitarlo y el código lo dice tal cual.
+- Done when: un test falla al borrar el guard o, si no hay forma de que discrimine, se borra el guard y su comentario.
+
+- [ ] **Resolver la allowlist MCP en el primer `specs()`**
+- Un agente con `tools:` recibe exactamente los `mcp__<server>__<tool>` que nombra, pero solo desde el segundo lookup: el descubrimiento es asíncrono y un nombre que no resuelve a tiempo falla con `Unknown tool`, igual que una errata.
+- Done when: un agente con allowlist recibe su tool MCP en el primer turno, con test que fije que el primer `specs()` ya la contiene; la vía natural es esperar al descubrimiento en el arranque de la sesión cuando la allowlist nombra tools `mcp__*`.
+
+- [ ] **Detectar nietos huérfanos de un servidor muerto por SIGKILL externo**
+- Si alguien mata el servidor por fuera, sus hijos quedan re-parentados a init y el harness no puede matar lo que el padre dejó atrás.
+- Done when: un barrido encuentra los procesos marcados con el `id` del servidor y avisa por log y en `listMcpServers()`, con test que mate el servidor con SIGKILL y compruebe el aviso. Lo que ya se garantiza es que la fuga nunca es silenciosa: el barrido de los tests la detecta y falla.
+
+- [ ] **Recortar el peso de `@modelcontextprotocol/sdk`**
+- La dependencia cuesta +80 paquetes en el store (329 → 409) porque arrastra express, hono, cors, jose y eventsource para los transports remotos y el lado servidor que no se usan; en runtime solo se cargan `cross-spawn`, `zod` y ajv.
+- Done when: el store baja de 409 sin perder la conexión stdio, o queda escrito por qué no se puede; la vía a medir es importar solo los subpaths de cliente y stdio y comprobar que el paquete no carga express ni hono.
+
+- [ ] **Usar o retirar `mcp.maxToolsIndexChars`**
+- Los defaults le dan 2000 y ningún lector lo consume: el índice de tools remotas no se recorta con él, así que el campo promete un comportamiento que no existe.
+- Done when: el índice de tools MCP entregado al modelo respeta `maxToolsIndexChars`, con test que fije el recorte, o el campo desaparece de `McpConfig` y de la documentación.
+
+- [ ] **Documentar MCP en `CONTRACT.md`**
+- `CONTRACT.md` describe el SDK publicado y hoy no contiene una sola referencia a MCP, así que los cuatro métodos nuevos de `IHarness` solo existen para quien lea el fuente.
+- Done when: `CONTRACT.md` describe el bloque `mcp` de la config, `listMcpServers`/`reloadMcp`/`mcpTools` y el contrato de `closeMcp` (idempotente, terminal, llamado desde `shutdown()`).
+
+11.2 descartados de la sección 11
+
+- **Reintentar solo un servidor que falló** — un reintento automático arrancaría un proceso en cada `tools()`; el manager no reintenta por diseño y lo que hay es `invalidate()`, expuesto por `reloadMcp()` y `/mcp reload`.
+- **Usar `sync.Once` para el init de MCP** — es la trampa de picoclaw listada en el README: recargar config lo mataría para siempre. El manager no tiene estado de módulo y su único guard es la promesa de descubrimiento en vuelo.
+- **Aceptar un `command` con espacios y partirlo en programa + args** — no siempre es un copy-paste de otro cliente: una ruta como `/Applications/My App/bin/server` es un ejecutable legítimo y adivinar mal cambia qué se ejecuta. Se rechaza con un mensaje explícito que dice qué mover a `args`.
 
 ## Preguntas abiertas de la sección 10
 
