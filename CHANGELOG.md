@@ -4,6 +4,23 @@ Todos los cambios notables de este proyecto se documentan en este archivo. El fo
 
 ## [Unreleased]
 
+## [1.1.2] - 2026-11-10
+
+### Añadido
+
+- **Parar un agente hijo en marcha**: `IHarness.cancelSpawn(spawnId)` interrumpe un hijo que está corriendo y `SpawnStatus` gana el estado `cancelled`. La cancelación no se queda en la marca: la señal de abort viaja hasta la petición que el hijo tiene en vuelo en el proveedor, así que una respuesta en streaming se corta en vez de esperarse, y las herramientas que la respetan matan su trabajo (el proceso de `shell` muere, aunque hoy lo reporte como un `timed out`). Un abort nunca se reintenta, porque reintentar es política de quien llama y una cancelación no es un fallo pasajero. Un hijo cancelado se asienta como tal y no arrastra el error del runner, deja de contar como trabajo pendiente para el padre (no vuelve tras un `/resume`) pero sí queda en el historial con la hora a la que se pidió pararlo. La petición se rechaza, sin lanzar, para un hijo desconocido, uno ya terminado o uno restaurado de una ejecución anterior, y aun así el handle apunta la hora de la cancelación en `cancelRequestedAt`: el usuario sí se rindió con ese hijo, y el handle lo dice.
+- **`/stop` en el prompt**: sin argumentos para el único hijo vivo de golpe o un selector cuando hay varios, cada uno etiquetado con su identificador, su agente y su prompt; y `/stop <spawnId>` para uno concreto. Una parada que el núcleo no puede entregar se reporta como tal en lugar de anunciar un final que no va a ocurrir, y cerrar el selector no cancela nada (`Stop canceled`). La franja de progreso distingue además el hijo cancelado con un círculo tachado en amarillo, ni el spinner de uno vivo ni la cruz roja de uno fallido, porque cancelar es algo que pidió el usuario y no una avería.
+
+### Cambiado
+
+- **El mensaje que recibe el padre cuando un hijo supera `sessions.childResultMaxChars` cambia de forma**: antes era el informe cortado a secas; ahora lleva una cabecera, un `Resumen` de una línea, `Informe completo (M caracteres) en: <ruta>`, `Ajustado a N de M caracteres.`, la instrucción explícita de leer el fichero, un `---` y el cuerpo acotado. Por debajo del tope el mensaje sigue siendo byte a byte el mismo que antes, así que nada de lo que ya se leía cambia.
+- **Aparece un directorio nuevo en el workspace del usuario**: `<workspace>/.racso-harness/artifacts/<sessionId>/<spawnId>.md` guarda el informe íntegro de cada hijo cuyo resultado supere `sessions.childResultMaxChars`; por debajo del tope no se escribe fichero, y un hijo cancelado no tiene informe que guardar. El `.gitignore` de este repositorio solo ignora `.racso-harness/` cuando el workspace es el propio repositorio, así que en el workspace de un usuario esos ficheros quedan sin ignorar y aparecerán como no rastreados en su control de versiones.
+
+### Corregido
+
+- **El informe de un hijo largo llegaba cortado al padre**: el mensaje que recibe el padre se recortaba a `sessions.childResultMaxChars` (2000 caracteres por defecto) y el padre decidía sobre un texto cortado a mitad de frase. Ahora el informe completo se escribe en `<workspace>/.racso-harness/artifacts/<sessionId>/<spawnId>.md`, dentro del workspace porque es donde las herramientas del padre pueden leer, y el mensaje lleva la ruta absoluta, un resumen de una línea, la longitud completa y la instrucción explícita de leer el fichero en vez de suponerlo. Por debajo del tope el mensaje es exactamente el de antes y no se escribe nada. La escritura es best-effort: si falla, la entrega degrada al mensaje acotado sin ruta, nunca se publica una ruta que no exista y no se escribe fuera del workspace ni a través de un symlink plantado. `SpawnHandle.resultChars` registra la longitud real al asentarse, así que quien consume el handle sabe que hubo recorte sin mirar si el texto acaba en puntos suspensivos.
+- **El corte de la respuesta en streaming ya no se confunde con un fallo**: el proveedor relanza el motivo de la señal en vez de un error de aborto pelado y descarta el cuerpo a medio leer, de modo que lo que se reporta es la cancelación y no el error del transporte.
+
 ## [1.1.1] - 2026-11-09
 
 ### Añadido
@@ -52,7 +69,8 @@ Todos los cambios notables de este proyecto se documentan en este archivo. El fo
 
 Primera versión: `@racso/core` y `@racso/cli` (renombrados a `@racso2609/*` en 1.1.0). El CLI (privado, no instalable) traía el stack de TUI y la persistencia de sesión. El contrato público del harness (`createHarness`, `IHarness`, `Config`, `SessionStore`), ya exportado en 1.0.0, se vuelve consumible de verdad en 1.1.0 al repararse el scope.
 
-[Unreleased]: https://github.com/racso2609/agent-harness/compare/v1.1.1...HEAD
+[Unreleased]: https://github.com/racso2609/agent-harness/compare/v1.1.2...HEAD
+[1.1.2]: https://github.com/racso2609/agent-harness/compare/v1.1.1...v1.1.2
 [1.1.1]: https://github.com/racso2609/agent-harness/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/racso2609/agent-harness/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/racso2609/agent-harness/releases/tag/v1.0.0

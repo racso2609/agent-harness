@@ -7,7 +7,9 @@ paquete. Es una mudanza: el cuerpo de cada ítem se copia **literal** del TODO o
 (con sus `hecho:`, `decisión:`, `tests:`, `revert:`, `pendiente:`, `riesgo conocido:`,
 `nota:` y párrafos), nunca se resume ni se recorta. Los TODO vivos
 ([`cli/TODO.md`](../../cli/TODO.md), [`core/TODO.md`](../../core/TODO.md),
-[`gateway/TODO.md`](../../gateway/TODO.md)) se quedan solo con lo abierto.
+[`gateway/TODO.md`](../../gateway/TODO.md)) se quedan solo con lo abierto. La única excepción
+es [`release/`](release/): no es sumidero de ítems del TODO, sino el registro de cada versión
+publicada.
 
 ## Fragmentos
 
@@ -26,8 +28,19 @@ paquete. Es una mudanza: el cuerpo de cada ítem se copia **literal** del TODO o
 | 2026-11-07 | core | [0–8](core/0-8-mvp.md) | split core/cli, session manager, agentes, tooling §4.1–4.3, MVP lazy de skills | — |
 | 2026-11-07 | core | [§8–§9](core/s8-s9-reporting.md) | Contrato de spawn público, listener, estado consultable, persistencia, progreso, `onOutput`, cierre | `baf5b93`, `267d271`, `c48b9a1`, `d92b818` |
 
+## Releases
+
+No son sumidero de ítems del TODO: cada fichero de `release/` registra qué entra en una
+versión publicada (los commits, las decisiones y las deudas), con el mismo tono y los mismos
+campos que los fragmentos por paquete. Viven aquí para que el mapa quede en un solo índice.
+
+| Fecha | Release | Qué contiene | Commits |
+| --- | --- | --- | --- |
+| 2026-11-10 | [v1.1.2](release/v1.1.2.md) | Cancelar un hijo en vuelo (`cancelSpawn` + estado `cancelled`), `/stop` en el prompt, informe largo del hijo como artefacto con ruta | `19580a6`, `5cd3f59`, `de3e65a` |
+
 ## Convención
 
 1. Un fragmento por **tema/fase**, nunca por ítem; si pasa de 120 líneas se parte por fase con sufijo (`p4-packaging.md` / `p4-publish.md`).
 2. Cada ítem entra como `### <Título exacto del TODO>` seguido de su cuerpo original **literal**: esto es un sumidero, no un resumen.
 3. El TODO vivo no enlaza cada fragmento desde cada ítem: este índice es el mapa; el TODO enlaza el fragmento de cada sección.
+4. La excepción es `release/`: sus ficheros no son ítems del TODO, sino el registro de una versión publicada, así que su `###` **no** es el título literal de un ítem.
