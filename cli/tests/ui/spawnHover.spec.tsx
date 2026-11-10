@@ -153,15 +153,18 @@ describe("the spawn strip hover", () => {
   it("never highlights a settled or a restored child", async () => {
     // A restored child comes from the history, not from the live handles: the
     // strip stamps `restored` on every row it takes from there.
-    const app = mount(
-      [child("done1", "done")],
-      notices(["hello"]),
-      [child("rest1", "running")],
-      notices(["hello"]),
-      [],
-    );
+    const app = mount([child("live1", "running"), child("done1", "done")], notices(["hello"]), [
+      child("rest1", "running"),
+    ]);
     await settle();
 
+    // The positive anchor comes first: a running child of this run, in the same
+    // layout, has to light up. Without it a geometry of `null` (or a tap that
+    // never ran) would leave every row unlit too, and the assertions below would
+    // pass for exactly the wrong reason.
+    app.stdin.write(move(app.rowOf("live1")));
+    await settle();
+    const overLive = app.frame();
     app.stdin.write(move(app.rowOf("done1")));
     await settle();
     const overDone = app.frame();
@@ -170,13 +173,14 @@ describe("the spawn strip hover", () => {
     const overRestored = app.frame();
     app.unmount();
 
+    expect(overLive).toContain(HOVER_GLYPH);
     expect(overDone).not.toContain(HOVER_GLYPH);
     expect(overRestored).not.toContain(HOVER_GLYPH);
   });
 
-  it("does not repaint for a press or a release", async () => {
-    // The highlight follows motion only; a click is a decision this slice does
-    // not take yet, so the two of them must leave the frame untouched.
+  it("does not highlight for a press or a release", async () => {
+    // The highlight follows motion only, so a press and a release (which do
+    // stop the child, see spawnClick.spec) must leave the row unlit.
     const app = mount([child("aaa", "running"), child("bbb", "running")]);
     await settle();
 

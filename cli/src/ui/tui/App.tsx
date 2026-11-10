@@ -112,7 +112,10 @@ interface AppProps {
   // Stops a child of this run, called when the user clicks its row on the strip
   // while it is still running. Optional so a caller with nothing to stop (and
   // the render tests) can leave it out: without it a click does nothing.
-  onCancelSpawn?: (spawnId: string) => void;
+  // It answers whether the abort was actually delivered (`false` for a child
+  // that settled or was restored between the frame on screen and the click), so
+  // the owner can say so instead of leaving the click without an answer.
+  onCancelSpawn?: (spawnId: string) => boolean;
 }
 
 // Columns reserved for the pane border and its horizontal padding.
@@ -186,7 +189,9 @@ export const App = ({
   const scrollRef = useRef<(lines: number) => void>(() => {});
   // Latest cancel callback, for the same reason: the tap is installed once and
   // would otherwise reach the prop of the render that installed it forever.
-  const cancelRef = useRef<(spawnId: string) => void>(() => {});
+  // It carries the owner's answer back, because a click that stops nothing must
+  // not look like one that did.
+  const cancelRef = useRef<(spawnId: string) => boolean>(() => false);
   // Which spawn row the pointer is over. The value is written by the mouse tap,
   // outside the React cycle, so it is read through `useSyncExternalStore` and
   // not through component state: a `setState` from the tap would tie every
@@ -577,7 +582,9 @@ export const App = ({
       // the geometry rows below the strip, so no report ever landed on a child.
       top: TRANSCRIPT_CHROME_Y + viewportLines,
       children: stripRows,
-      hidden: strip.hidden > 0,
+      // The counter row is charged by children but it is not a child: the tap
+      // knows one sits under them.
+      hasCounter: strip.hidden > 0,
     };
   } else {
     geometryRef.current = null;
@@ -587,7 +594,7 @@ export const App = ({
   stoppableRef.current = new Set(strip.rows.filter(stoppable).map((row) => row.id));
   // Pointed at the prop of the frame on screen on every render, never at the
   // one of the render that installed the tap.
-  cancelRef.current = (spawnId) => onCancelSpawn?.(spawnId);
+  cancelRef.current = (spawnId) => onCancelSpawn?.(spawnId) ?? false;
 
   // Mouse wheel, trackpad and hover. Ink consumes every chunk it reads from
   // stdin, so the mouse sequences have to be taken on the way out. The wrapping

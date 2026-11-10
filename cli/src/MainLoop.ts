@@ -227,8 +227,21 @@ class MainLoop {
         onSubmit: (prompt) => this.enqueueFromUser(prompt),
         onExit: () => void this.shutdown(0),
         // A click on a running child of the strip stops it with the same verb
-        // /stop uses, so both paths end in the same abort.
-        onCancelSpawn: (spawnId) => this.harness.cancelSpawn(spawnId),
+        // /stop uses, so both paths end in the same abort — and answer the same
+        // way: a child that settled between the frame on screen and the click
+        // aborts nothing, so that is said out loud instead of swallowed.
+        onCancelSpawn: (spawnId) => {
+          const stopped = this.harness.cancelSpawn(spawnId);
+
+          if (!stopped) {
+            this.ui.render({
+              type: "notice",
+              message: `Unknown or already finished child: ${spawnId}`,
+            });
+          }
+
+          return stopped;
+        },
         // The draft decides whether a continuation may start: the box reports every
         // change, including the emptying that follows a send.
         onDraftChange: () => this.maybeContinue({ fromDraft: true }),

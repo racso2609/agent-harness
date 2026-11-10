@@ -64,7 +64,7 @@ const mount = (
   options: {
     lines?: TuiLine[];
     history?: TuiSpawn[];
-    onCancelSpawn?: (spawnId: string) => void;
+    onCancelSpawn?: (spawnId: string) => boolean;
   } = {},
 ) => {
   const stdin = fakeStdin();
@@ -176,6 +176,30 @@ describe("a click on the spawn strip", () => {
     app.unmount();
 
     expect(onCancelSpawn).not.toHaveBeenCalled();
+  });
+
+  it("hands every press of a running child over and lets the owner answer", async () => {
+    // The race this guards: the frame on screen still lists the child as
+    // running, and by the time the click lands the child has settled. The owner
+    // then aborts nothing and says so; the app must not drop that answer on the
+    // way back. The tap is the only door between the two, so the case checks it
+    // is still open in both directions: one call in, one answer out.
+    const answered: string[] = [];
+    const onCancelSpawn = vi.fn((spawnId: string) => {
+      answered.push(spawnId);
+
+      return false;
+    });
+    const app = mount([child("aaa", "running")], { onCancelSpawn });
+    await settle();
+
+    app.stdin.write(click(app.rowOf("aaa")));
+    await settle();
+    app.unmount();
+
+    expect(onCancelSpawn).toHaveBeenCalledWith("aaa");
+    // Nothing was swallowed: the owner's answer reached the loop exactly once.
+    expect(answered).toEqual(["aaa"]);
   });
 
   it("does nothing at all when no owner asked to be told", async () => {

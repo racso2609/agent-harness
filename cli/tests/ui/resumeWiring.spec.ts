@@ -105,6 +105,7 @@ const fakeHarness = (options: FakeOptions = {}) => {
   let pending = options.pending ?? [];
 
   const harness: IHarness = {
+    ...options.harness,
     initialize: async (initOptions) => {
       calls.initialize.push(initOptions);
     },
@@ -372,6 +373,40 @@ describe("the session picker", () => {
 
     expect(changed).toBe(true);
     expect(loaded).toEqual(["session-old"]);
+  });
+
+  it("answers a click that stops nothing instead of swallowing it", async () => {
+    // The race behind the click: the strip still shows the child as running in the
+    // frame the user is looking at, and by the time the press lands the child has
+    // settled. cancelSpawn then reports false, and the user must be told so — the
+    // same way /stop tells them — rather than see nothing happen at all.
+    const start = vi.spyOn(TuiUiAdapter.prototype, "start");
+    const cancelSpawn = vi.fn(() => false);
+    const { ui } = await boot({ harness: { cancelSpawn } });
+
+    const received = start.mock.calls[0]?.[0] as { onCancelSpawn?: (id: string) => boolean };
+    const stopped = received.onCancelSpawn?.("spawn-gone");
+
+    expect(stopped).toBe(false);
+    expect(ui.events).toContainEqual({
+      type: "notice",
+      message: "Unknown or already finished child: spawn-gone",
+    });
+  });
+
+  it("stops a running child and stays quiet", async () => {
+    const start = vi.spyOn(TuiUiAdapter.prototype, "start");
+    const cancelSpawn = vi.fn(() => true);
+    const { ui } = await boot({ harness: { cancelSpawn } });
+
+    const received = start.mock.calls[0]?.[0] as { onCancelSpawn?: (id: string) => boolean };
+    const stopped = received.onCancelSpawn?.("spawn-live");
+
+    expect(stopped).toBe(true);
+    expect(cancelSpawn).toHaveBeenCalledWith("spawn-live");
+    expect(
+      ui.events.some((event) => event.type === "notice" && event.message.startsWith("Unknown")),
+    ).toBe(false);
   });
 
   it("sends the command catalog to the app, which is what the dropdown lists", async () => {
