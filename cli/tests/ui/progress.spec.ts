@@ -3,6 +3,8 @@ import {
   colorFor,
   elapsedFor,
   iconFor,
+  PROMPT_COLUMNS,
+  promptFor,
   RESTORED_LIMIT,
   spawnStrip,
   SPAWN_LINGER_MS,
@@ -11,6 +13,7 @@ import {
   toSpawnEntry,
   visibleSpawns,
 } from "../../src/ui/tui/progress";
+import { truncateCell } from "../../src/ui/tui/layout";
 
 const at = (offsetMs: number) => new Date(Date.UTC(2026, 0, 1) + offsetMs).toISOString();
 const now = Date.parse(at(60_000));
@@ -116,16 +119,85 @@ describe("toSpawnEntry", () => {
       toSpawnEntry({
         spawnId: "spawn-1",
         agentId: "coder",
+        prompt: "fix the login bug",
         status: "running",
         startedAt: at(0),
       }),
     ).toEqual({
       id: "spawn-1",
       agent: "coder",
+      prompt: "fix the login bug",
       status: "running",
       startedAt: at(0),
       finishedAt: undefined,
     });
+  });
+
+  it("keeps two children of the same agent distinguishable", () => {
+    const first = toSpawnEntry({
+      spawnId: "spawn-1",
+      agentId: "coder",
+      prompt: "fix the login bug",
+      status: "running",
+      startedAt: at(0),
+    });
+    const second = toSpawnEntry({
+      spawnId: "spawn-2",
+      agentId: "coder",
+      prompt: "add the logout test",
+      status: "running",
+      startedAt: at(0),
+    });
+
+    expect(second.prompt).not.toBe(first.prompt);
+  });
+});
+describe("promptFor", () => {
+  it("keeps a short prompt whole", () => {
+    const spawn = { id: "s", agent: "coder", prompt: "fix the login bug", status: "running" };
+
+    expect(promptFor(spawn)).toBe("fix the login bug");
+  });
+
+  it("clips a long prompt to the reserved columns, marking the cut", () => {
+    const spawn = {
+      id: "s",
+      agent: "coder",
+      prompt: "read every file of the repository and then refactor the whole parser".repeat(5),
+      status: "running",
+    };
+    const painted = promptFor(spawn);
+
+    expect(painted).toHaveLength(PROMPT_COLUMNS);
+    expect(painted.endsWith("…")).toBe(true);
+  });
+
+  it("folds a prompt written across several lines onto one", () => {
+    const spawn = {
+      id: "s",
+      agent: "coder",
+      prompt: "  fix the\n  login bug\n\tand add a test ",
+      status: "running",
+    };
+
+    // One row per child is a rule of the strip: a newline here would push the
+    // row onto a second terminal line and desynchronise the mouse hit-test.
+    expect(promptFor(spawn)).toBe(truncateCell("fix the login bug and add a test", PROMPT_COLUMNS));
+    expect(promptFor(spawn)).not.toContain("\n");
+  });
+
+  it("never leaves a long multi-line prompt with a line break", () => {
+    const spawn = {
+      id: "s",
+      agent: "coder",
+      prompt: Array.from({ length: 40 }, (_, index) => `step ${index} with detail`).join("\n"),
+      status: "running",
+    };
+    const painted = promptFor(spawn);
+
+    expect(painted.split("\n")).toHaveLength(1);
+    expect(painted.length).toBeLessThanOrEqual(PROMPT_COLUMNS);
+    expect(painted.startsWith("step 0 with detail step")).toBe(true);
   });
 });
 

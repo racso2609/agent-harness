@@ -10,6 +10,7 @@ import {
   colorFor,
   elapsedFor,
   iconFor,
+  promptFor,
   type SpawnEntry,
   type SpawnStripRow,
   spawnStrip,
@@ -270,6 +271,20 @@ export const App = ({
 
     if (key.ctrl && input === "t") {
       onToggleAll("tool");
+      return;
+    }
+
+    if (key.ctrl && input === "u") {
+      // Only the input box has a draft, so with a picker, a question or an approval
+      // on screen the key is ignored here and left to that panel.
+      if (!selection && !prompt && !approval) {
+        setDraft("");
+
+        // Same rule as a backspace that empties the box: the next "/" is a new
+        // question, so it has to reopen a dropdown the user closed on purpose.
+        setMenuDismissed(null);
+      }
+
       return;
     }
 
@@ -754,6 +769,7 @@ export const App = ({
                 {spawn.id}
                 {separator}
                 {elapsedFor(spawn, now)}
+                {spawn.prompt.trim() ? `${separator}(${promptFor(spawn)})` : ""}
               </Text>
             );
           })}

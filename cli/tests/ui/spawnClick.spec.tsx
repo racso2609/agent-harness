@@ -56,6 +56,8 @@ const child = (id: string, status: string, extra: Partial<TuiSpawn> = {}): TuiSp
   id,
   agent: "helper",
   status,
+  // A context every child carries, the way the core fills it on every handle.
+  prompt: `work on ${id}`,
   ...extra,
 });
 

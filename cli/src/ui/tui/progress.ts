@@ -1,10 +1,16 @@
 // Pure helpers behind the progress strip. Kept out of the component so the
 // visibility and timing rules are testable without mounting ink.
 
+import { truncateCell } from "./layout";
+
 export interface SpawnView {
   handle: {
     spawnId: string;
     agentId: string;
+    // Original prompt the child was launched with. The core sets it on every
+    // handle, restored ones included, so two children of the same agent can
+    // be told apart on the strip.
+    prompt: string;
     status: string;
     startedAt: string;
     finishedAt?: string;
@@ -18,6 +24,9 @@ export const SPAWN_LINGER_MS = 5_000;
 export interface SpawnEntry {
   id: string;
   agent: string;
+  // What the child was asked to do. May span several lines: the row paints it
+  // through `promptFor`, which folds it onto one.
+  prompt: string;
   status: string;
   startedAt?: string;
   finishedAt?: string;
@@ -29,16 +38,39 @@ export interface SpawnEntry {
 export const toSpawnEntry = (handle: {
   spawnId: string;
   agentId: string;
+  prompt: string;
   status: string;
   startedAt: string;
   finishedAt?: string;
 }): SpawnEntry => ({
   id: handle.spawnId,
   agent: handle.agentId,
+  prompt: handle.prompt,
   status: handle.status,
   startedAt: handle.startedAt,
   finishedAt: handle.finishedAt,
 });
+
+// Collapses a prompt onto a single line. A child row must stay exactly one
+// terminal row — the mouse hit-test maps a terminal row to a child assuming
+// one painted row per child — so a prompt written across several lines is
+// folded before it is measured. Same rule as `oneLine` in ui/outcome, kept
+// here so the strip does not reach into the command layer.
+export const oneLinePrompt = (prompt: string): string => prompt.replace(/\s+/g, " ").trim();
+
+// Columns reserved for the prompt in a child row.
+//
+// The fixed part of the row is roughly 34 columns: icon, space, agent name,
+// the two " · " separators, a "spawn-…" id and a 6-character clock. In an
+// 80-column terminal PANEL_CHROME leaves 60 columns for the pane, so 24 for
+// the context keeps the whole row inside a single line with room to spare on
+// narrower terminals instead of letting ink wrap it onto a second row.
+export const PROMPT_COLUMNS = 24;
+
+// The prompt as a child row paints it: one line, cut on a column boundary so
+// a double-width character is never split in half.
+export const promptFor = (spawn: SpawnEntry, width = PROMPT_COLUMNS): string =>
+  truncateCell(oneLinePrompt(spawn.prompt), width);
 
 // A child is visible while running and for SPAWN_LINGER_MS after settling.
 export const visibleSpawns = (spawns: SpawnEntry[], now: number): SpawnEntry[] =>
