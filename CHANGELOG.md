@@ -4,6 +4,23 @@ Todos los cambios notables de este proyecto se documentan en este archivo. El fo
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-11-09
+
+### Añadido
+
+- **Mantenimiento de la memoria por el agente**: dos herramientas nuevas, `remember` y `forget`, acompañan a `recall` para que el agente pueda escribir y borrar su memoria persistente en vez de limitarse a leerla. Aplican el mismo gate de allowlist que `recall`: un agente que declara `tools:` sigue recibiendo exactamente su lista. La tool `recall` pasa a imprimir el identificador de cada memoria encontrada, sin el cual `forget` no era alcanzable. El `forget` solo acepta identificadores numéricos, de modo que un id inventado se rechaza antes de llegar al provider.
+- **Comandos del prompt**: `/memory recent [n]` lista las memorias más recientes con su identificador al frente y `/memory forget <id>` borra una, en lugar de tener que buscar lo que ya se conoce. Cierra la mitad de CLI de la deuda F-M6 anotada en `docs/MEMORY.md`.
+- **Configuración de la memoria**: `memory.rememberTool` y `memory.forgetTool` apagan cada herramienta por separado, con el mismo interruptor que ya tenía `memory.recallTool`, y `memory.maxCaptureChars` (4000 por defecto) acota lo que se puede guardar en una sola observación.
+
+### Cambiado
+
+- **Borrado de memoria**: antes de borrar se pasa por el gate de aprobación como acción de escritura, con el identificador en el sujeto, y solo se alcanza una fila que la sesión posee.
+- **Redacción de la captura**: `redact()` vive ahora en un único punto de escritura del session manager y cubre también el título de la memoria capturada al compactar, no solo el contenido.
+
+### Corregido
+
+- **Aislamiento de la memoria entre proyectos**: el índice único que sostiene el upsert por `topicKey` era global y el upsert reescribía el proyecto, así que una clave repetida en otro workspace reclamaba la fila ajena y la dejaba visible y borrable desde allí. El índice pasa a ser `(project, topic_key)` y el conflicto ya no reescribe el proyecto. En un fichero que ya contiene duplicados el índice nuevo no se puede crear: la escritura cae a una inserción plana y avisa una sola vez, en lugar de perder la observación en silencio.
+
 ## [1.1.0] - 2026-11-09
 
 ### Añadido
@@ -35,6 +52,7 @@ Todos los cambios notables de este proyecto se documentan en este archivo. El fo
 
 Primera versión: `@racso/core` y `@racso/cli` (renombrados a `@racso2609/*` en 1.1.0). El CLI (privado, no instalable) traía el stack de TUI y la persistencia de sesión. El contrato público del harness (`createHarness`, `IHarness`, `Config`, `SessionStore`), ya exportado en 1.0.0, se vuelve consumible de verdad en 1.1.0 al repararse el scope.
 
-[Unreleased]: https://github.com/racso2609/agent-harness/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/racso2609/agent-harness/compare/v1.1.1...HEAD
+[1.1.1]: https://github.com/racso2609/agent-harness/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/racso2609/agent-harness/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/racso2609/agent-harness/releases/tag/v1.0.0

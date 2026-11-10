@@ -204,14 +204,15 @@ try {
     );
   });
 
-  check(`cli dependency on ${CORE_NAME} is rewritten to ^1.0.0`, () => {
-    const dependency = cliManifest.dependencies?.[CORE_NAME];
-    assert.equal(
-      dependency,
-      "^1.0.0",
-      `expected ${CORE_NAME} to be "^1.0.0" (workspace:^ rewritten by pnpm pack), found ${JSON.stringify(dependency)}`,
-    );
-  });
+  const expectedCoreRange = `^${coreManifest.version}`;
+  check(`cli dependency on ${CORE_NAME} is rewritten to ${expectedCoreRange}`, () => {
+   const dependency = cliManifest.dependencies?.[CORE_NAME];
+   assert.equal(
+   dependency,
+   expectedCoreRange,
+   `expected ${CORE_NAME} to be "${expectedCoreRange}" (workspace:^ rewritten by pnpm pack), found ${JSON.stringify(dependency)}`,
+   );
+   });
 
   process.stdout.write("\n3. install into a clean consumer\n");
   fs.writeFileSync(
@@ -284,7 +285,7 @@ try {
 
  process.stdout.write("\n5. installing the cli tarball alone fails (negative)\n");
  // This assertion exists because the README documented `npm i -g <cli.tgz>` as valid and this
- // smoke test did not catch it: the cli declares @racso2609/core@^1.0.0, which is in no registry.
+ // smoke test did not catch it: the cli declares @racso2609/core@^<version>, which is in no registry.
  fs.writeFileSync(
  path.join(cliOnlyDir, "package.json"),
  `${JSON.stringify({ name: "racso-smoke-cli-only", version: "1.0.0", private: true }, null, 2)}\n`,
