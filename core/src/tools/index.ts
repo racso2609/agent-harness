@@ -3,9 +3,11 @@ import type { McpManager } from "@/mcp/McpManager";
 import { mcpDisabledByEnv } from "@/mcp/mcpEnv";
 import type { SkillRegistry } from "@/skills";
 import { logger } from "@/utils/logger";
+import { ForgetTool } from "./forget";
 import { ListDirTool } from "./listDir";
 import { ReadFileTool } from "./readFile";
 import { RecallTool } from "./recall";
+import { RememberTool } from "./remember";
 import { ShellTool } from "./shell";
 import { SpawnTool } from "./spawn";
 import {
@@ -42,6 +44,13 @@ export const compositeName = (name: string): string | undefined => {
   // way out: the composite parser only accepts lowercase [a-z0-9_] parts.
   return mcpToolName(sanitizeServerId(parts.serverId), sanitizeRemoteToolName(parts.toolName));
 };
+
+// Whether the configured backend honours MemoryObservation.topicKey. The http
+// provider (Engram) does not: capture() never sends it, so there is no upsert
+// to require a key for. Anything unknown is assumed to support it, because the
+// requirement is the safer default when a write may be a revision.
+const memoryBackendUpsertsOnTopicKey = (provider: string | undefined): boolean =>
+  provider !== "http";
 
 // Builds the registry wired with the tools enabled for this harness version.
 // When allowedTools is given, only those tools are registered; an empty list
@@ -86,6 +95,16 @@ export const createToolRegistry = (
     allowedTools === undefined &&
     config.config.memory?.enabled === true &&
     config.config.memory?.recallTool !== false;
+  // Same gate as recall, one knob each: an install that only trusts the model to
+  // read memory keeps behaving exactly as before.
+  const rememberUsable =
+    allowedTools === undefined &&
+    config.config.memory?.enabled === true &&
+    config.config.memory?.rememberTool !== false;
+  const forgetUsable =
+    allowedTools === undefined &&
+    config.config.memory?.enabled === true &&
+    config.config.memory?.forgetTool !== false;
 
   const all = [
     new ShellTool({
@@ -98,6 +117,15 @@ export const createToolRegistry = (
     new SpawnTool(),
     ...(skillsUsable ? [new UseSkillTool()] : []),
     ...(recallUsable ? [new RecallTool()] : []),
+    ...(rememberUsable
+      ? [
+          new RememberTool({
+            maxContentChars: config.config.memory?.maxCaptureChars,
+            topicKeyUnsupported: !memoryBackendUpsertsOnTopicKey(config.config.memory?.provider),
+          }),
+        ]
+      : []),
+    ...(forgetUsable ? [new ForgetTool()] : []),
   ];
 
   // One source for the names a remote tool must not take: every native name,
@@ -136,11 +164,14 @@ export const createToolRegistry = (
   return registry;
 };
 
-export { RecallTool, ToolRegistry, UseSkillTool };
+export { ForgetTool, RecallTool, RememberTool, ToolRegistry, UseSkillTool };
 export type { ToolRegistryWiring };
 export type {
   ApprovalDecision,
   ApprovalRequest,
+  ForgetResult,
+  RememberInput,
+  RememberResult,
   SpawnRequestResult,
   Tool,
   ToolContext,

@@ -92,9 +92,39 @@ const formatMemoryHits = (hits: MemoryHit[], query: string) => {
     .join("\n");
 };
 
+// Newest memories first, one line each. The id leads because it is what
+// `/memory forget` takes, so the listing doubles as the way to get one.
+const formatMemoryRecent = (hits: MemoryHit[], limit?: number) => {
+  if (!hits.length) {
+    return limit ? `No memories stored yet (asked for up to ${limit}).` : "No memories stored yet.";
+  }
+
+  return hits
+    .map((hit) => {
+      const title = hit.title || "(untitled)";
+      return `${hit.id} [${hit.kind}] ${truncate(title, 120)}`;
+    })
+    .join("\n");
+};
+
+// A delete that did not happen is not a backend error: the id may be a typo or
+// belong to another project, and naming the likely cause is what makes the
+// message actionable instead of a bare "false".
+const formatMemoryForget = (id: string, forgotten: boolean) => {
+  if (forgotten) return `Forgot memory ${id}.`;
+
+  return [
+    `Memory ${id} was not forgotten.`,
+    "Nothing with that id is stored here (a typo, or a memory from another project or session), or the backend cannot delete memories.",
+    "Use /memory recent to see the ids that exist.",
+  ].join("\n");
+};
+
 export {
   formatCost,
+  formatMemoryForget,
   formatMemoryHits,
+  formatMemoryRecent,
   formatMemoryStatus,
   formatSessionList,
   formatSessionStatus,

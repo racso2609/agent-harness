@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
-import type { SessionStatus } from "@racso2609/core";
-import { formatCost, formatSessionStatus, formatTokens } from "../../src/render/status";
+import type { MemoryHit, SessionStatus } from "@racso2609/core";
+import {
+  formatCost,
+  formatMemoryForget,
+  formatMemoryRecent,
+  formatSessionStatus,
+  formatTokens,
+} from "../../src/render/status";
 
 const status: SessionStatus = {
   sessionId: "abc123",
@@ -42,5 +48,50 @@ describe("status formatters", () => {
     const output = formatSessionStatus({ ...status, autoCompact: false });
 
     expect(output).not.toContain("auto-compact");
+  });
+});
+
+describe("memory formatters", () => {
+  const hits: MemoryHit[] = [
+    {
+      id: "12",
+      kind: "decision",
+      scope: "project",
+      title: "Deploy flow",
+      content: "Releases go through the tag pipeline.",
+    },
+    {
+      id: "7",
+      kind: "preference",
+      scope: "user",
+      title: "",
+      content: "Tabs over spaces.",
+    },
+  ];
+
+  it("says so when there is nothing stored", () => {
+    expect(formatMemoryRecent([])).toBe("No memories stored yet.");
+  });
+
+  it("names the limit it asked for when the listing is empty", () => {
+    expect(formatMemoryRecent([], 5)).toBe("No memories stored yet (asked for up to 5).");
+  });
+
+  it("renders id, kind and title one per line", () => {
+    expect(formatMemoryRecent(hits)).toBe(
+      ["12 [decision] Deploy flow", "7 [preference] (untitled)"].join("\n"),
+    );
+  });
+
+  it("confirms a forget that happened", () => {
+    expect(formatMemoryForget("12", true)).toBe("Forgot memory 12.");
+  });
+
+  it("explains a forget that did not happen and points at the id list", () => {
+    const output = formatMemoryForget("12", false);
+
+    expect(output).toContain("Memory 12 was not forgotten.");
+    expect(output).toContain("/memory recent");
+    expect(output).not.toContain("Forgot memory 12.");
   });
 });

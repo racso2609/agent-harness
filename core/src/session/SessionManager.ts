@@ -16,7 +16,13 @@ import {
   resolveProjectIdentity,
   stripMemoryBlocks,
 } from "@/memory";
-import type { MemoryHit, MemoryProvider, ProjectIdentity } from "@/memory";
+import type {
+  MemoryHit,
+  MemoryObservation,
+  MemoryProvider,
+  MemoryScope,
+  ProjectIdentity,
+} from "@/memory";
 
 import { OpenAiProvider } from "@/providers/openai";
 import { ensureSkillsDir, SkillLoader, SkillRegistry } from "@/skills";
@@ -24,7 +30,13 @@ import type { SkillSummary } from "@/skills";
 import { McpManager } from "@/mcp";
 import type { McpServerSummary, McpToolSummary } from "@/mcp";
 import { createToolRegistry, ToolContext, ToolRegistry } from "@/tools";
-import type { ApprovalDecision, ApprovalRequest } from "@/tools";
+import type {
+  ApprovalDecision,
+  ApprovalRequest,
+  ForgetResult,
+  RememberInput,
+  RememberResult,
+} from "@/tools";
 import {
   AgentResponse,
   ChatEventListener,
@@ -864,7 +876,7 @@ class SessionManagerImpl implements SessionManager {
       await this.memoryProvider.capture({
         kind: "episode",
         scope: "project",
-        title: title || "Compacted session",
+        title: redact(title || "Compacted session"),
         content: redact(summary),
         project: this.memoryProject(),
         sessionId: this.sessionId,
@@ -1078,6 +1090,9 @@ class SessionManagerImpl implements SessionManager {
       getSkillBody: (id) => this.skillBody(id),
       listSkillIds: () => this.skillIds(),
       recallMemory: (query, limit) => this.recallMemory(query, limit),
+      rememberMemory: (input) => this.rememberMemory(input),
+      forgetMemory: (id, scope) => this.forgetMemory(id, scope),
+      listMemories: (limit) => this.listMemories(limit),
       // Streams shell/tool output live, tagged with the originating call so the
       // UI can attribute it.
       onOutput: (chunk) => {
@@ -1232,6 +1247,133 @@ class SessionManagerImpl implements SessionManager {
       project: identity.key,
       projectSource: identity.source,
     };
+  }
+
+  // Writes one observation on behalf of the remember tool. Same contract as
+  // captureCompaction - the persisted text is redacted first, and the project key
+  // and the session id come from here, never from the model - but not the same
+  // call site: compaction writes on its own, because it has no model input.
+  protected async rememberMemory(input: RememberInput): Promise<RememberResult> {
+    if (!this.memoryProvider.capabilities().capture) return { error: "unsupported" };
+
+    try {
+      const { id } = await this.memoryProvider.capture({
+        kind: input.kind,
+        scope: input.scope,
+        // Redacted after trimming is not needed: the tool already trimmed, and
+        // redacting keeps the text the user typed in every other respect.
+        title: redact(input.title),
+        content: redact(input.content),
+        ...(input.topicKey ? { topicKey: input.topicKey } : {}),
+        project: this.memoryProject(),
+        sessionId: this.sessionId,
+      });
+      // The providers report a down backend as an empty id instead of throwing.
+      if (!id) return { error: "failed" };
+
+      return { id };
+    } catch (error) {
+      logger.warn({ err: error }, "Memory capture failed");
+
+      return { error: "failed", detail: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
+  // Deletes one observation on behalf of the forget tool. The scope check is
+  // here because it is the only place that knows both the session id and the
+  // project key; the approval gate runs after the lookup so a request for an id
+  // that does not exist never reaches the user.
+  //
+  // `scope` is the caller's intent and defaults to the contract's "project". It
+  // is not a permission: ownsObservation() compares against the stored scope, so
+  // asking for a wider one never grants access to another session's memory.
+  protected async forgetMemory(id: string, scope: MemoryScope = "project"): Promise<ForgetResult> {
+    // Logged rather than acted on: it says what the caller believes it is
+    // deleting, and the stored entry decides whether it may.
+    logger.debug({ id, scope }, "Memory delete requested");
+    if (!this.memoryProvider.capabilities().forget)
+      return { forgotten: false, reason: "unsupported" };
+
+    const provider = this.memoryProvider;
+    const inspect = provider.inspect;
+    // Without a lookup there is no way to tell whose memory this is, and deleting
+    // blind would cross the boundary the scope check exists to enforce.
+    if (!inspect) return { forgotten: false, reason: "unsupported" };
+
+    try {
+      const observation = await inspect.call(provider, id);
+      if (!observation) return { forgotten: false, reason: "not-found" };
+      if (!this.ownsObservation(observation)) {
+        return { forgotten: false, reason: "out-of-scope" };
+      }
+
+      const decision = await this.approve({
+        tool: "forget",
+        kind: "write",
+        subject: `memory:${id}`,
+      });
+      if (decision === "deny") return { forgotten: false, reason: "failed" };
+
+      const forgotten = await this.memoryProvider.forget(id);
+      return forgotten ? { forgotten: true, reason: "ok" } : { forgotten: false, reason: "failed" };
+    } catch (error) {
+      logger.warn({ err: error }, "Memory delete failed");
+
+      return { forgotten: false, reason: "failed" };
+    }
+  }
+
+  // A user-scoped memory belongs to everybody, a session one only to the session
+  // that wrote it and a project one only to the workspace that wrote it. The
+  // project key already hashes the path/config, so comparing it is enough. The
+  // stored scope decides, not the caller's: asking for another one is not a way
+  // in, so the caller's scope is only there to document intent.
+  protected ownsObservation(observation: MemoryObservation): boolean {
+    switch (observation.scope) {
+      case "user":
+        return true;
+      case "session":
+        return observation.sessionId === this.sessionId;
+      case "project":
+        return observation.project === this.memoryProject();
+      default:
+        return false;
+    }
+  }
+
+  // Newest memories first, for the listMemories tool. No query involved, so it
+  // prefers `recent` and falls back to an empty search, which is the only thing
+  // a backend without it understands.
+  protected async listMemories(limit?: number): Promise<MemoryHit[]> {
+    try {
+      const recent = this.memoryProvider.recent;
+      if (recent) {
+        return await recent.call(this.memoryProvider, { project: this.memoryProject(), limit });
+      }
+
+      return await this.memoryProvider.search({
+        text: "",
+        project: this.memoryProject(),
+        limit,
+      });
+    } catch (error) {
+      logger.warn({ err: error }, "Memory listing failed");
+
+      return [];
+    }
+  }
+
+  // Public memory delete used by the harness contract. A caller that does not
+  // say the scope is acting on its own project, which is what every listing
+  // shows by default.
+  forgetStoredMemory(id: string, options: { scope?: MemoryScope } = {}): Promise<boolean> {
+    return this.forgetMemory(id, options.scope ?? "project").then(
+      (result) => result.reason === "ok",
+    );
+  }
+
+  listStoredMemories(limit?: number): Promise<MemoryHit[]> {
+    return this.listMemories(limit);
   }
 
   // Public memory search used by the harness contract.

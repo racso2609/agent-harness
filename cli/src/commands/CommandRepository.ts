@@ -8,7 +8,9 @@ import type {
 } from "@racso2609/core";
 import type { Flows } from "@/flows";
 import {
+  formatMemoryForget,
   formatMemoryHits,
+  formatMemoryRecent,
   formatMemoryStatus,
   formatSessionList,
   formatSessionStatus,
@@ -197,7 +199,7 @@ const BUILT_IN_COMMANDS: CommandDefinition[] = [
   },
   {
     name: "memory",
-    description: "Memory backend: /memory | search <q> | on | off",
+    description: "Memory backend: /memory | search <q> | recent [n] | forget <id> | on | off",
     run: async (context, args) => {
       const [action, ...rest] = args;
 
@@ -235,7 +237,36 @@ const BUILT_IN_COMMANDS: CommandDefinition[] = [
         return;
       }
 
-      context.notify("Usage: /memory | /memory search <query> | /memory on|off");
+      if (action === "recent") {
+        // No limit means the contract default: passing undefined through would
+        // be the same thing, but leaving the argument out says so.
+        const raw = rest[0];
+        const limit = raw === undefined ? undefined : Number(raw);
+        if (limit !== undefined && (!Number.isInteger(limit) || limit <= 0)) {
+          context.notify("Usage: /memory recent [n]");
+          return;
+        }
+
+        const hits = await context.harness.listMemories(limit);
+        context.notify(formatMemoryRecent(hits, limit));
+        return;
+      }
+
+      if (action === "forget") {
+        const [id] = rest;
+        if (!id) {
+          context.notify("Usage: /memory forget <id>");
+          return;
+        }
+
+        const forgotten = await context.harness.forgetMemory(id);
+        context.notify(formatMemoryForget(id, forgotten));
+        return;
+      }
+
+      context.notify(
+        "Usage: /memory | /memory search <query> | /memory recent [n] | /memory forget <id> | /memory on|off",
+      );
     },
   },
   {

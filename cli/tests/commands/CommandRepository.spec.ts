@@ -96,6 +96,8 @@ const makeContext = (): CommandContext => ({
       projectSource: "git",
     })),
     searchMemory: vi.fn(async () => []),
+    listMemories: vi.fn(async () => []),
+    forgetMemory: vi.fn(async () => true),
     listMcpServers: vi.fn(() => []),
     reloadMcp: vi.fn(async () => []),
     mcpTools: vi.fn(() => []),
@@ -579,7 +581,71 @@ describe("CommandRepository", () => {
     await new CommandRepository().run("/memory nope", context);
 
     expect(context.notify).toHaveBeenCalledWith(
-      "Usage: /memory | /memory search <query> | /memory on|off",
+      "Usage: /memory | /memory search <query> | /memory recent [n] | /memory forget <id> | /memory on|off",
     );
+  });
+
+  it("lists the most recent memories with the requested limit", async () => {
+    const context = makeContext();
+    vi.mocked(context.harness.listMemories).mockResolvedValueOnce([
+      {
+        id: "12",
+        kind: "decision",
+        scope: "project",
+        title: "Deploy flow",
+        content: "Releases go through the tag pipeline.",
+      },
+    ]);
+
+    await new CommandRepository().run("/memory recent 5", context);
+
+    expect(context.harness.listMemories).toHaveBeenCalledWith(5);
+    expect(context.notify).toHaveBeenCalledWith("12 [decision] Deploy flow");
+  });
+
+  it("leaves the limit to the contract when /memory recent has no argument", async () => {
+    const context = makeContext();
+
+    await new CommandRepository().run("/memory recent", context);
+
+    expect(context.harness.listMemories).toHaveBeenCalledWith(undefined);
+    expect(context.notify).toHaveBeenCalledWith("No memories stored yet.");
+  });
+
+  it("explains the recent usage for a limit that is not a number", async () => {
+    const context = makeContext();
+
+    await new CommandRepository().run("/memory recent lots", context);
+
+    expect(context.harness.listMemories).not.toHaveBeenCalled();
+    expect(context.notify).toHaveBeenCalledWith("Usage: /memory recent [n]");
+  });
+
+  it("forgets a memory by id without calling the model", async () => {
+    const context = makeContext();
+
+    await new CommandRepository().run("/memory forget 12", context);
+
+    expect(context.harness.forgetMemory).toHaveBeenCalledWith("12");
+    expect(context.notify).toHaveBeenCalledWith("Forgot memory 12.");
+    expect(context.harness.ask).not.toHaveBeenCalled();
+  });
+
+  it("reports an id that was not forgotten", async () => {
+    const context = makeContext();
+    vi.mocked(context.harness.forgetMemory).mockResolvedValueOnce(false);
+
+    await new CommandRepository().run("/memory forget 99", context);
+
+    expect(context.notify).toHaveBeenCalledWith(expect.stringContaining("was not forgotten"));
+  });
+
+  it("explains the forget usage when the id is missing", async () => {
+    const context = makeContext();
+
+    await new CommandRepository().run("/memory forget", context);
+
+    expect(context.harness.forgetMemory).not.toHaveBeenCalled();
+    expect(context.notify).toHaveBeenCalledWith("Usage: /memory forget <id>");
   });
 });

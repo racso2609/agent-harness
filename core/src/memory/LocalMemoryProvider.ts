@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { memoryHome } from "@/utils/env";
+import { logger } from "@/utils/logger";
 import type {
   MemoryCapabilities,
   MemoryContextOptions,
@@ -23,6 +24,9 @@ export const DEFAULT_MAX_HIT_CHARS = 1200;
 const CONTEXT_CANDIDATES = 20;
 
 const DEFAULT_SEARCH_LIMIT = 10;
+
+// How many entries `recent()` returns when the caller does not pass a limit.
+const DEFAULT_RECENT_LIMIT = 20;
 
 export interface LocalMemoryProviderOptions {
   // SQLite file. Defaults to memoryHome() (RACSO_HARNESS_MEMORY_LOCATION).
@@ -71,6 +75,10 @@ export class LocalMemoryProvider implements MemoryProvider {
   private readonly maxHitChars: number;
   private db: SqliteDatabase | null = null;
   private openFailed = false;
+  // One warning per process is enough: the degraded upsert is a property of the
+  // file (an index that could not be built), not of the write, so repeating it
+  // on every capture would bury the one line that says how to fix it.
+  private warnedNoUpsert = false;
   private opening: Promise<SqliteDatabase | null> | null = null;
 
   constructor(options: LocalMemoryProviderOptions = {}) {
@@ -194,61 +202,97 @@ export class LocalMemoryProvider implements MemoryProvider {
     }
   }
 
+  // The plain insert, shared by the two capture paths: no `topicKey`, and the
+  // fallback of the upsert. It is the only statement that works on a file whose
+  // unique index is missing, which is why the upsert path can fall back to it.
+  private insertPlain(
+    db: SqliteDatabase,
+    observation: MemoryObservation,
+    topicKey: string | null,
+    now: string,
+  ): Record<string, unknown> | undefined {
+    return db
+      .prepare(
+        `INSERT INTO observations
+				(kind, scope, project, session_id, title, content, topic_key, created_at, updated_at)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+				RETURNING id`,
+      )
+      .get(
+        observation.kind,
+        observation.scope,
+        observation.project ?? null,
+        observation.sessionId ?? null,
+        observation.title,
+        observation.content,
+        topicKey,
+        now,
+        now,
+      );
+  }
+
   // With a `topicKey` this is an upsert: the unique partial index on
-  // topic_key is the conflict target, which is why the ON CONFLICT clause
-  // repeats its WHERE predicate.
+  // (project, topic_key) is the conflict target, which is why the ON CONFLICT
+  // clause repeats its WHERE predicate. That index lives in a file we did not
+  // create and its migration is allowed to fail, so the upsert degrades to a
+  // plain insert that keeps the `topic_key`: the observation is stored either
+  // way, and a one-time warning makes the degradation visible.
   async capture(observation: MemoryObservation): Promise<{ id: string }> {
     try {
       const db = await this.open();
       if (!db) return { id: "" };
 
       const now = new Date().toISOString();
-      const row = observation.topicKey
-        ? db
-            .prepare(
-              `INSERT INTO observations
-								(kind, scope, project, session_id, title, content, topic_key, created_at, updated_at)
-							VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-							ON CONFLICT(topic_key) WHERE topic_key IS NOT NULL DO UPDATE SET
-								title = excluded.title,
-								content = excluded.content,
-								kind = excluded.kind,
-								scope = excluded.scope,
-								project = excluded.project,
-								session_id = excluded.session_id,
-								updated_at = excluded.updated_at,
-								revision_count = revision_count + 1
-							RETURNING id`,
-            )
-            .get(
-              observation.kind,
-              observation.scope,
-              observation.project ?? null,
-              observation.sessionId ?? null,
-              observation.title,
-              observation.content,
-              observation.topicKey,
-              now,
-              now,
-            )
-        : db
-            .prepare(
-              `INSERT INTO observations
-								(kind, scope, project, session_id, title, content, topic_key, created_at, updated_at)
-							VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-							RETURNING id`,
-            )
-            .get(
-              observation.kind,
-              observation.scope,
-              observation.project ?? null,
-              observation.sessionId ?? null,
-              observation.title,
-              observation.content,
-              null,
-              now,
-              now,
-            );
+      if (!observation.topicKey) {
+        const plain = this.insertPlain(db, observation, null, now);
+        return { id: plain ? String(plain.id) : "" };
+      }
+
+      let row: Record<string, unknown> | undefined;
+      try {
+        row = db
+          .prepare(
+            `INSERT INTO observations
+				(kind, scope, project, session_id, title, content, topic_key, created_at, updated_at)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+				ON CONFLICT(COALESCE(project, ''), topic_key) WHERE topic_key IS NOT NULL DO UPDATE SET
+					title = excluded.title,
+					content = excluded.content,
+					kind = excluded.kind,
+					scope = excluded.scope,
+					session_id = excluded.session_id,
+					updated_at = excluded.updated_at,
+					revision_count = revision_count + 1
+				RETURNING id`,
+          )
+          .get(
+            observation.kind,
+            observation.scope,
+            observation.project ?? null,
+            observation.sessionId ?? null,
+            observation.title,
+            observation.content,
+            observation.topicKey,
+            now,
+            now,
+          );
+      } catch (error) {
+        // The conflict target does not exist - the index could not be created
+        // on a file that already held duplicates of (project, topic_key), or the
+        // file is locked - so the statement cannot run at all. Storing the row
+        // beats losing the write: the retry keeps `topic_key` and the caller's
+        // `project`, so neither the fact nor the workspace is lost, only the
+        // revision. Warned once per process, because the cause belongs to the
+        // file and would otherwise be repeated on every single write.
+        if (!this.warnedNoUpsert) {
+          this.warnedNoUpsert = true;
+          logger.warn(
+            { err: error },
+            "Memory topicKey upsert is unavailable; the observation was stored with a plain insert, so a repeated topicKey duplicates instead of revising. Rebuild the observations_project_topic_key index to restore the upsert",
+          );
+        }
+        row = this.insertPlain(db, observation, observation.topicKey, now);
+      }
 
       return { id: row ? String(row.id) : "" };
     } catch {
@@ -266,6 +310,81 @@ export class LocalMemoryProvider implements MemoryProvider {
       return Number(result.changes) > 0;
     } catch {
       return false;
+    }
+  }
+
+  // Plain lookup by id: the forget path already has the id from a search and
+  // needs the stored scope/session/project to decide whether it may delete it.
+  async inspect(id: string): Promise<MemoryObservation | undefined> {
+    try {
+      const db = await this.open();
+      if (!db) return undefined;
+      const numeric = Number(id);
+      if (!Number.isInteger(numeric)) return undefined;
+
+      const row = db
+        .prepare(
+          `SELECT kind, scope, title, content, project, session_id, topic_key
+FROM observations WHERE id = ?`,
+        )
+        .get(numeric);
+      if (!row) return undefined;
+
+      const observation: MemoryObservation = {
+        kind: asString(row.kind) as MemoryKind,
+        scope: asString(row.scope) as MemoryScope,
+        title: asString(row.title),
+        content: truncate(asString(row.content), this.maxHitChars),
+      };
+      const project = asNullableString(row.project);
+      if (project) observation.project = project;
+      const sessionId = asNullableString(row.session_id);
+      if (sessionId) observation.sessionId = sessionId;
+      const topicKey = asNullableString(row.topic_key);
+      if (topicKey) observation.topicKey = topicKey;
+      return observation;
+    } catch {
+      return undefined;
+    }
+  }
+
+  // No MATCH here on purpose: "the newest N" is an index scan, and an empty
+  // query is exactly what FTS5 refuses to match.
+  async recent(options: {
+    project?: string;
+    scope?: MemoryScope;
+    limit?: number;
+  }): Promise<MemoryHit[]> {
+    try {
+      const db = await this.open();
+      if (!db) return [];
+
+      const where: string[] = [];
+      const params: unknown[] = [];
+      if (options.project) {
+        where.push("o.project = ?");
+        params.push(options.project);
+      }
+      if (options.scope) {
+        where.push("o.scope = ?");
+        params.push(options.scope);
+      }
+      const limit = options.limit && options.limit > 0 ? options.limit : DEFAULT_RECENT_LIMIT;
+      params.push(limit);
+
+      const rows = db
+        .prepare(
+          `SELECT o.id, o.kind, o.scope, o.title, o.content, o.project, o.created_at
+FROM observations o
+${where.length > 0 ? `WHERE ${where.join(" AND ")}` : ""}
+ORDER BY o.created_at DESC, o.id DESC
+LIMIT ?`,
+        )
+        .all(...params);
+
+      return rows.map((row) => this.toHit(row));
+    } catch {
+      return [];
     }
   }
 

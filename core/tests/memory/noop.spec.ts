@@ -57,3 +57,16 @@ describe("NoopMemoryProvider", () => {
     await expect(provider.close()).resolves.toBeUndefined();
   });
 });
+
+describe("NoopMemoryProvider optional operations", () => {
+  it("declares forget as unsupported", () => {
+    expect(new NoopMemoryProvider().capabilities().forget).toBe(false);
+  });
+
+  it("does not implement inspect or recent, so a typeof check is safe", () => {
+    const provider = new NoopMemoryProvider();
+
+    expect(typeof provider.inspect).toBe("undefined");
+    expect(typeof provider.recent).toBe("undefined");
+  });
+});

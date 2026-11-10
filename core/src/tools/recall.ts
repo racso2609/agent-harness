@@ -6,7 +6,7 @@ import type { Tool, ToolContext, ToolResult } from "./Tool";
 class RecallTool implements Tool {
   name = "recall";
   description =
-    "Search the persistent project memory captured in previous sessions. Call it when you suspect a decision, fact or past episode is already recorded instead of asking the user again.";
+    "Search the persistent project memory captured in previous sessions. Call it when you suspect a decision, fact or past episode is already recorded instead of asking the user again. Each result carries its id (#42), which is what the forget tool takes.";
   parameters = {
     type: "object" as const,
     properties: {
@@ -46,7 +46,14 @@ class RecallTool implements Tool {
       const hits = await ctx.recallMemory(query, limit);
       if (!hits.length) return { output: `No memories found for: "${query}"` };
 
-      const lines = hits.map((hit) => `- [${hit.kind}] **${hit.title}**\n  ${hit.content}`);
+      // The id is printed because it is the only handle forget accepts: a result
+      // the model cannot name is a memory it cannot ask to delete. A backend that
+      // reports no id still lists the line; it just cannot be forgotten by it.
+      const lines = hits.map((hit) =>
+        hit.id
+          ? `- [${hit.kind}] #${hit.id} **${hit.title}**\n ${hit.content}`
+          : `- [${hit.kind}] **${hit.title}**\n ${hit.content}`,
+      );
 
       return { output: `Memories for "${query}":\n${lines.join("\n")}` };
     } catch (error) {

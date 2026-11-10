@@ -1,5 +1,5 @@
 import type { AgentSummary } from "@/agents";
-import type { MemoryHit } from "@/memory";
+import type { MemoryHit, MemoryScope } from "@/memory";
 import type { SkillSummary } from "@/skills";
 import type { Config, ProviderConfig, ProviderDetail } from "@/configuration";
 import type { McpServerSummary, McpToolSummary } from "@/mcp";
@@ -114,6 +114,12 @@ export interface IHarness {
   memoryStatus(): Promise<{ provider: string; ok: boolean; detail?: string }>;
   // Searches the persistent memory. Empty when memory is off or down.
   searchMemory(query: string, limit?: number): Promise<MemoryHit[]>;
+  // Deletes one memory. true only when it was actually removed: a missing id, a
+  // memory owned by another session or project, and a backend that cannot delete
+  // all report false. `scope` defaults to "project".
+  forgetMemory(id: string, options?: { scope?: MemoryScope }): Promise<boolean>;
+  // Newest memories first. Empty when memory is off or down.
+  listMemories(limit?: number): Promise<MemoryHit[]>;
 
   // --- mcp ---
   // One entry per configured MCP server (id, transport, connection status,

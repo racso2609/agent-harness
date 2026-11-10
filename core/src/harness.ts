@@ -10,6 +10,7 @@ import { Config } from "@/configuration";
 import { SessionManager } from "@/session/SessionManager";
 import { SessionStore } from "@/session/SessionStore";
 import type { SpawnEventListener, SpawnHandle } from "@/session/spawn";
+import type { MemoryScope } from "@/memory";
 import type { ApprovalRequest } from "@/tools";
 import type { AgentResponse } from "@/types/providers";
 import { createLogger, setLogger } from "@/utils/logger";
@@ -111,6 +112,14 @@ class Harness implements IHarness {
 
   searchMemory(query: string, limit?: number) {
     return this.session.searchMemory(query, limit);
+  }
+
+  forgetMemory(id: string, options: { scope?: MemoryScope } = {}) {
+    return this.session.forgetStoredMemory(id, options);
+  }
+
+  listMemories(limit?: number) {
+    return this.session.listStoredMemories(limit);
   }
 
   listMcpServers() {

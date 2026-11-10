@@ -172,6 +172,16 @@ describe("compactSession capture", () => {
     expect(fake.captures[0].content).toContain("[redacted]");
   });
 
+  it("redacts secrets in the title, not only in the summary", async () => {
+    const session = await initSession({ enabled: true });
+    session.history = conversation("apikey=abcdef123456", "u2", "u3", "u4", "u5", "u6");
+
+    await session.compactSession();
+
+    expect(fake.captures).toHaveLength(1);
+    expect(fake.captures[0].title).not.toContain("abcdef123456");
+    expect(fake.captures[0].title).toContain("[redacted]");
+  });
   it("falls back to a fixed title when the folded window has no user turn", async () => {
     const session = await initSession({ enabled: true });
     session.history = [

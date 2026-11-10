@@ -85,6 +85,12 @@ interface MemoryConfig {
   captureOnCompact?: boolean;
   // --- tool ---
   recallTool?: boolean;
+  // Same off-switch as recallTool, one per write path: each tool is only
+  // offered when memory is enabled and its knob is not false.
+  rememberTool?: boolean;
+  forgetTool?: boolean;
+  // Cap on the content the remember tool accepts, from memory.maxCaptureChars.
+  maxCaptureChars?: number;
   // --- network ---
   timeoutMs?: number;
 }
@@ -199,6 +205,9 @@ const applyDefaults = (config: HarnessConfig): HarnessConfig => {
   config.memory.maxHitChars ??= 1200;
   config.memory.captureOnCompact ??= true;
   config.memory.recallTool ??= true;
+  config.memory.rememberTool ??= true;
+  config.memory.forgetTool ??= true;
+  config.memory.maxCaptureChars ??= 4000;
   config.memory.timeoutMs ??= 5000;
   config.memory.path ??= path.join(harnessHome(), "memory.db");
   config.ui ??= {};

@@ -1,4 +1,4 @@
-import type { MemoryHit } from "@/memory";
+import type { MemoryHit, MemoryKind, MemoryScope } from "@/memory";
 import type { JsonSchema, ToolResult } from "@/types/providers";
 
 // What a tool is about to do, handed to the approval gate.
@@ -14,6 +14,30 @@ export interface ApprovalRequest {
 // Outcome of an approval request. "always" allows the subject for the rest
 // of the session without prompting again.
 export type ApprovalDecision = "allow" | "deny" | "always";
+
+// Arguments the remember tool persists. Validated by the tool before it
+// reaches the callback.
+export interface RememberInput {
+  kind: MemoryKind;
+  scope: MemoryScope;
+  title: string;
+  content: string;
+  // Upsert key for facts and decisions that evolve. Optional here because the
+  // tool is what decides which kinds may omit it.
+  topicKey?: string;
+}
+
+// Outcome of a write to the memory. `unsupported` means the backend cannot
+// store anything (memory off, or capabilities().capture false); `failed` is a
+// backend that answered with nothing, which the caller reports as an error.
+export type RememberResult = { id: string } | { error: "unsupported" | "failed"; detail?: string };
+
+// Outcome of a delete. The reasons are distinct because the tool turns each
+// one into a different message for the model.
+export type ForgetResult = {
+  forgotten: boolean;
+  reason: "ok" | "not-found" | "out-of-scope" | "unsupported" | "failed";
+};
 
 // Runtime dependencies handed to a tool on every execution.
 export interface ToolContext {
@@ -35,6 +59,13 @@ export interface ToolContext {
   // Searches the persistent memory. Injected by the session manager; tools
   // that cannot recall leave it undefined.
   recallMemory?: (query: string, limit?: number) => Promise<MemoryHit[]>;
+  // Writes, deletes and lists persistent memories. Injected by the session
+  // manager for the same reason as recallMemory: the session owns the project
+  // key, the scope checks and the approval gate, so tools never hold a provider
+  // and never talk to a backend on their own.
+  rememberMemory?: (input: RememberInput) => Promise<RememberResult>;
+  forgetMemory?: (id: string, scope: MemoryScope) => Promise<ForgetResult>;
+  listMemories?: (limit?: number) => Promise<MemoryHit[]>;
   // Live output of a long-running tool. Chunks are already throttled by the
   // tool. Optional: every tool must work without it.
   onOutput?: (chunk: string) => void;

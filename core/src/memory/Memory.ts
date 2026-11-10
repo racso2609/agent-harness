@@ -68,5 +68,12 @@ export interface MemoryProvider {
   context(options: MemoryContextOptions): Promise<string>;
   capture(observation: MemoryObservation): Promise<{ id: string }>;
   forget(id: string): Promise<boolean>;
+  // Reads one observation by id, undefined when it does not exist. Optional so a
+  // backend that can only match terms keeps compiling; a caller that needs it
+  // (the forget path, to check the scope) degrades to "unsupported" without it.
+  inspect?(id: string): Promise<MemoryObservation | undefined>;
+  // Newest observations first, with no query at all. Optional too: `search("")`
+  // is the fallback for a backend that only knows how to match terms.
+  recent?(options: { project?: string; scope?: MemoryScope; limit?: number }): Promise<MemoryHit[]>;
   close(): Promise<void>;
 }
