@@ -226,6 +226,9 @@ class MainLoop {
       (this.ui as TuiUiAdapter).start({
         onSubmit: (prompt) => this.enqueueFromUser(prompt),
         onExit: () => void this.shutdown(0),
+        // A click on a running child of the strip stops it with the same verb
+        // /stop uses, so both paths end in the same abort.
+        onCancelSpawn: (spawnId) => this.harness.cancelSpawn(spawnId),
         // The draft decides whether a continuation may start: the box reports every
         // change, including the emptying that follows a send.
         onDraftChange: () => this.maybeContinue({ fromDraft: true }),

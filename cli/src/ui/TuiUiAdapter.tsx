@@ -38,6 +38,9 @@ class TuiUiAdapter implements UiAdapter {
   protected instance?: ReturnType<typeof render>;
   protected onSubmit: (prompt: string) => void = () => {};
   protected onExit: () => void = () => {};
+  // Stops a child of this process, wired to the core's cancel. Empty by
+  // default: an adapter nobody asked to stop anything swallows the click.
+  protected onCancelSpawn: (spawnId: string) => void = () => {};
   // Text typed in the input box and not sent yet. Ink owns stdin, so the app
   // is the only one that knows it; it reports every change here.
   protected draft = "";
@@ -83,6 +86,9 @@ class TuiUiAdapter implements UiAdapter {
   start(options: {
     onSubmit: (prompt: string) => void;
     onExit: () => void;
+    // Stops a running child when its row is clicked on the strip. Optional:
+    // without it a click on the strip does nothing.
+    onCancelSpawn?: (spawnId: string) => void;
     onDraftChange?: (draft: string) => void;
     // Slash commands the input box offers in its dropdown. Ink owns stdin, so
     // the catalog has to travel through the adapter: the app cannot ask stdin
@@ -91,6 +97,7 @@ class TuiUiAdapter implements UiAdapter {
   }) {
     this.onSubmit = options.onSubmit;
     this.onExit = options.onExit;
+    this.onCancelSpawn = options.onCancelSpawn ?? (() => {});
     this.onDraftChange = options.onDraftChange ?? null;
     this.commands = options.commands ?? [];
     this.mount();
@@ -115,6 +122,7 @@ class TuiUiAdapter implements UiAdapter {
         onSubmit={(prompt) => this.onSubmit(prompt)}
         onExit={() => this.onExit()}
         onDecision={(decision) => this.resolveApproval(decision)}
+        onCancelSpawn={(spawnId) => this.onCancelSpawn(spawnId)}
         onSelect={(id) => this.resolveSelection(id)}
         onPrompt={(answer) => this.resolvePrompt(answer)}
         onToggle={(kind, index) => this.toggleEntry(kind, index)}

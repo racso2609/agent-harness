@@ -109,6 +109,10 @@ interface AppProps {
   // that follows a send. The owner needs it to know whether the user is
   // half-way through a thought.
   onDraftChange?: (draft: string) => void;
+  // Stops a child of this run, called when the user clicks its row on the strip
+  // while it is still running. Optional so a caller with nothing to stop (and
+  // the render tests) can leave it out: without it a click does nothing.
+  onCancelSpawn?: (spawnId: string) => void;
 }
 
 // Columns reserved for the pane border and its horizontal padding.
@@ -146,6 +150,7 @@ export const App = ({
   onToggle,
   onToggleAll,
   onDraftChange,
+  onCancelSpawn,
 }: AppProps) => {
   const [draft, setDraft] = useState("");
   // Text typed into the open question. It lives here and not in the owner for
@@ -179,6 +184,9 @@ export const App = ({
   // Latest scroll applier, kept in a ref so the mouse tap installed once can
   // use the current viewport without being re-attached on every render.
   const scrollRef = useRef<(lines: number) => void>(() => {});
+  // Latest cancel callback, for the same reason: the tap is installed once and
+  // would otherwise reach the prop of the render that installed it forever.
+  const cancelRef = useRef<(spawnId: string) => void>(() => {});
   // Which spawn row the pointer is over. The value is written by the mouse tap,
   // outside the React cycle, so it is read through `useSyncExternalStore` and
   // not through component state: a `setState` from the tap would tie every
@@ -577,6 +585,9 @@ export const App = ({
 
   rowsRef.current = strip.rows;
   stoppableRef.current = new Set(strip.rows.filter(stoppable).map((row) => row.id));
+  // Pointed at the prop of the frame on screen on every render, never at the
+  // one of the render that installed the tap.
+  cancelRef.current = (spawnId) => onCancelSpawn?.(spawnId);
 
   // Mouse wheel, trackpad and hover. Ink consumes every chunk it reads from
   // stdin, so the mouse sequences have to be taken on the way out. The wrapping
@@ -605,14 +616,34 @@ export const App = ({
           typeof chunk === "string" ? chunk : Buffer.from(chunk as Uint8Array).toString("utf8");
         const deltas = wheelScrollLines(text);
         if (deltas.length) scrollRef.current(deltas.reduce((sum, delta) => sum + delta, 0));
-        // Hover only highlights. A press, a release and a drag are left alone: a click
-        // is a separate decision and this tap must not guess at it.
         const geometry = geometryRef.current;
 
         for (const report of parseMouseReports(text)) {
+          const row = geometry ? stripRowAt(report, geometry) : null;
+
+          // A left press on the row of a running child stops it, and that is the
+          // only report that acts. A release, a drag and every other button are
+          // ignored, and a click anywhere else — the transcript, a border, the
+          // "+N older" counter — does nothing at all.
+          //
+          // Only a child of this process with work left to abort is stopped, so
+          // a click on a settled or a restored row is swallowed on purpose: it
+          // is silent because there is nothing to stop, not because it failed.
+          if (report.phase === "press" && report.button === "left") {
+            const spawn = row === null ? undefined : rowsRef.current[row];
+
+            if (spawn && stoppableRef.current.has(spawn.id)) {
+              cancelRef.current(spawn.id);
+              // A row left lit over a child that is being stopped is a lie, and
+              // the next motion report would light it again.
+              hover.current.set(null);
+            }
+
+            continue;
+          }
+
           if (report.phase !== "move") continue;
 
-          const row = geometry ? stripRowAt(report, geometry) : null;
           const spawn = row === null ? undefined : rowsRef.current[row];
           // A settled or restored child has nothing to stop, so it must not look
           // actionable: the pointer over one clears the highlight.
