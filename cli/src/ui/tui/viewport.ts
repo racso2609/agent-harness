@@ -215,6 +215,18 @@ export const WHEEL_LINES = 3;
 export const MOUSE_ENABLE = "\u001b[?1000h\u001b[?1006h";
 export const MOUSE_DISABLE = "\u001b[?1006l\u001b[?1000l";
 
+// Any-event tracking: every movement of the pointer is reported, which is what
+// a hover needs. It is a separate pair of sequences on purpose — `MOUSE_ENABLE`
+// above is what a terminal without motion support still understands, so the
+// hover rides on top of it instead of replacing it.
+//
+// A terminal that ignores `?1003` (Apple Terminal, tmux without
+// `set -g mouse on`) simply never sends motion. The wheel and the click keep
+// working and the highlight never appears: there is no error to report and
+// nothing to fall back to.
+export const MOUSE_HOVER_ENABLE = "\u001b[?1003h";
+export const MOUSE_HOVER_DISABLE = "\u001b[?1003l";
+
 // Scroll deltas, in lines, carried by one raw stdin chunk. Positive scrolls up,
 // matching `scrollBy`. A chunk can hold several notches when the terminal
 // batches them, so the caller applies them in order.
@@ -225,12 +237,12 @@ export const MOUSE_DISABLE = "\u001b[?1006l\u001b[?1000l";
 // is not imported by the parser, so the dependency only ever goes
 // viewport -> mouse and there is no import cycle to untangle.
 export const wheelScrollLines = (input: string): number[] => {
-const deltas: number[] = [];
+  const deltas: number[] = [];
 
-for (const report of parseMouseReports(input)) {
-if (report.button === "wheel-up") deltas.push(WHEEL_LINES);
-else if (report.button === "wheel-down") deltas.push(-WHEEL_LINES);
-}
+  for (const report of parseMouseReports(input)) {
+    if (report.button === "wheel-up") deltas.push(WHEEL_LINES);
+    else if (report.button === "wheel-down") deltas.push(-WHEEL_LINES);
+  }
 
-return deltas;
+  return deltas;
 };

@@ -6,6 +6,8 @@ import { describe, expect, it } from "vitest";
 import {
   MOUSE_DISABLE,
   MOUSE_ENABLE,
+  MOUSE_HOVER_DISABLE,
+  MOUSE_HOVER_ENABLE,
   WHEEL_LINES,
   wheelScrollLines,
 } from "../../src/ui/tui/viewport";
@@ -41,5 +43,16 @@ describe("wheelScrollLines", () => {
     expect(MOUSE_ENABLE).toContain("1006h");
     expect(MOUSE_DISABLE).toContain("1000l");
     expect(MOUSE_DISABLE).toContain("1006l");
+  });
+
+  it("enables any-event tracking on its own pair, past press and wheel", () => {
+    // Hover needs motion, which `?1000` does not report. It rides on a separate
+    // sequence so a terminal that ignores it keeps its wheel and its click.
+    expect(MOUSE_HOVER_ENABLE).toBe("\u001b[?1003h");
+    expect(MOUSE_HOVER_DISABLE).toBe("\u001b[?1003l");
+    expect(MOUSE_HOVER_ENABLE).not.toContain("1000");
+    expect(MOUSE_HOVER_ENABLE).not.toContain("1006");
+    expect(MOUSE_HOVER_DISABLE).not.toContain("1000");
+    expect(MOUSE_HOVER_DISABLE).not.toContain("1006");
   });
 });

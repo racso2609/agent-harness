@@ -33,12 +33,25 @@ const fakeStdout = (rows: number, columns: number) => {
   return { stream, chunks };
 };
 
-// ANSI-stripped text of the most recent frame. Each frame ends with the status
-// line, so the segment before the final "ready" is the frame itself.
+// ANSI-stripped text of the most recent complete frame. Counting on a "ready"
+// after the last one does not work: the TUI also writes its mouse-mode
+// sequences on mount and ink flushes them as their own chunks, so how many
+// "ready" segments there are is not a fact about the frame. What is stable is
+// the transcript panel itself: the frame is the last panel, borders included.
 const frameOf = (chunks: string[]): string => {
-  const clean = chunks.join("").replace(/\u001b\[[0-9;?]*[a-zA-Z]/g, "");
-  const frames = clean.split("ready");
-  return frames.at(-2) ?? "";
+  // SGR mouse reports go first, and before anything is stripped: the "<" of a
+  // report such as ESC [ <64;10;10M is code point U+256D, the same one the
+  // borders are drawn with, so a report left in the text passes for a border.
+  const raw = chunks.join("").replace(/\u001b\[<\d+;\d+;\d+[Mm]/g, "");
+  // Ink does not repaint the screen, it erases a line at a time and writes only
+  // what changed, so the output holds every frame the app ever painted and the
+  // last complete one begins at the last erase. Counting "ready" segments does
+  // not work here: the mouse-mode sequences written on mount are flushed as
+  // chunks of their own and change how many segments there are.
+  const erase = raw.lastIndexOf("\u001b[2K");
+  const last = erase === -1 ? raw : raw.slice(erase + "\u001b[2K".length);
+
+  return last.replace(/\u001b\[[0-9;?]*[A-Za-z]/g, "");
 };
 
 const notices = (labels: string[]): TuiLine[] =>

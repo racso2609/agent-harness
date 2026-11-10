@@ -1,11 +1,22 @@
 import { Box, Text, useInput, useStdin, useStdout, useWindowSize } from "ink";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { CommandOption } from "@/commands/CommandRepository";
 import { menuMove, menuRows } from "@/terminal/commandMenu";
 import type { SelectionRequest, UiStatus } from "../UiAdapter";
 import { formatStatusBar } from "../statusBar";
 import type { Block, InlineSpan, StreamDocument, TableBlock } from "./markdown";
-import { colorFor, elapsedFor, iconFor, type SpawnEntry, spawnStrip } from "./progress";
+import { createHoverStore, parseMouseReports } from "./mouse";
+import {
+  colorFor,
+  elapsedFor,
+  iconFor,
+  type SpawnEntry,
+  type SpawnStripRow,
+  spawnStrip,
+  stoppable,
+  type StripGeometry,
+  stripRowAt,
+} from "./progress";
 import { GLYPH, resolveTheme, type Role, type Theme } from "./theme";
 import { collapse } from "./collapse";
 import { fitColumns, gapBefore, truncateCell, wrapText } from "./layout";
@@ -26,10 +37,13 @@ import {
   SELECT_CHROME_Y,
   MOUSE_DISABLE,
   MOUSE_ENABLE,
+  MOUSE_HOVER_DISABLE,
+  MOUSE_HOVER_ENABLE,
   nextView,
   PANEL_PADDING_X,
   PANEL_PADDING_Y,
   PROMPT_CHROME_Y,
+  STRIP_BORDER_ROWS,
   TRANSCRIPT_CHROME_Y,
   viewportRows,
   wheelScrollLines,
@@ -166,6 +180,21 @@ export const App = ({
   // Latest scroll applier, kept in a ref so the mouse tap installed once can
   // use the current viewport without being re-attached on every render.
   const scrollRef = useRef<(lines: number) => void>(() => {});
+  // Which spawn row the pointer is over. The value is written by the mouse tap,
+  // outside the React cycle, so it is read through `useSyncExternalStore` and
+  // not through component state: a `setState` from the tap would tie every
+  // mouse report to a render, and the store only notifies when the row really
+  // changes.
+  const hover = useRef(createHoverStore());
+  const hovered = useSyncExternalStore(hover.current.subscribe, hover.current.get);
+  // Fresh copies of what the tap needs to answer "which child is under the
+  // pointer": the strip geometry, the ids that can actually be stopped and the
+  // rows themselves, so the tap can tell an actionable child from a settled
+  // one. Refs for the same reason as `scrollRef`: the tap is installed once and
+  // must never read a stale render.
+  const geometryRef = useRef<StripGeometry | null>(null);
+  const stoppableRef = useRef<Set<string>>(new Set());
+  const rowsRef = useRef<SpawnStripRow[]>([]);
   const approval = state.approval;
   const selection = state.selection;
   const prompt = state.prompt;
@@ -524,10 +553,37 @@ export const App = ({
     });
   };
 
-  // Mouse wheel and trackpad. Ink owns stdin and drops mouse sequences before
-  // `useInput` ever sees them, so the wheel is read by tapping the stream Ink
-  // reads from. Its `read` is wrapped instead of adding a `data` listener: a
-  // data listener flips stdin to flowing mode and starves Ink's paused reads.
+  // Where the strip sits in the ink viewport, derived from the same chain that
+  // computes its height: the transcript chrome, the rows it reserves and the
+  // strip itself. The reserved height (`viewportLines`) is used and not
+  // `padTop + painted`, because only the reserved one cannot diverge from what
+  // `chromeRows` charged. No strip, no geometry: nothing is painted and every
+  // report falls outside it.
+  //
+  // Rewritten on every render, the way `scrollRef` is, so the tap always reads
+  // the geometry of the frame the user is looking at.
+  if (strip.rows.length > 0) {
+    geometryRef.current = {
+      top: TRANSCRIPT_CHROME_Y + viewportLines + stripRows + STRIP_BORDER_ROWS,
+      children: stripRows,
+      hidden: strip.hidden > 0,
+    };
+  } else {
+    geometryRef.current = null;
+  }
+
+  rowsRef.current = strip.rows;
+  stoppableRef.current = new Set(strip.rows.filter(stoppable).map((row) => row.id));
+
+  // Mouse wheel, trackpad and hover. Ink consumes every chunk it reads from
+  // stdin, so the mouse sequences have to be taken on the way out. The wrapping
+  // is around `read` and not a `data` listener: a data listener flips stdin to
+  // flowing mode and starves Ink's paused reads.
+  //
+  // Ink keeps its own parser in front of `read` and only calls it while an
+  // escape is pending there, so in practice it is this tap that pulls the chunk.
+  // A report split across two chunks is still honoured one read later, because
+  // nothing is kept between reads.
   useEffect(() => {
     const stream = stdin as NodeJS.ReadStream & { isTTY?: boolean };
 
@@ -543,17 +599,35 @@ export const App = ({
           typeof chunk === "string" ? chunk : Buffer.from(chunk as Uint8Array).toString("utf8");
         const deltas = wheelScrollLines(text);
         if (deltas.length) scrollRef.current(deltas.reduce((sum, delta) => sum + delta, 0));
+        // Hover only highlights. A press, a release and a drag are left alone: a click
+        // is a separate decision and this tap must not guess at it.
+        const geometry = geometryRef.current;
+
+        for (const report of parseMouseReports(text)) {
+          if (report.phase !== "move") continue;
+
+          const row = geometry ? stripRowAt(report, geometry) : null;
+          const spawn = row === null ? undefined : rowsRef.current[row];
+          // A settled or restored child has nothing to stop, so it must not look
+          // actionable: the pointer over one clears the highlight.
+          hover.current.set(spawn && stoppableRef.current.has(spawn.id) ? row : null);
+        }
       }
 
       return chunk;
     };
 
     (stream as unknown as { read: unknown }).read = tap;
-    out?.write(MOUSE_ENABLE);
+    // Motion reporting is stacked on top of the press and wheel modes, so a
+    // terminal that ignores `?1003` keeps its wheel and simply never hovers.
+    out?.write(MOUSE_ENABLE + MOUSE_HOVER_ENABLE);
 
     return () => {
       (stream as unknown as { read: unknown }).read = originalRead;
-      out?.write(MOUSE_DISABLE);
+      // Undone in the reverse order of the setup, and the highlight goes with it so
+      // no row is left lit on a screen nobody is tracking any more.
+      hover.current.set(null);
+      out?.write(MOUSE_HOVER_DISABLE + MOUSE_DISABLE);
     };
   }, [stdin, stdout]);
 
@@ -609,8 +683,16 @@ export const App = ({
           borderColor="cyan"
           paddingX={PANEL_PADDING_X}
         >
-          {strip.rows.map((spawn) => (
-            <Text key={spawn.id} color={colorFor(spawn.status)} dimColor={spawn.restored}>
+          {strip.rows.map((spawn, index) => (
+            <Text
+              key={spawn.id}
+              color={colorFor(spawn.status)}
+              dimColor={spawn.restored}
+              // Inverse, not another colour: it flips fg and bg over whatever `colorFor`
+              // already chose, so the highlight never competes with the yellow of a
+              // cancelled child or the dim of a restored one.
+              inverse={index === hovered}
+            >
               {iconFor(spawn.status)} {spawn.agent} · {spawn.id} · {elapsedFor(spawn, now)}
             </Text>
           ))}
