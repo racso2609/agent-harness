@@ -43,7 +43,6 @@ import {
   PANEL_PADDING_X,
   PANEL_PADDING_Y,
   PROMPT_CHROME_Y,
-  STRIP_BORDER_ROWS,
   TRANSCRIPT_CHROME_Y,
   viewportRows,
   wheelScrollLines,
@@ -564,7 +563,11 @@ export const App = ({
   // the geometry of the frame the user is looking at.
   if (strip.rows.length > 0) {
     geometryRef.current = {
-      top: TRANSCRIPT_CHROME_Y + viewportLines + stripRows + STRIP_BORDER_ROWS,
+      // The strip hangs directly under the transcript box, so its top border
+      // sits on the first row that box does not paint. Its own height and the
+      // panels below it are charged by `chromeRows`, not here: adding them put
+      // the geometry rows below the strip, so no report ever landed on a child.
+      top: TRANSCRIPT_CHROME_Y + viewportLines,
       children: stripRows,
       hidden: strip.hidden > 0,
     };
@@ -582,8 +585,11 @@ export const App = ({
   //
   // Ink keeps its own parser in front of `read` and only calls it while an
   // escape is pending there, so in practice it is this tap that pulls the chunk.
-  // A report split across two chunks is still honoured one read later, because
-  // nothing is kept between reads.
+  // Nothing is carried between reads, so a report the kernel splits across two
+  // chunks is dropped instead of completed. With `?1003h` the terminal sends
+  // tens of them and the next movement puts the pointer where it belongs;
+  // stitching the halves would mean holding parser state in the tap for the
+  // rare report that is cut.
   useEffect(() => {
     const stream = stdin as NodeJS.ReadStream & { isTTY?: boolean };
 
@@ -683,19 +689,36 @@ export const App = ({
           borderColor="cyan"
           paddingX={PANEL_PADDING_X}
         >
-          {strip.rows.map((spawn, index) => (
-            <Text
-              key={spawn.id}
-              color={colorFor(spawn.status)}
-              dimColor={spawn.restored}
-              // Inverse, not another colour: it flips fg and bg over whatever `colorFor`
-              // already chose, so the highlight never competes with the yellow of a
-              // cancelled child or the dim of a restored one.
-              inverse={index === hovered}
-            >
-              {iconFor(spawn.status)} {spawn.agent} · {spawn.id} · {elapsedFor(spawn, now)}
-            </Text>
-          ))}
+          {strip.rows.map((spawn, index) => {
+            // The highlight also repaints the text, because ink compares the text of
+            // the frame to decide whether to write: a row that differs only in style
+            // produces an identical frame and is never repainted, so an `inverse` on
+            // its own never reached the screen. The separators of the row under the
+            // pointer become the same `›` the open menus mark a choice with, which
+            // reads as "this is what a click would act on".
+            const lit = index === hovered;
+            const separator = lit ? " › " : " · ";
+
+            return (
+              <Text
+                key={spawn.id}
+                color={colorFor(spawn.status)}
+                dimColor={spawn.restored}
+                // Inverse on top of the changed text, not instead of it: it flips fg
+                // and bg over whatever `colorFor` already chose, so the highlight never
+                // competes with the yellow of a cancelled child or the dim of a restored
+                // one. In ink 8 `inverse` does not force `fg`, so on its own it would
+                // not win over `dimColor` either.
+                inverse={lit}
+              >
+                {iconFor(spawn.status)} {spawn.agent}
+                {separator}
+                {spawn.id}
+                {separator}
+                {elapsedFor(spawn, now)}
+              </Text>
+            );
+          })}
           {strip.hidden > 0 && <Text dimColor>+{strip.hidden} older from previous runs</Text>}
         </Box>
       )}
