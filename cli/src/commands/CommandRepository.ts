@@ -7,6 +7,7 @@ import type {
   SpawnHandle,
 } from "@racso2609/core";
 import type { Flows } from "@/flows";
+import { oneLine } from "@/ui/outcome";
 import {
   formatMemoryForget,
   formatMemoryHits,
@@ -329,6 +330,47 @@ const BUILT_IN_COMMANDS: CommandDefinition[] = [
     },
   },
   {
+    name: "stop",
+    description: "Stop a spawned agent: /stop [spawnId]",
+    run: async (context, args) => {
+      const [spawnId] = args;
+
+      if (spawnId) {
+        stopSpawn(context, spawnId);
+        return;
+      }
+
+      const live = liveSpawns(context);
+      if (!live.length) {
+        context.notify("No running spawned agents to stop");
+        return;
+      }
+
+      // One child is not a choice: a picker would cost a keystroke to answer
+      // what the command already knows. The notice still names it.
+      if (live.length === 1) {
+        stopSpawn(context, live[0]!.spawnId);
+        return;
+      }
+
+      // The option id is the spawn id itself, so nothing has to be decoded on
+      // the way back and the picker and an explicit id share one path.
+      const chosen = await context.flows.ui.select({
+        message: "Select the agent to stop:",
+        options: live.map((spawn) => ({
+          id: spawn.spawnId,
+          label: `${spawn.spawnId} · ${spawn.agentId} · ${oneLine(spawn.prompt)}`,
+        })),
+      });
+      if (!chosen) {
+        context.notify("Stop canceled");
+        return;
+      }
+
+      stopSpawn(context, chosen);
+    },
+  },
+  {
     name: "join",
     description: "Wait for a spawned agent and show its result",
     run: async (context, args) => {
@@ -393,9 +435,9 @@ const formatMcpServers = (context: CommandContext, servers?: McpServerSummary[])
   });
 
   for (const [serverId, tools] of groupMcpTools(context.harness.mcpTools())) {
-    lines.push(`    ${serverId}:`);
+    lines.push(`  ${serverId}:`);
     for (const tool of tools) {
-      lines.push(`        ${tool.name} - ${truncate(tool.description, 120)}`);
+      lines.push(`    ${tool.name} - ${truncate(tool.description, 120)}`);
     }
   }
 
@@ -450,6 +492,24 @@ const formatSpawnList = (spawns: SpawnHandle[]) => {
       return `[${label}] ${spawn.spawnId} (${spawn.agentId})${suffix}`;
     })
     .join("\n");
+};
+
+// Live children only: `listSpawns()` also carries the ones that already
+// settled, and those cannot be stopped, so offering them would be a lie.
+const liveSpawns = (context: CommandContext) =>
+  context.harness.listSpawns().filter((spawn) => spawn.status === "running");
+
+// Says whether the abort was actually delivered. `cancelSpawn` returns false
+// for an unknown id, for a child that already settled and for one restored
+// from a previous run, and none of those stopped anything: claiming otherwise
+// would leave the user waiting on a child that never dies.
+const stopSpawn = (context: CommandContext, spawnId: string) => {
+  if (context.harness.cancelSpawn(spawnId)) {
+    context.notify(`Stopping ${spawnId}`);
+    return;
+  }
+
+  context.notify(`Unknown or already finished child: ${spawnId}`);
 };
 
 const formatSpawnResult = (spawn: SpawnHandle) => {

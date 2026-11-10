@@ -74,6 +74,9 @@ export const elapsedFor = (spawn: SpawnEntry, now: number): string => {
 export const iconFor = (status: string): string => {
   if (status === "done") return "✓";
   if (status === "error") return "✗";
+  // A slashed circle, so a child the user gave up on never reads as a live
+  // spinner nor as a failure of its own.
+  if (status === "cancelled") return "⊘";
 
   return "◐";
 };
@@ -81,6 +84,8 @@ export const iconFor = (status: string): string => {
 export const colorFor = (status: string): string | undefined => {
   if (status === "done") return "green";
   if (status === "error") return "red";
+  // Yellow, not red: cancelled is something the user asked for, not a fault.
+  if (status === "cancelled") return "yellow";
 
   return "cyan";
 };

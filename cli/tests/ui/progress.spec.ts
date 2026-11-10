@@ -77,6 +77,18 @@ describe("elapsedFor", () => {
     expect(elapsedFor(spawn, now)).toBe("done in 42s");
   });
 
+  it("freezes a cancelled child the same way as a done one", () => {
+    const spawn = {
+      id: "s",
+      agent: "a",
+      status: "cancelled",
+      startedAt: at(0),
+      finishedAt: at(12_000),
+    };
+
+    expect(elapsedFor(spawn, now)).toBe("cancelled in 12s");
+  });
+
   it("falls back to the status when there is no start time", () => {
     expect(elapsedFor({ id: "s", agent: "a", status: "error" }, now)).toBe("error");
   });
@@ -87,10 +99,12 @@ describe("iconFor / colorFor", () => {
     expect(iconFor("running")).toBe("◐");
     expect(iconFor("done")).toBe("✓");
     expect(iconFor("error")).toBe("✗");
+    expect(iconFor("cancelled")).toBe("⊘");
 
     expect(colorFor("running")).toBe("cyan");
     expect(colorFor("done")).toBe("green");
     expect(colorFor("error")).toBe("red");
+    expect(colorFor("cancelled")).toBe("yellow");
   });
 });
 

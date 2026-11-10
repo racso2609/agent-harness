@@ -86,6 +86,7 @@ const makeContext = (): CommandContext => ({
     })),
     pollSpawn: vi.fn(() => undefined),
     listSpawns: vi.fn(() => []),
+    cancelSpawn: vi.fn(() => true),
     waitSpawn: vi.fn(async () => undefined),
     collectSpawns: vi.fn(async () => []),
     compactSession: vi.fn(async () => true),
@@ -104,6 +105,9 @@ const makeContext = (): CommandContext => ({
     shutdown: vi.fn(),
   } as unknown as CommandContext["harness"],
   flows: {
+    ui: {
+      select: vi.fn(async () => undefined),
+    } as unknown as CommandContext["flows"]["ui"],
     changeProvider: vi.fn(async () => true),
     addProvider: vi.fn(async () => true),
     removeProvider: vi.fn(async () => true),
@@ -164,6 +168,7 @@ describe("CommandRepository", () => {
       "status",
       "spawn",
       "children",
+      "stop",
       "join",
     ]);
     expect(commands[0]).not.toHaveProperty("run");
@@ -416,6 +421,85 @@ describe("CommandRepository", () => {
     expect(context.notify).toHaveBeenCalledWith(expect.stringContaining("the result"));
   });
 
+  const liveSpawn = (spawnId: string, agentId: string, prompt: string) => ({
+    spawnId,
+    sessionId: "session-1",
+    agentId,
+    prompt,
+    status: "running" as const,
+    startedAt: "2024-01-01T00:00:00.000Z",
+  });
+
+  it("offers every running child in a picker when there are several", async () => {
+    const repository = new CommandRepository();
+    const context = makeContext();
+    context.harness.listSpawns = vi.fn(() => [
+      liveSpawn("spawn-1", "coder", "write\nthe   docs"),
+      liveSpawn("spawn-2", "reviewer", "review it"),
+      // A settled child cannot be stopped, so it is not offered.
+      { ...liveSpawn("spawn-3", "coder", "old task"), status: "done" as const },
+    ]);
+    context.flows.ui.select = vi.fn(async () => "spawn-2");
+
+    await repository.run("/stop", context);
+
+    expect(context.flows.ui.select).toHaveBeenCalledWith({
+      message: "Select the agent to stop:",
+      options: [
+        { id: "spawn-1", label: "spawn-1 · coder · write the docs" },
+        { id: "spawn-2", label: "spawn-2 · reviewer · review it" },
+      ],
+    });
+    expect(context.harness.cancelSpawn).toHaveBeenCalledWith("spawn-2");
+    expect(context.notify).toHaveBeenCalledWith("Stopping spawn-2");
+  });
+
+  it("stops the only running child without asking", async () => {
+    const repository = new CommandRepository();
+    const context = makeContext();
+    context.harness.listSpawns = vi.fn(() => [liveSpawn("spawn-1", "coder", "task")]);
+
+    await repository.run("/stop", context);
+
+    expect(context.flows.ui.select).not.toHaveBeenCalled();
+    expect(context.harness.cancelSpawn).toHaveBeenCalledWith("spawn-1");
+    expect(context.notify).toHaveBeenCalledWith("Stopping spawn-1");
+  });
+
+  it("stops the child named as an argument without asking", async () => {
+    const repository = new CommandRepository();
+    const context = makeContext();
+    context.harness.listSpawns = vi.fn(() => [
+      liveSpawn("spawn-1", "coder", "task"),
+      liveSpawn("spawn-2", "coder", "other task"),
+    ]);
+
+    await repository.run("/stop spawn-2", context);
+
+    expect(context.flows.ui.select).not.toHaveBeenCalled();
+    expect(context.harness.cancelSpawn).toHaveBeenCalledWith("spawn-2");
+  });
+
+  it("does not claim a child was stopped when the cancel was not delivered", async () => {
+    const repository = new CommandRepository();
+    const context = makeContext();
+    context.harness.cancelSpawn = vi.fn(() => false);
+
+    await repository.run("/stop nope", context);
+
+    expect(context.notify).toHaveBeenCalledWith("Unknown or already finished child: nope");
+  });
+
+  it("reports when there is nothing running to stop", async () => {
+    const repository = new CommandRepository();
+    const context = makeContext();
+
+    await repository.run("/stop", context);
+
+    expect(context.flows.ui.select).not.toHaveBeenCalled();
+    expect(context.harness.cancelSpawn).not.toHaveBeenCalled();
+    expect(context.notify).toHaveBeenCalledWith("No running spawned agents to stop");
+  });
   it("reports unknown spawn ids on join", async () => {
     const repository = new CommandRepository();
     const context = makeContext();
