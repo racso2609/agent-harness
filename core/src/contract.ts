@@ -141,6 +141,28 @@ export interface IHarness {
   // --- background children ---
   spawn(agentId: string, prompt: string, options?: SpawnOptions): SpawnHandle;
   pollSpawn(spawnId: string): SpawnHandle | undefined;
+  // Asks a child of this process to stop and reports whether the abort was
+  // delivered. Synchronous on purpose, because it only signals: the handle
+  // flips to "cancelled" when the child reaches its settlement point, which
+  // happens as soon as the abort lands.
+  //
+  // The abort is real, not a promise: it travels down to the request the child
+  // has in flight at the provider, so an ask() already running is interrupted
+  // instead of being waited out, and the child stops spending tokens. Aborted
+  // work is never retried at any level, because retrying is the caller's policy
+  // and a cancel is not a transient failure. Tools that honour the signal (shell
+  // and friends) kill their work too.
+  //
+  // Returns false, without throwing, for an unknown id, for a child that
+  // already settled, and for a child restored from a previous run (history is
+  // never reattached, so there is nothing running to abort). The request is
+  // still recorded on the handle as `cancelRequestedAt` even when it returns
+  // false: the user did give up on that child, and the handle says so.
+  //
+  // A cancelled child is not work owed to the parent: it never enters
+  // pendingSpawns() and its result is never delivered into a parent turn, but
+  // it stays in childHistory() as "cancelled" across a resume.
+  cancelSpawn(spawnId: string): boolean;
   // Live children of the current process only.
   listSpawns(): SpawnHandle[];
   // Every child this session ever launched, including the ones restored from a

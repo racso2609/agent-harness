@@ -24,14 +24,20 @@ const heuristic = (prompt: string): ClassifiedAction =>
 export const classifyAction = async (
   prompt: string,
   provider: Provider,
+  signal?: AbortSignal,
 ): Promise<ClassifiedAction> => {
+  // Already cancelled: do not spend a classification request either.
+  if (signal?.aborted) throw signal.reason;
   try {
-    const { turn } = await provider.chat([
-      {
-        role: "user",
-        content: `${CLASSIFICATION_PROMPT}\n\nPrompt: ${prompt}`,
-      },
-    ]);
+    const { turn } = await provider.chat(
+      [
+        {
+          role: "user",
+          content: `${CLASSIFICATION_PROMPT}\n\nPrompt: ${prompt}`,
+        },
+      ],
+      { signal },
+    );
     const parsed = normalize(turn.text);
 
     if (typeof parsed?.is_image_generation === "boolean")
@@ -39,6 +45,11 @@ export const classifyAction = async (
 
     return heuristic(prompt);
   } catch (err) {
+    // An abort is not a classification failure: it is re-thrown
+    // instead of being swallowed by the heuristic, so a cancelled
+    // turn never continues on a guess.
+    if (signal?.aborted) throw signal.reason ?? err;
+
     logger.debug({ err }, "classification failed, falling back to heuristic");
     return heuristic(prompt);
   }

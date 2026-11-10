@@ -146,6 +146,10 @@ class Harness implements IHarness {
     return this.session.pollSpawn(spawnId);
   }
 
+  cancelSpawn(spawnId: string): boolean {
+    return this.session.cancelSpawn(spawnId);
+  }
+
   onSpawnEvent(listener: SpawnEventListener): () => void {
     return this.session.onSpawnEvent(listener);
   }

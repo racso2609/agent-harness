@@ -7,7 +7,7 @@ import type { Config } from "../../src/configuration";
 import { OpenAiProvider } from "../../src/providers/openai";
 import { SessionManager } from "../../src/session/SessionManager";
 import type { SessionStore } from "../../src/session/SessionStore";
-import type { SpawnHandle } from "../../src/session/spawn";
+import { CANCELLED_SUMMARY, type SpawnHandle } from "../../src/session/spawn";
 
 const makeConfig = (overrides: Record<string, unknown> = {}) => {
   const config = { providers: {}, ...overrides };
@@ -462,6 +462,148 @@ describe("SessionManager agent loop", () => {
     vi.spyOn(session, "classifyAction").mockResolvedValue("textGeneration");
     return session;
   };
+
+  it("does not spend a request when the turn is already aborted", async () => {
+    const session = makeSession();
+    const chat = vi.fn(async () => stopTurn("done"));
+    provider.chat = chat;
+
+    const controller = new AbortController();
+    const reason = new Error("spawn cancelled");
+    controller.abort(reason);
+
+    await expect(session.ask("hi", undefined, { signal: controller.signal })).rejects.toBe(reason);
+
+    // Neither the classification nor the model was asked, and the prompt never
+    // entered the history of a session whose turn was over before it began.
+    expect(session.classifyAction).not.toHaveBeenCalled();
+    expect(chat).not.toHaveBeenCalled();
+    expect(session.history).toEqual([]);
+  });
+
+  it("stops between two iterations when the tool aborts the turn", async () => {
+    // The iteration that returns the tool call is not empty, so nothing but the
+    // abort guard at the top of the loop stands between the tool result and a
+    // second request: a cancelled turn must not spend one.
+    const session = makeSession();
+    const controller = new AbortController();
+    const reason = new Error("spawn cancelled");
+
+    session.tools.register({
+      name: "abort",
+      description: "Aborts the turn",
+      parameters: { type: "object" },
+      execute: async () => {
+        controller.abort(reason);
+        return { output: "aborted" };
+      },
+    });
+
+    const chat = vi.fn().mockResolvedValueOnce({
+      turn: {
+        text: "",
+        toolCalls: [{ id: "call_1", name: "abort", args: {} }],
+        finishReason: "toolCalls",
+      },
+      usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+    });
+    provider.chat = chat;
+
+    await expect(session.ask("run abort", undefined, { signal: controller.signal })).rejects.toBe(
+      reason,
+    );
+
+    expect(chat).toHaveBeenCalledTimes(1);
+    // The tool ran and its result was fed back; what never happened is the
+    // second request and the final answer that would have closed the turn.
+    expect(session.conversation()).toEqual([{ role: "user", content: "run abort" }]);
+  });
+
+  it("does not retry an empty turn that was aborted", async () => {
+    // An abort can cut the stream right before the first token, which looks
+    // exactly like the gateway coming back empty. Retrying that spends a second
+    // request on a turn the user already cancelled; the signal is what tells the
+    // two apart.
+    const session = makeSession();
+    const controller = new AbortController();
+    const reason = new Error("spawn cancelled");
+
+    const chat = vi.fn(async () => {
+      // The model answers nothing because the request was cancelled mid-stream.
+      controller.abort(reason);
+      return stopTurn("");
+    });
+    provider.chat = chat;
+
+    const response = await session.ask("hi", undefined, { signal: controller.signal });
+
+    expect(chat).toHaveBeenCalledTimes(1);
+    expect(response.text).toBe("Stopped: the model returned an empty response");
+  });
+
+  it("hands the turn signal to the tools it runs", async () => {
+    // A long-running tool (shell and friends) kills its work by listening to
+    // this signal: without it the cancel reaches the model but never the command
+    // the model asked for.
+    const session = makeSession();
+    const controller = new AbortController();
+    let seen: AbortSignal | undefined;
+
+    session.tools.register({
+      name: "echo",
+      description: "Echo a value",
+      parameters: { type: "object" },
+      execute: async (ctx) => {
+        seen = ctx.signal;
+        return { output: "ok" };
+      },
+    });
+
+    provider.chat = vi
+      .fn()
+      .mockResolvedValueOnce({
+        turn: {
+          text: "",
+          toolCalls: [{ id: "call_1", name: "echo", args: {} }],
+          finishReason: "toolCalls",
+        },
+        usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+      })
+      .mockResolvedValueOnce(stopTurn("done"));
+
+    await session.ask("run echo", undefined, { signal: controller.signal });
+
+    expect(seen).toBe(controller.signal);
+  });
+
+  it("does not hand the turn signal to the tool without a cancel", async () => {
+    // A turn with no signal still runs its tools: the guard is on the abort, not
+    // on the presence of a signal.
+    const session = makeSession();
+    const execute = vi.fn(async () => ({ output: "ok" }));
+    session.tools.register({
+      name: "echo",
+      description: "Echo a value",
+      parameters: { type: "object" },
+      execute,
+    });
+    provider.chat = vi
+      .fn()
+      .mockResolvedValueOnce({
+        turn: {
+          text: "",
+          toolCalls: [{ id: "call_1", name: "echo", args: {} }],
+          finishReason: "toolCalls",
+        },
+        usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+      })
+      .mockResolvedValueOnce(stopTurn("done"));
+
+    const response = await session.ask("run echo");
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(response.text).toBe("done");
+  });
 
   it("runs tool calls sequentially and feeds results back to the model", async () => {
     const session = makeSession();
@@ -1667,8 +1809,174 @@ describe("SessionManager spawn", () => {
     await expect(session.waitSpawn("missing")).resolves.toBeUndefined();
     await expect(session.collectSpawns()).resolves.toEqual([]);
   });
+
+  it("cancels a live child and settles its handle as cancelled", async () => {
+    // The child never answers on its own: only the abort ends its run, so a
+    // handle that settles as cancelled proves the signal reached the provider.
+    let seen: AbortSignal | undefined;
+    vi.spyOn(OpenAiProvider.prototype, "initialize").mockResolvedValue();
+    vi.spyOn(OpenAiProvider.prototype, "setModel").mockReturnValue(true);
+    vi.spyOn(OpenAiProvider.prototype, "getContextWindow").mockReturnValue(1000);
+    vi.spyOn(OpenAiProvider.prototype, "chat").mockImplementation(
+      (_history, options) =>
+        new Promise((_resolve, reject) => {
+          seen = options?.signal;
+          options?.signal?.addEventListener("abort", () => reject(options.signal!.reason));
+        }),
+    );
+    const session = makeSession();
+
+    const handle = session.spawn("coder", "do the thing");
+    await vi.waitFor(() => expect(seen).toBeDefined());
+
+    expect(session.cancelSpawn(handle.spawnId)).toBe(true);
+
+    const settled = await session.waitSpawn(handle.spawnId);
+
+    expect(settled).toMatchObject({
+      status: "cancelled",
+      summary: CANCELLED_SUMMARY,
+      error: undefined,
+    });
+    expect(settled?.finishedAt).toBeDefined();
+    expect(settled?.cancelRequestedAt).toBeDefined();
+  });
+
+  it("rejects a cancel for an unknown, a settled or a childless session", async () => {
+    stubProvider("child answer");
+    const session = makeSession();
+
+    expect(session.cancelSpawn("spawn-unknown")).toBe(false);
+    // No spawn manager yet: a session without children must not throw.
+    expect(session.cancelSpawn("spawn-unknown")).toBe(false);
+
+    const done = session.spawn("coder", "do the thing");
+    await session.waitSpawn(done.spawnId);
+
+    // Reject every later call, not just the next one: the child asks
+    // classification first, and a single rejection would be swallowed.
+    vi.spyOn(OpenAiProvider.prototype, "chat").mockRejectedValue(new Error("boom"));
+    const failed = session.spawn("coder", "break please");
+    await session.waitSpawn(failed.spawnId);
+    expect(session.pollSpawn(failed.spawnId)?.status).toBe("error");
+
+    expect(session.cancelSpawn(done.spawnId)).toBe(false);
+    expect(session.cancelSpawn(failed.spawnId)).toBe(false);
+    expect(session.pollSpawn(done.spawnId)?.status).toBe("done");
+    expect(session.pollSpawn(failed.spawnId)?.status).toBe("error");
+  });
+
+  it("never delivers a cancelled child to the parent turn", async () => {
+    vi.spyOn(OpenAiProvider.prototype, "initialize").mockResolvedValue();
+    vi.spyOn(OpenAiProvider.prototype, "setModel").mockReturnValue(true);
+    vi.spyOn(OpenAiProvider.prototype, "getContextWindow").mockReturnValue(1000);
+    // A transport that answers the parent and hangs on the child: the child is
+    // ended by the cancel, the parent by its own stub below.
+    vi.spyOn(OpenAiProvider.prototype, "chat").mockImplementation(async (history) =>
+      history.some((message) => message.content === "next turn")
+        ? stopTurn("parent ok")
+        : new Promise(() => {}),
+    );
+    const session = makeSession();
+
+    const handle = session.spawn("coder", "do the thing");
+    await vi.waitFor(() => expect(session.listSpawns()).toHaveLength(1));
+    expect(session.cancelSpawn(handle.spawnId)).toBe(true);
+    await session.waitSpawn(handle.spawnId);
+
+    expect(session.pendingSpawns()).toEqual([]);
+
+    await parentTurn(session);
+
+    expect(deliveredFor(session, handle.spawnId)).toEqual([]);
+    expect(session.childHistory()).toEqual([
+      expect.objectContaining({ spawnId: handle.spawnId, status: "cancelled" }),
+    ]);
+  });
+
+  it("keeps a cancelled child as cancelled across a resume", async () => {
+    vi.spyOn(OpenAiProvider.prototype, "initialize").mockResolvedValue();
+    vi.spyOn(OpenAiProvider.prototype, "setModel").mockReturnValue(true);
+    vi.spyOn(OpenAiProvider.prototype, "getContextWindow").mockReturnValue(1000);
+    vi.spyOn(OpenAiProvider.prototype, "chat").mockImplementation(
+      (_history, options) =>
+        new Promise((_resolve, reject) => {
+          options?.signal?.addEventListener("abort", () => reject(options.signal!.reason));
+        }),
+    );
+    const saved: unknown[] = [];
+    const session = makeSession({}, saved);
+    // A real session starts with its persona at history[0], and load() rewrites
+    // that slot when the record carries an agentId.
+    session["applySystemPrompt"]();
+
+    const handle = session.spawn("coder", "do the thing");
+    await vi.waitFor(() => expect(session.listSpawns()).toHaveLength(1));
+    expect(session.cancelSpawn(handle.spawnId)).toBe(true);
+    await session.waitSpawn(handle.spawnId);
+
+    const persisted = saved.at(-1) as Record<string, unknown>;
+
+    const resumed = makeSession();
+    resumed.store.load = vi.fn(() => persisted) as unknown as typeof resumed.store.load;
+    await expect(resumed.load("session-1")).resolves.toBe(true);
+
+    expect(resumed.childHistory()).toEqual([
+      expect.objectContaining({
+        spawnId: handle.spawnId,
+        status: "cancelled",
+        summary: CANCELLED_SUMMARY,
+      }),
+    ]);
+    expect(resumed.childHistory()[0].cancelRequestedAt).toBeDefined();
+    expect(resumed.childHistory()[0].finishedAt).toBeDefined();
+    expect(resumed.pendingSpawns()).toEqual([]);
+
+    await parentTurn(resumed);
+
+    expect(deliveredFor(resumed, handle.spawnId)).toEqual([]);
+  });
+
+  it("renders a cancelled child from its summary instead of a placeholder", () => {
+    const session = makeSession();
+
+    expect(
+      formatter(session)(handleWith({ status: "cancelled", summary: CANCELLED_SUMMARY })),
+    ).toBe(`[spawn spawn-1 · coder · cancelled] ${CANCELLED_SUMMARY}`);
+  });
+
+  it("delivers a done child of a parent that also cancelled one", async () => {
+    vi.spyOn(OpenAiProvider.prototype, "initialize").mockResolvedValue();
+    vi.spyOn(OpenAiProvider.prototype, "setModel").mockReturnValue(true);
+    vi.spyOn(OpenAiProvider.prototype, "getContextWindow").mockReturnValue(1000);
+    // One prompt finishes and the other never does: only the cancel ends the
+    // hanging child, so a done/cancelled pair under the same parent is real.
+    vi.spyOn(OpenAiProvider.prototype, "chat").mockImplementation(async (history) => {
+      const prompt = history.at(-1)?.content ?? "";
+      if (prompt.includes("finish")) return stopTurn("done answer");
+
+      return new Promise(() => {});
+    });
+    const session = makeSession();
+
+    const cancelled = session.spawn("coder", "hang forever");
+    const done = session.spawn("coder", "finish please");
+    await vi.waitFor(() => expect(session.listSpawns()).toHaveLength(2));
+
+    expect(session.cancelSpawn(cancelled.spawnId)).toBe(true);
+    await session.waitSpawn(cancelled.spawnId);
+    await session.waitSpawn(done.spawnId);
+
+    expect(session.pendingSpawns().map((entry) => entry.spawnId)).toEqual([done.spawnId]);
+    expect(session.childHistory().map((entry) => [entry.spawnId, entry.status])).toEqual([
+      [cancelled.spawnId, "cancelled"],
+      [done.spawnId, "done"],
+    ]);
+  });
 });
 
+// The UI repaints the transcript from core, so what counts as conversation
+// has to be filtered here and not in each caller.
 // The UI repaints the transcript from core, so what counts as conversation
 // has to be filtered here and not in each caller.
 describe("SessionManager conversation", () => {

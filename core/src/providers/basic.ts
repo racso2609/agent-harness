@@ -41,18 +41,30 @@ export abstract class BasicProvider {
     stream?: boolean,
   ): Promise<Response | T>;
 
+  // `init.signal` travels to fetch untouched. A rejection caused by it is
+  // re-thrown as the signal's own reason, because fetch rejects with a fresh
+  // DOMException("AbortError") that says nothing about who cancelled or why.
+  // An abort is never retried here: whether to retry belongs to the caller.
   protected async _fetcher<T>(
     path: `/${string}`,
     init: RequestInit & { timeout?: number } = {},
     stream: boolean = false,
   ): Promise<T | Response> {
-    const response = await fetch(`${this.url}${path}`, {
-      ...init,
-      headers: {
-        Authorization: `Bearer ${this.apikey}`,
-        "Content-Type": "application/json",
-      },
-    });
+    let response: Response;
+
+    try {
+      response = await fetch(`${this.url}${path}`, {
+        ...init,
+        headers: {
+          Authorization: `Bearer ${this.apikey}`,
+          "Content-Type": "application/json",
+        },
+      });
+    } catch (err) {
+      if (init.signal?.aborted) throw init.signal.reason ?? err;
+      throw err;
+    }
+
     if (!response.ok) throw new Error(await response.clone().text());
 
     if (stream) return response;

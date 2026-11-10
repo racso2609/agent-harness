@@ -7,9 +7,9 @@ import type { SpawnEvent, SpawnHandle, SpawnStatus } from "../../src/index";
 // at runtime if the event shape drifts.
 describe("spawn contract surface", () => {
   it("exposes the lifecycle statuses", () => {
-    const statuses: SpawnStatus[] = ["running", "done", "error"];
+    const statuses: SpawnStatus[] = ["running", "done", "error", "cancelled"];
 
-    expect(statuses).toHaveLength(3);
+    expect(statuses).toHaveLength(4);
   });
 
   it("keeps the settled event carrying a complete handle", () => {

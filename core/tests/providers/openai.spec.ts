@@ -590,6 +590,67 @@ describe("OpenAiProvider", () => {
     });
   });
 
+  describe("chat cancellation", () => {
+    it("rejects with the signal reason as soon as the request is aborted", async () => {
+      await loadModels(provider, fetchMock);
+
+      // A fetch that honours the signal, the way the platform one does: it
+      // rejects with a DOMException instead of the reason it was aborted with.
+      const abortReason = new Error("spawn cancelled");
+      const controller = new AbortController();
+      fetchMock.mockImplementation((_url: string, init: RequestInit) => {
+        return new Promise((_resolve, reject) => {
+          const signal = init.signal!;
+
+          signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")));
+        });
+      });
+
+      const pending = provider.chat([{ role: "user", content: "hi" }], {
+        signal: controller.signal,
+      });
+
+      // The request is in flight, then the caller gives up on it.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const started = Date.now();
+      controller.abort(abortReason);
+
+      await expect(pending).rejects.toBe(abortReason);
+      // Fast: no waiting for a timeout or for the gateway to answer.
+      expect(Date.now() - started).toBeLessThan(100);
+    });
+
+    it("does not spend a request on an already aborted signal", async () => {
+      await loadModels(provider, fetchMock);
+      const calls = fetchMock.mock.calls.length;
+
+      const controller = new AbortController();
+      const reason = new Error("already cancelled");
+      controller.abort(reason);
+
+      await expect(
+        provider.chat([{ role: "user", content: "hi" }], { signal: controller.signal }),
+      ).rejects.toBe(reason);
+
+      expect(fetchMock.mock.calls.length).toBe(calls);
+    });
+
+    it("passes the signal to fetch as part of the request", async () => {
+      await loadModels(provider, fetchMock);
+      mockStreamOnce(fetchMock, [
+        `data: {"choices":[{"delta":{"content":"ok"}}]}\n\n`,
+        "data: [DONE]\n\n",
+      ]);
+
+      const controller = new AbortController();
+      await provider.chat([{ role: "user", content: "hi" }], { signal: controller.signal });
+
+      const init = fetchMock.mock.calls.at(-1)?.[1] as RequestInit;
+
+      expect(init.signal).toBe(controller.signal);
+    });
+  });
+
   describe("model aliasing", () => {
     it("matches models by name and by id", async () => {
       mockFetchOnce(fetchMock, modelsPayload([{ id: "id-only" }, { id: "alias-name" }]));

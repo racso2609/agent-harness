@@ -124,7 +124,11 @@ export class OpenAiProvider extends BasicProvider implements Provider {
     response: Response,
     onEvent?: ChatEventListener,
   ): Promise<{ turn: AssistantTurn; usage?: TokenUsage }> {
-    const reader = response.body!.getReader();
+    // A fetch that was aborted (or mocked) can resolve without a body: fail
+    // loudly instead of crashing on a non-null assertion.
+    if (!response.body) throw new Error("Streaming response has no body");
+
+    const reader = response.body.getReader();
     const decoder = new TextDecoder("utf-8");
     let buffer = "";
     let fullAssistantResponse = "";
@@ -255,10 +259,15 @@ export class OpenAiProvider extends BasicProvider implements Provider {
   async chat(messages: History[], options: ChatOptions = {}): Promise<ChatResult> {
     const model = this.assertReady();
 
+    // An already aborted signal must not spend a request: report the reason the
+    // caller gave instead of asking the gateway anything.
+    if (options.signal?.aborted) throw options.signal.reason;
+
     const response = (await this._fetcher(
       "/chat/completions",
       {
         method: "POST",
+        signal: options.signal,
         body: JSON.stringify({
           model: model.id,
           messages: this.toWireMessages(messages),
@@ -271,7 +280,22 @@ export class OpenAiProvider extends BasicProvider implements Provider {
       },
       true,
     )) as Response;
-    const { turn, usage } = await this._handleStream(response, options.onEvent);
+
+    let turn: AssistantTurn;
+    let usage: TokenUsage | undefined;
+
+    try {
+      ({ turn, usage } = await this._handleStream(response, options.onEvent));
+    } catch (err) {
+      // Reading the body can fail on an abort too (the stream stops mid-chunk):
+      // the caller's reason, not the transport error, is what travels up.
+      if (options.signal?.aborted) {
+        await response.body?.cancel().catch(() => {});
+        throw options.signal.reason ?? err;
+      }
+
+      throw err;
+    }
 
     this.lastContextTokens = usage
       ? usage.promptTokens + usage.completionTokens

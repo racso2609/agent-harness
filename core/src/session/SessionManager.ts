@@ -61,6 +61,14 @@ import { SessionRecord, SessionStore } from "./SessionStore";
 import { SpawnEventListener, SpawnHandle, SpawnManager } from "./spawn";
 
 // Options accepted by initialize/load to resume an existing session.
+// Options of a turn started by the session itself (never by IHarness.ask,
+// whose signature stays put). `signal` is handed down by the spawn runner:
+// aborting it is what cancels a child mid-request.
+interface AskTurnOptions {
+  unprompted?: true;
+  signal?: AbortSignal;
+}
+
 export interface SessionOptions {
   // Id of a previously persisted session to resume.
   sessionId?: string;
@@ -190,10 +198,14 @@ interface SessionManager {
   // Returns the current session usage, cost and context status.
   status: () => SessionStatus;
   // Routes the prompt to text or image generation based on classification.
-  ask: (prompt: string) => Promise<AgentResponse>;
+  ask: (
+    prompt: string,
+    onEvent?: ChatEventListener,
+    options?: AskTurnOptions,
+  ) => Promise<AgentResponse>;
   // internal
   // la idea es agharrar el propmt pasaarlo por un agent peque;o que no consuma mucho y preguntarle que tipo de accion es textGeneration or imageGeneration para luego enrutarlo a la accion correcta del provider (jev)
-  classifyAction: (prompt: string) => Promise<ClassifiedAction>;
+  classifyAction: (prompt: string, signal?: AbortSignal) => Promise<ClassifiedAction>;
 }
 
 class SessionManagerImpl implements SessionManager {
@@ -375,8 +387,13 @@ class SessionManagerImpl implements SessionManager {
     // delivered once more.
     const deliveredIds = new Set(record.deliveredSpawns ?? []);
     this.delivered = deliveredIds;
+    // Only a done or error child carries a result for the parent, so only
+    // those are re-queued: a cancelled one stays as history, never as pending
+    // work, and a "running" one died with the previous process.
+    const deliverable = (handle: SpawnHandle) =>
+      handle.status === "done" || handle.status === "error";
     this.undelivered = this.spawnHistory.filter(
-      (handle) => handle.status !== "running" && !deliveredIds.has(handle.spawnId),
+      (handle) => deliverable(handle) && !deliveredIds.has(handle.spawnId),
     );
     // Sessions persisted with an agent already start with its persona. Older
     // sessions keep their system messages (e.g. compacted memory) untouched.
@@ -706,6 +723,12 @@ class SessionManagerImpl implements SessionManager {
     return this.spawns?.poll(spawnId);
   }
 
+  // Cancelling never builds the manager: a session that spawned nothing has
+  // nothing to cancel, so it answers false instead of starting one to say no.
+  cancelSpawn(spawnId: string): boolean {
+    return this.spawns?.cancel(spawnId) ?? false;
+  }
+
   listSpawns() {
     return this.spawns?.list() ?? [];
   }
@@ -736,7 +759,8 @@ class SessionManagerImpl implements SessionManager {
 
   // Children already settled (done or error) whose result has not entered a
   // parent turn yet, in settlement order. Reading it does not drain the list:
-  // it is a copy, and only flushPendingSpawns() delivers the results.
+  // it is a copy, and only flushPendingSpawns() delivers the results. A
+  // cancelled child never enters: there is no result to hand over.
   pendingSpawns(): SpawnHandle[] {
     return [...this.undelivered];
   }
@@ -774,10 +798,14 @@ class SessionManagerImpl implements SessionManager {
         await child.initialize({ agent: agentId, store: this.store });
         if (this.approvalHandler) child.approveWith(this.approvalHandler);
 
-        if (signal.aborted) throw new Error("Spawn aborted");
+        // Surface the manager's own abort reason (cancel or timeout) instead of a
+        // message of our own: it is what tells the settlement point why it stopped.
+        if (signal.aborted) throw signal.reason ?? new Error("Spawn aborted");
 
         const fullPrompt = context ? `${context}\n\n${prompt}` : prompt;
-        return child.ask(fullPrompt);
+        // The signal travels with the turn so a cancel reaches the request that
+        // is already in flight at the provider, instead of waiting for it to end.
+        return child.ask(fullPrompt, undefined, { signal });
       },
     });
 
@@ -794,10 +822,13 @@ class SessionManagerImpl implements SessionManager {
         entry.spawnId === event.handle.spawnId ? event.handle : entry,
       );
       // Queue the result for the next parent turn, replacing any previous entry
-      // for the same child so a re-settle cannot enqueue it twice.
+      // for the same child so a re-settle cannot enqueue it twice. A cancelled
+      // child has nothing to deliver, so it is left out of the queue (and any
+      // stale entry for it is dropped) while staying in the persisted history.
+      const deliverable = event.handle.status === "done" || event.handle.status === "error";
       this.undelivered = [
         ...this.undelivered.filter((entry) => entry.spawnId !== event.handle.spawnId),
-        event.handle,
+        ...(deliverable ? [event.handle] : []),
       ];
       // A child can finish without another turn, so persist here too.
       this.save();
@@ -837,6 +868,13 @@ class SessionManagerImpl implements SessionManager {
 
     if (handle.status === "error") {
       return `${header} ${truncateText(outcomeText(handle.error, "unknown error"), max)}`;
+    }
+    // A cancelled child has no result to report: say so, instead of rendering
+    // the missing answer as if the child had succeeded.
+    if (handle.status === "cancelled") {
+      // settle() always writes the cancellation summary on a cancelled handle
+      // and only a live child reaches this formatter, so the summary is present.
+      return `${header} ${truncateText(handle.summary!, max)}`;
     }
     return `${header}\n${truncateText(outcomeText(handle.result, "(no output)"), max)}`;
   }
@@ -887,14 +925,16 @@ class SessionManagerImpl implements SessionManager {
   }
 
   // Classifies the prompt and dispatches it to text or image generation.
-  async ask(prompt: string, onEvent?: ChatEventListener, options: { unprompted?: true } = {}) {
+  async ask(prompt: string, onEvent?: ChatEventListener, options: AskTurnOptions = {}) {
     if (!this.provider) throw new Error("Session not initialized");
+    // Already cancelled: do not spend a classification call nor touch history.
+    if (options.signal?.aborted) throw options.signal.reason;
 
     // Deliver before the turn reads history, so the parent starts the turn
     // with the child results already in context instead of mid-conversation.
     this.flushPendingSpawns();
 
-    const action = await this.classifyAction(prompt);
+    const action = await this.classifyAction(prompt, options.signal);
 
     const response =
       action === "imageGeneration"
@@ -912,7 +952,7 @@ class SessionManagerImpl implements SessionManager {
   protected async runAgentLoop(
     prompt: string,
     onEvent?: ChatEventListener,
-    options: { unprompted?: true } = {},
+    options: AskTurnOptions = {},
   ): Promise<AgentResponse> {
     const provider = this.provider;
     if (!provider) throw new Error("Session not initialized");
@@ -939,7 +979,15 @@ class SessionManagerImpl implements SessionManager {
     const failedTools: string[] = [];
 
     for (let iteration = 0; iteration < maxIterations; iteration++) {
-      const result = await provider.chat(this.history, { tools: specs, onEvent });
+      // An abort is never retried: a cancelled turn must not spend another
+      // request, whatever loop it is in.
+      if (options.signal?.aborted) throw options.signal.reason;
+
+      const result = await provider.chat(this.history, {
+        tools: specs,
+        onEvent,
+        signal: options.signal,
+      });
 
       this.addUsage(usage, result.usage);
       costUsd += result.costUsd ?? 0;
@@ -954,7 +1002,9 @@ class SessionManagerImpl implements SessionManager {
       // failure instead of a silent success.
       const empty = !result.turn.text.trim() && toolCalls.length === 0;
 
-      if (empty && iteration < maxIterations - 1) {
+      // A turn aborted right after an empty answer is not a flaky gateway:
+      // the cancel is why it looked empty, so it must not be retried.
+      if (empty && iteration < maxIterations - 1 && !options.signal?.aborted) {
         logger.warn("Empty assistant turn; retrying");
         continue;
       }
@@ -988,7 +1038,7 @@ class SessionManagerImpl implements SessionManager {
       }
 
       for (const call of toolCalls) {
-        const toolResult = await this.runTool(call, onEvent);
+        const toolResult = await this.runTool(call, onEvent, options.signal);
         if (toolResult.isError) failedTools.push(call.name);
         const content = toolResult.isError
           ? `[tool error] ${toolResult.output}`
@@ -1027,10 +1077,14 @@ class SessionManagerImpl implements SessionManager {
     return { status: "completed", pending: [] };
   }
 
-  protected async runTool(call: ToolCall, onEvent?: ChatEventListener): Promise<ToolResult> {
+  protected async runTool(
+    call: ToolCall,
+    onEvent?: ChatEventListener,
+    signal?: AbortSignal,
+  ): Promise<ToolResult> {
     logger.info(`Tool call: ${call.name} ${this.preview(call.args)}`);
 
-    const result = await this.tools.execute(this.toolContext(call, onEvent), call);
+    const result = await this.tools.execute(this.toolContext(call, onEvent, signal), call);
 
     if (result.isError) {
       logger.warn(`Tool ${call.name} failed: ${this.preview(result.output)}`);
@@ -1081,10 +1135,17 @@ class SessionManagerImpl implements SessionManager {
     return this.config.config.tools?.workspace ?? process.cwd();
   }
 
-  protected toolContext(call?: ToolCall, onEvent?: ChatEventListener): ToolContext {
+  protected toolContext(
+    call?: ToolCall,
+    onEvent?: ChatEventListener,
+    signal?: AbortSignal,
+  ): ToolContext {
     return {
       cwd: this.workspaceRoot(),
       sessionId: this.sessionId,
+      // Lets a long-running tool (shell and friends) kill its work when the
+      // turn is cancelled, instead of owning a signal that never arrives.
+      signal,
       approve: (request) => this.approve(request),
       spawn: (agentId, prompt) => this.spawn(agentId, prompt),
       getSkillBody: (id) => this.skillBody(id),
@@ -1452,9 +1513,9 @@ class SessionManagerImpl implements SessionManager {
   // Determines whether the prompt is a text or image generation request.
   // Uses the isolated classifier provider when available so the extra call
   // never lands in the main conversation history.
-  async classifyAction(prompt: string) {
+  async classifyAction(prompt: string, signal?: AbortSignal) {
     if (!this.provider) throw new Error("Session not initialized");
-    return classifyAction(prompt, this.classifierProvider ?? this.provider);
+    return classifyAction(prompt, this.classifierProvider ?? this.provider, signal);
   }
 
   // Builds the secondary provider used only for prompt classification.

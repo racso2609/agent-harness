@@ -112,6 +112,10 @@ export type ChatOptions = {
   // Called as the turn is produced. Optional: omitting it preserves the
   // existing non-streaming behaviour of chat().
   onEvent?: ChatEventListener;
+  // Aborted when the caller gives up on the turn. Best effort: a provider that
+  // ignores it keeps working as before, but one that honours it must reject
+  // with `signal.reason` as soon as the abort lands, and must not retry.
+  signal?: AbortSignal;
 };
 
 export type ChatResult = {
