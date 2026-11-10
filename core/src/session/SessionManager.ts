@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import nodePath from "node:path";
+
 import {
   AgentDefinition,
   AgentLoader,
@@ -30,6 +33,7 @@ import type { SkillSummary } from "@/skills";
 import { McpManager } from "@/mcp";
 import type { McpServerSummary, McpToolSummary } from "@/mcp";
 import { createToolRegistry, ToolContext, ToolRegistry } from "@/tools";
+import { isInsideRealWorkspace, spawnArtifactPath, workspaceRoot } from "@/tools/paths";
 import type {
   ApprovalDecision,
   ApprovalRequest,
@@ -58,7 +62,14 @@ import {
   estimateHistoryTokens,
 } from "./history";
 import { SessionRecord, SessionStore } from "./SessionStore";
-import { SpawnEventListener, SpawnHandle, SpawnManager } from "./spawn";
+import {
+  childResultBudget,
+  outcomeText,
+  SpawnEventListener,
+  SpawnHandle,
+  SpawnManager,
+  summarize,
+} from "./spawn";
 
 // Options accepted by initialize/load to resume an existing session.
 // Options of a turn started by the session itself (never by IHarness.ask,
@@ -106,15 +117,12 @@ const applyProviderOptions = (provider: Provider, config: Config, type: string) 
   return provider;
 };
 
-// Caps a string for injection into history, marking the elision.
-const truncateText = (text: string, max: number) =>
-  text.length > max ? `${text.slice(0, max)}…` : text;
-
-// A settled child can come back with nothing useful: undefined (never set) and
-// an empty or blank string are the same case for the parent, so both fall back
-// to a placeholder instead of injecting a blank system message.
-const outcomeText = (value: string | undefined, fallback: string) =>
-  value && value.trim() ? value : fallback;
+// Line of the delivery message that tells the parent the whole report is in
+// the artifact and that guessing instead of reading is not an option: the
+// dangerous failure is not the truncation itself but a parent that decides on
+// text it never read.
+const ARTIFACT_INSTRUCTION =
+  "Es obligatorio leer ese fichero antes de decidir; si no puedes leerlo, dilo y no supongas su contenido.";
 
 // Public contract of the session manager.
 // Concrete implementation is SessionManagerImpl below.
@@ -792,6 +800,9 @@ class SessionManagerImpl implements SessionManager {
     this.spawns = new SpawnManager({
       maxChildren: this.config.config.sessions?.maxChildren,
       timeoutMs: this.config.config.sessions?.childTimeoutMs,
+      // The same budget the delivery formats with, so the settled handle
+      // records the length of a report the parent will only see truncated.
+      resultMaxChars: childResultBudget(this.config.config.sessions?.childResultMaxChars),
       runner: async ({ sessionId, agentId, prompt, context, signal }) => {
         const child = new SessionManagerImpl(this.config, this.store, this.mcp);
         child.parentId = sessionId;
@@ -860,23 +871,132 @@ class SessionManagerImpl implements SessionManager {
     this.save();
   }
 
-  // Builds the compact system message injected into the parent's history once
-  // a child finishes. Only the final (truncated) text is included.
+  // Builds the system message injected into the parent's history once a child
+  // finishes, capped at the configured budget. Single entry point: the message
+  // wording lives here and nowhere else, and formatting has no side effect.
   protected formatSpawnResult(handle: SpawnHandle): string {
-    const max = this.config.config.sessions?.childResultMaxChars ?? 2000;
+    const max = childResultBudget(this.config.config.sessions?.childResultMaxChars);
     const header = `[spawn ${handle.spawnId} · ${handle.agentId} · ${handle.status}]`;
+// A cancelled child has no report to deliver: say so, and write no artifact
+// for an outcome the user asked to stop. settle() always records the
+// cancellation summary, so it is present here.
+if (handle.status === "cancelled") return `${header} ${handle.summary ?? "cancelled"}`;
 
-    if (handle.status === "error") {
-      return `${header} ${truncateText(outcomeText(handle.error, "unknown error"), max)}`;
+    const report =
+      handle.status === "error"
+        ? outcomeText(handle.error, "unknown error")
+        : outcomeText(handle.result, "(no output)");
+
+    // A report longer than the budget is not delivered as a silent cut: the
+    // whole text goes to an artifact inside the workspace and the message
+    // carries its absolute path, a one-line summary and how many characters
+    // were kept, so the parent can read the rest instead of deciding on a
+    // report it never saw. Under the budget the message keeps its original
+    // shape, byte for byte, and writes nothing.
+    if (report.length <= max) {
+      return handle.status === "error" ? `${header} ${report}` : `${header}\n${report}`;
     }
-    // A cancelled child has no result to report: say so, instead of rendering
-    // the missing answer as if the child had succeeded.
-    if (handle.status === "cancelled") {
-      // settle() always writes the cancellation summary on a cancelled handle
-      // and only a live child reaches this formatter, so the summary is present.
-      return `${header} ${truncateText(handle.summary!, max)}`;
+
+    const body = `${report.slice(0, max)}…`;
+    // The full length comes from the handle when the settlement recorded it, so the
+    // notice and SpawnHandle.resultChars cannot drift apart.
+    const total = handle.resultChars ?? report.length;
+    const notice = `Ajustado a ${max} de ${total} caracteres.`;
+    const summary = summarize(report);
+    const path = this.ensureResultArtifact(handle);
+
+    const lines = [header];
+    if (summary) lines.push(`Resumen: ${summary}`);
+
+    if (path) {
+      lines.push(`Informe completo (${report.length} caracteres) en: ${path}`);
+      lines.push(`${notice} Este mensaje es un recorte; el fichero es el informe íntegro.`);
+      lines.push(ARTIFACT_INSTRUCTION);
+    } else {
+      // The artifact could not be written: degrade to the bounded message and
+      // never announce a path that does not exist, which would cost the parent
+      // a turn and invite it to invent the content.
+      lines.push(notice);
     }
-    return `${header}\n${truncateText(outcomeText(handle.result, "(no output)"), max)}`;
+
+    lines.push("---", body);
+
+    return lines.join("\n");
+  }
+
+  // Writes the whole report of a settled child to
+  // <workspace>/.racso-harness/artifacts/<sessionId>/<spawnId>.md and returns its
+  // absolute path, or undefined when it is not a path the parent could read.
+  // The write replaces the file, so it is idempotent: a resumed delivery stores
+  // the current report instead of appending to the previous one. Best effort by
+  // design: it runs on the delivery path, never throws and never blocks the
+  // message.
+  //
+  // The guarantee is about the BYTES, not only about the announced path: every
+  // existing component of the target is resolved for real (symlinks expanded,
+  // the missing tail only appended when its names are plain) and the write is
+  // refused when the target lands outside the real workspace. A prefix
+  // comparison against the unresolved root is not enough: with
+  // <workspace>/.racso-harness a symlink pointing outside, the path still
+  // starts with the root while mkdir + write would create the file on the
+  // other side of the link.
+  // The final component gets the same treatment: a link named <spawnId>.md
+  // inside an honest directory would still redirect the bytes, so the write
+  // uses "wx" and replaces the entry instead of writing through it.
+  // What this does NOT do: check and write are separate syscalls, so a
+  // component swapped for a symlink between them is only caught by the
+  // post-write belt, which withholds the path instead of moving the bytes back.
+  protected ensureResultArtifact(handle: SpawnHandle): string | undefined {
+    const root = this.workspaceRoot();
+
+    try {
+      const report = handle.status === "error" ? handle.error : handle.result;
+      // Unreachable from formatSpawnResult, which only calls this for a report over
+      // the budget (a blank report falls back to a placeholder shorter than any
+      // budget). Kept as a defensive type narrowing, silent on purpose: there is
+      // nothing to warn about, the delivery is intact.
+      if (!report || !report.trim()) return undefined;
+
+      const path = spawnArtifactPath(root, this.sessionId, handle.spawnId);
+      const dir = nodePath.dirname(path);
+      if (!isInsideRealWorkspace(root, dir)) {
+        logger.warn(
+          `Dropped the report artifact of ${handle.spawnId}: ${dir} resolves outside the workspace`,
+        );
+        return undefined;
+      }
+
+      fs.mkdirSync(dir, { recursive: true });
+      // The write must not follow a link at the final component: a symlink named
+      // <spawnId>.md inside the jail would carry the report outside it while the
+      // directory pre-check still reads as inside. "wx" refuses to write through
+      // an existing entry, so the link is removed and the file created in place.
+      try {
+        fs.writeFileSync(path, report, { encoding: "utf8", flag: "wx" });
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+        fs.unlinkSync(path);
+        fs.writeFileSync(path, report, { encoding: "utf8", flag: "wx" });
+      }
+
+      // Belt on top of the pre-check: a component that appeared between the two
+      // calls still must not be published as a path the parent cannot read.
+      if (!isInsideRealWorkspace(root, path)) {
+        logger.warn(
+          `Dropped the path of the report artifact of ${handle.spawnId}: ${path} resolves outside the workspace`,
+        );
+        return undefined;
+      }
+
+      return path;
+    } catch (err) {
+      logger.warn(
+        `Could not write the report artifact of ${handle.spawnId}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+      return undefined;
+    }
   }
 
   // Compacts the session history using the configured threshold and, when the
@@ -1132,7 +1252,7 @@ class SessionManagerImpl implements SessionManager {
   // announced in the system prompt: if they diverged, the model would believe it
   // works somewhere while every file operation happens elsewhere.
   protected workspaceRoot(): string {
-    return this.config.config.tools?.workspace ?? process.cwd();
+    return workspaceRoot(this.config.config.tools?.workspace);
   }
 
   protected toolContext(

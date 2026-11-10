@@ -1,4 +1,14 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import nodePath from "node:path";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -6,6 +16,9 @@ import type { ChatEvent } from "../../src/types/providers";
 import type { Config } from "../../src/configuration";
 import { OpenAiProvider } from "../../src/providers/openai";
 import { SessionManager } from "../../src/session/SessionManager";
+import { summarize } from "../../src/session/spawn";
+import { resolveInWorkspace } from "../../src/tools/paths";
+import { logger } from "../../src/utils/logger";
 import type { SessionStore } from "../../src/session/SessionStore";
 import { CANCELLED_SUMMARY, type SpawnHandle } from "../../src/session/spawn";
 
@@ -1245,11 +1258,27 @@ describe("SessionManager spawn", () => {
   });
 
   it("caps the child answer to the configured budget", () => {
-    const session = makeSession({ sessions: { childResultMaxChars: 3 } });
+    const workspace = mkdtempSync(join(tmpdir(), "harness-cap-"));
+    const session = makeSession({ sessions: { childResultMaxChars: 3 }, tools: { workspace } });
+    const report = "abcdef";
+    const path = join(workspace, ".racso-harness", "artifacts", session.sessionId, "spawn-1.md");
+    const message = formatter(session)(handleWith({ result: report }));
 
-    expect(formatter(session)(handleWith({ result: "abcdef" }))).toBe(
-      "[spawn spawn-1 · coder · done]\nabc…",
+    // Over the budget: the whole message, wrapper lines included, pinned exactly.
+    expect(message).toBe(
+      [
+        "[spawn spawn-1 · coder · done]",
+        `Resumen: ${summarize(report)}`,
+        `Informe completo (${report.length} caracteres) en: ${path}`,
+        `Ajustado a 3 de ${report.length} caracteres. Este mensaje es un recorte; el fichero es el informe íntegro.`,
+        "Es obligatorio leer ese fichero antes de decidir; si no puedes leerlo, dilo y no supongas su contenido.",
+        "---",
+        "abc…",
+      ].join("\n"),
     );
+    // The whole report is on disk; the message only carries the cut.
+    expect(readFileSync(path, "utf8")).toBe(report);
+    rmSync(workspace, { recursive: true, force: true });
   });
 
   it("delivers spawn events to an external listener", async () => {
@@ -1972,6 +2001,580 @@ describe("SessionManager spawn", () => {
       [cancelled.spawnId, "cancelled"],
       [done.spawnId, "done"],
     ]);
+  });
+});
+
+// Report artifacts: a child report longer than the delivery budget is not
+// delivered as a silent cut. The whole text lands in a file the parent can
+// read, and the message says where it is, how long it is and how much was kept.
+describe("SessionManager spawn report artifacts", () => {
+  const workspace = mkdtempSync(join(tmpdir(), "harness-artifacts-"));
+
+  // The store keeps no copy of what it is handed, so a snapshot taken after the
+  // fact would read a newer state. Cloning on every save is what "exactly as
+  // SessionStore would write it" means here.
+  const recordingStore = (saved: unknown[]) => {
+    const store = makeStore();
+    store.save = vi.fn((record: unknown) => {
+      saved.push(JSON.parse(JSON.stringify({ ...(record as object), version: 4 })));
+    }) as unknown as SessionStore["save"];
+    return store;
+  };
+  const artifactConfig = {
+    autoCompact: false,
+    defaultProvider: "openai",
+    model: "model",
+    providers: { openai: { url: "https://api.example.com", apikey: "key" } },
+    tools: { workspace },
+  };
+  // 4360 characters is the case that motivated the change: a reviewer report cut
+  // mid-sentence at the default 2000 character budget.
+  const longReport = "Hallazgo con severidad y file:line. ".repeat(115);
+  const artifactPath = (session: ReturnType<typeof makeSession>, spawnId: string) =>
+    join(workspace, ".racso-harness", "artifacts", session.sessionId, `${spawnId}.md`);
+
+  // Every literal the message wraps the body with, so a bound can be derived
+  // from the parts that really compose it instead of from a magic number.
+  const notice = (max: number, total: number) => `Ajustado a ${max} de ${total} caracteres.`;
+  const fullReportLine = (total: number, path: string) =>
+    `Informe completo (${total} caracteres) en: ${path}`;
+  const ARTIFACT_INSTRUCTION =
+    "Es obligatorio leer ese fichero antes de decidir; si no puedes leerlo, dilo y no supongas su contenido.";
+  const summaryMaxChars = 120;
+
+  // A child that answers without any real network call, for the cases that go
+  // through spawn() instead of formatting a handle by hand.
+  const stubChild = (text = "child answer") => {
+    vi.spyOn(OpenAiProvider.prototype, "initialize").mockResolvedValue();
+    vi.spyOn(OpenAiProvider.prototype, "setModel").mockReturnValue(true);
+    vi.spyOn(OpenAiProvider.prototype, "getModel").mockImplementation(function (
+      this: OpenAiProvider,
+    ) {
+      return (this as unknown as { model?: string }).model ?? "model";
+    });
+    vi.spyOn(OpenAiProvider.prototype, "getContextWindow").mockReturnValue(1000);
+    vi.spyOn(OpenAiProvider.prototype, "chat").mockResolvedValue(stopTurn(text));
+  };
+
+  const makeSession = (
+    overrides: Record<string, unknown> = {},
+    saved: Array<Record<string, unknown>> = [],
+  ) => {
+    const store = recordingStore(saved);
+    const session = new SessionManager(makeConfig({ ...artifactConfig, ...overrides }), store);
+    session.provider = new OpenAiProvider("https://api.example.com", "key", "model");
+    session.providerName = "openai";
+    session.model = "model";
+    vi.spyOn(session, "classifyAction").mockResolvedValue("textGeneration");
+    return session;
+  };
+
+  // Child results reach the parent when it starts its next turn.
+  const parentTurn = async (session: ReturnType<typeof makeSession>) => {
+    session.provider!.chat = vi.fn(async () => stopTurn("parent ok"));
+    await session.ask("next turn");
+  };
+
+  const deliveredFor = (session: ReturnType<typeof makeSession>, spawnId: string): string[] =>
+    session.history
+      .filter((message) => message.role === "system")
+      .map((message) => message.content)
+      .filter((content) => content.includes(`[spawn ${spawnId} `));
+
+  const handleWith = (overrides: Partial<SpawnHandle> = {}): SpawnHandle => ({
+    spawnId: "spawn-1",
+    sessionId: "session-1",
+    agentId: "coder",
+    prompt: "do the thing",
+    status: "done",
+    startedAt: new Date(0).toISOString(),
+    ...overrides,
+  });
+
+  // The formatter is protected, so the tests reach it through the one instance
+  // that owns the wording. Every other assertion goes through the public API.
+  const formatter = (session: ReturnType<typeof makeSession>) =>
+    (
+      session as unknown as {
+        formatSpawnResult: (handle: SpawnHandle) => string;
+      }
+    ).formatSpawnResult.bind(session);
+
+  const artifactsDir = join(workspace, ".racso-harness");
+
+  // Builds the message the delivery produces for one report, and the path its
+  // artifact occupies, so a test can assert the whole text exactly.
+  const expectedMessage = (options: {
+    spawnId: string;
+    sessionId: string;
+    report: string;
+    max: number;
+    header: string;
+    path: string;
+  }) => {
+    return [
+      options.header,
+      `Resumen: ${summarize(options.report)}`,
+      fullReportLine(options.report.length, options.path),
+      `${notice(options.max, options.report.length)} Este mensaje es un recorte; el fichero es el informe íntegro.`,
+      ARTIFACT_INSTRUCTION,
+      "---",
+      `${options.report.slice(0, options.max)}…`,
+    ].join("\n");
+  };
+
+  beforeEach(() => {
+    rmSync(artifactsDir, { recursive: true, force: true });
+  });
+
+  it("writes the full child report to an artifact file and gives the parent its path", () => {
+    const session = makeSession();
+    const handle = handleWith({ sessionId: session.sessionId, result: longReport });
+    const message = formatter(session)(handle);
+    const path = artifactPath(session, handle.spawnId);
+
+    expect(longReport.length).toBeGreaterThan(2000);
+    expect(message).toContain(fullReportLine(longReport.length, path));
+    expect(readFileSync(path, "utf8")).toBe(longReport);
+  });
+
+  // The budget bounds the BODY. The wrapper is the header, the summary line,
+  // the path, the notice line and the instruction, and only the path term
+  // grows with the workspace, which is why it is measured, not guessed.
+  const wrapperCost = (path: string, total: number, max: number, header: string) =>
+    [
+      header,
+      `Resumen: ${summarize(longReport)}`,
+      fullReportLine(total, path),
+      `${notice(max, total)} Este mensaje es un recorte; el fichero es el informe íntegro.`,
+      ARTIFACT_INSTRUCTION,
+      "---",
+    ].join("\n").length + 1; // the newline joining the wrapper to the body
+
+  it("bounds the parent message to the body budget plus the cost of its wrapper", () => {
+    const session = makeSession({ sessions: { childResultMaxChars: 200 } });
+    const handle = handleWith({ sessionId: session.sessionId, result: longReport });
+    const message = formatter(session)(handle);
+    const path = artifactPath(session, handle.spawnId);
+    const header = `[spawn ${handle.spawnId} · ${handle.agentId} · done]`;
+    const body = 200 + 1; // the budget plus the ellipsis
+
+    expect(message.length).toBe(body + wrapperCost(path, longReport.length, 200, header));
+    // Only the four variable parts are left: nothing else is unbounded.
+    expect(message.length).toBeLessThanOrEqual(
+      body + wrapperCost(path, longReport.length, 200, header) + 0,
+    );
+    expect(summarize(longReport)!.length).toBeLessThanOrEqual(summaryMaxChars);
+  });
+
+  it("accounts for the path when the workspace is deep, so the wrapper is the path term", () => {
+    // A workspace root as deep as a real home directory, where the path alone
+    // costs more than the body budget.
+    const deep = mkdtempSync(join(tmpdir(), "harness-deep-"));
+    const nested = join(deep, ...Array.from({ length: 8 }, (_, i) => `level-${i}`));
+    mkdirSync(nested, { recursive: true });
+    const session = makeSession({
+      sessions: { childResultMaxChars: 50 },
+      tools: { workspace: nested },
+    });
+    const handle = handleWith({ sessionId: session.sessionId, result: longReport });
+    const message = formatter(session)(handle);
+    const path = join(
+      nested,
+      ".racso-harness",
+      "artifacts",
+      session.sessionId,
+      `${handle.spawnId}.md`,
+    );
+    const header = `[spawn ${handle.spawnId} · coder · done]`;
+
+    expect(path.length).toBeGreaterThan(50);
+    expect(message.length).toBe(51 + wrapperCost(path, longReport.length, 50, header));
+    expect(readFileSync(path, "utf8")).toBe(longReport);
+    rmSync(deep, { recursive: true, force: true });
+  });
+
+  it("the artifact path holds the whole report, not the truncated body", () => {
+    const session = makeSession();
+    const handle = handleWith({ sessionId: session.sessionId, result: longReport });
+    const message = formatter(session)(handle);
+    const stored = readFileSync(artifactPath(session, handle.spawnId), "utf8");
+
+    expect(stored).toBe(longReport);
+    expect(stored).not.toBe(message);
+    expect(stored.length).toBeGreaterThan(message.length);
+  });
+
+  it("pins the whole message, wrapper lines included", () => {
+    const session = makeSession({ sessions: { childResultMaxChars: 50 } });
+    const handle = handleWith({ sessionId: session.sessionId, result: longReport });
+    const path = artifactPath(session, handle.spawnId);
+    const message = formatter(session)(handle);
+
+    expect(message).toBe(
+      expectedMessage({
+        spawnId: handle.spawnId,
+        sessionId: session.sessionId,
+        report: longReport,
+        max: 50,
+        header: `[spawn ${handle.spawnId} · coder · done]`,
+        path,
+      }),
+    );
+    expect(message).toContain(`Ajustado a 50 de ${longReport.length} caracteres.`);
+    expect(message).toContain("el fichero es el informe íntegro");
+  });
+
+  // The artifact path is derived from two ids that end up as path segments: a
+  // crafted one must never place the file outside the session directory.
+  it("refuses a session id or a spawn id that is not a single path segment", () => {
+    const session = makeSession();
+    const handle = handleWith({ sessionId: session.sessionId, result: longReport });
+    const escapeAttempts = [
+      { spawnId: "../../before" },
+      { spawnId: "nested/child" },
+      // A sessionId cannot be chosen by the caller, but the guard covers both.
+      { sessionId: "../sibling" },
+    ];
+
+    for (const attempt of escapeAttempts) {
+      const crafted = { ...handle, ...attempt };
+      const id = attempt.spawnId ?? attempt.sessionId!;
+      session.sessionId = attempt.sessionId ? session.sessionId : session.sessionId;
+      // The id that fails is the one on the path, so the session id has to be
+      // swapped on the manager to exercise that branch.
+      const target = attempt.sessionId ? makeSession() : session;
+      if (attempt.sessionId) target.sessionId = attempt.sessionId;
+      target["sessionId"] = attempt.sessionId ?? session.sessionId;
+
+      expect(() => formatter(target)(crafted)).not.toThrow();
+      expect(formatter(target)(crafted)).not.toContain("Informe completo (");
+      expect(formatter(target)(crafted)).toContain(notice(2000, longReport.length));
+      expect(join(workspace, "before.md")).not.toSatisfy((p: string) => existsSync(p));
+      expect(join(workspace, "sibling")).not.toSatisfy((p: string) => existsSync(p));
+      expect(id.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("does not announce a path when the artifact cannot be written", () => {
+    // A regular file where the harness directory should be makes mkdir fail,
+    // which is the write failure the message has to survive. Survivors of the
+    // same run read the artifact the previous case wrote, so the assertion is
+    // on memory, not on the presence of an artifact.
+    const blocked = mkdtempSync(join(tmpdir(), "harness-blocked-"));
+    writeFileSync(join(blocked, ".racso-harness"), "not a directory");
+    const session = makeSession({ tools: { workspace: blocked } });
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const message = formatter(session)(
+      handleWith({ sessionId: session.sessionId, result: longReport }),
+    );
+
+    expect(warn).toHaveBeenCalled();
+    expect(message).not.toContain("Es obligatorio");
+    expect(message).not.toContain(".racso-harness");
+    expect(message).toContain(`Ajustado a 2000 de ${longReport.length} caracteres.`);
+    expect(message.endsWith(`---\n${longReport.slice(0, 2000)}…`)).toBe(true);
+    rmSync(blocked, { recursive: true, force: true });
+  });
+
+  // A relative tools.workspace has to mean the same directory here and in the
+  // jail the tools resolve against, otherwise the path published is not the
+  // file the parent will read.
+  it("resolves a relative workspace before publishing the artifact path", () => {
+    const relative = nodePath.relative(process.cwd(), workspace);
+    const session = makeSession({ tools: { workspace: relative } });
+    const handle = handleWith({ sessionId: session.sessionId, result: longReport });
+    const message = formatter(session)(handle);
+    const absolute = artifactPath(session, handle.spawnId);
+
+    expect(relative.startsWith("..")).toBe(true);
+    expect(resolveInWorkspace(relative, absolute)).toBe(absolute);
+    expect(message).toContain(fullReportLine(longReport.length, absolute));
+    expect(readFileSync(absolute, "utf8")).toBe(longReport);
+  });
+
+  // A symlinked directory inside the workspace can send the write elsewhere:
+  // the published path must be one resolveInWorkspace accepts.
+  it("writes nothing outside the workspace when the artifact escapes by symlink", () => {
+    // The artifacts directory is a link that leaves the workspace: the report must
+    // not be created on the other side of it, and no path may be announced.
+    const outside = mkdtempSync(join(tmpdir(), "harness-outside-"));
+    const jailed = mkdtempSync(join(tmpdir(), "harness-jailed-"));
+    mkdirSync(join(jailed, ".racso-harness"), { recursive: true });
+    symlinkSync(outside, join(jailed, ".racso-harness", "artifacts"), "dir");
+    const session = makeSession({ tools: { workspace: jailed } });
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const handle = handleWith({ sessionId: session.sessionId, result: longReport });
+    const message = formatter(session)(handle);
+
+    try {
+      // Nothing was written on the other side of the link.
+      expect(readdirSync(outside)).toEqual([]);
+      expect(existsSync(join(outside, session.sessionId, `${handle.spawnId}.md`))).toBe(false);
+      // The operator learns the artifact was dropped, and no path is published.
+      expect(warn).toHaveBeenCalled();
+      expect(message).not.toContain("Informe completo (");
+      expect(message).not.toContain(outside);
+      expect(message).toContain(notice(2000, longReport.length));
+    } finally {
+      warn.mockRestore();
+      rmSync(outside, { recursive: true, force: true });
+      rmSync(jailed, { recursive: true, force: true });
+    }
+  });
+
+  it("writes nothing outside the workspace when the artifact escapes by symlink and the session directory is missing", () => {
+    // The whole harness directory is a link that leaves the workspace, and the
+    // per-session directory does not exist yet: mkdir would create it on the
+    // other side of the link, which is the case a prefix comparison misses.
+    const outside = mkdtempSync(join(tmpdir(), "harness-outside-missing-"));
+    const jailed = mkdtempSync(join(tmpdir(), "harness-jailed-missing-"));
+    symlinkSync(outside, join(jailed, ".racso-harness"), "dir");
+    const session = makeSession({ tools: { workspace: jailed } });
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const handle = handleWith({ sessionId: session.sessionId, result: longReport });
+    const message = formatter(session)(handle);
+
+    try {
+      expect(existsSync(join(outside, session.sessionId))).toBe(false);
+      expect(readdirSync(outside)).toEqual([]);
+      expect(warn).toHaveBeenCalled();
+      expect(String(warn.mock.calls[0]?.[0])).toContain("resolves outside the workspace");
+      expect(message).not.toContain("Informe completo (");
+      expect(message).not.toContain(outside);
+      expect(message).toContain(notice(2000, longReport.length));
+    } finally {
+      warn.mockRestore();
+      rmSync(outside, { recursive: true, force: true });
+      rmSync(jailed, { recursive: true, force: true });
+    }
+  });
+
+  it("does not write through a symlink planted at the artifact file itself", () => {
+    // The directory is honest, but <spawnId>.md is a link pointing outside: a
+    // plain write would follow it and leave the report beyond the jail.
+    const outside = mkdtempSync(join(tmpdir(), "harness-file-outside-"));
+    const jailed = mkdtempSync(join(tmpdir(), "harness-file-jailed-"));
+    const session = makeSession({ tools: { workspace: jailed } });
+    const handle = handleWith({ sessionId: session.sessionId, result: longReport });
+    const dir = join(jailed, ".racso-harness", "artifacts", session.sessionId);
+
+    mkdirSync(dir, { recursive: true });
+    const escaped = join(outside, "target.md");
+    symlinkSync(escaped, join(dir, `${handle.spawnId}.md`));
+
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const message = formatter(session)(handle);
+
+    try {
+      // The link was replaced by a real file, and nothing reached the target.
+      expect(existsSync(escaped)).toBe(false);
+      expect(readFileSync(join(dir, `${handle.spawnId}.md`), "utf8")).toBe(longReport);
+      expect(message).toContain("Informe completo (");
+    } finally {
+      warn.mockRestore();
+      rmSync(outside, { recursive: true, force: true });
+      rmSync(jailed, { recursive: true, force: true });
+    }
+  });
+
+  it("degrades without a path when writing the artifact throws", () => {
+    // The pre-check passes and the write itself fails: the harness directory is
+    // a regular file, so mkdirSync throws and the catch branch runs.
+    const blocked = mkdtempSync(join(tmpdir(), "harness-writefail-"));
+    writeFileSync(join(blocked, ".racso-harness"), "not a directory");
+    const session = makeSession({ tools: { workspace: blocked } });
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const handle = handleWith({ sessionId: session.sessionId, result: longReport });
+    const message = formatter(session)(handle);
+
+    try {
+      expect(warn).toHaveBeenCalled();
+      expect(String(warn.mock.calls[0]?.[0])).toContain(
+        `Could not write the report artifact of ${handle.spawnId}:`,
+      );
+      expect(message).not.toContain("Informe completo (");
+      expect(message).toContain(notice(2000, longReport.length));
+      expect(message.endsWith(`---\n${longReport.slice(0, 2000)}…`)).toBe(true);
+    } finally {
+      warn.mockRestore();
+      rmSync(blocked, { recursive: true, force: true });
+    }
+  });
+
+  it("a report that fits is delivered unchanged, writes no artifact and warns nobody", () => {
+    const session = makeSession();
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const handle = handleWith({ sessionId: session.sessionId, result: "short report" });
+
+    expect(formatter(session)(handle)).toBe(
+      `[spawn ${handle.spawnId} · coder · done]\nshort report`,
+    );
+    expect(existsSync(artifactPath(session, handle.spawnId))).toBe(false);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  // A real resume: the second manager rehydrates spawns/undelivered from the
+  // store, so the case proves the queue, the delivery and the artifact survive
+  // a restart instead of formatting an already-delivered handle by hand.
+  it("delivers the artifact once per settle and rewrites it on resume", async () => {
+    stubChild("child answer");
+    const saved: Array<Record<string, unknown>> = [];
+    const session = makeSession({ sessions: { childResultMaxChars: 5 } }, saved);
+    const handle = session.spawn("coder", "do the thing");
+    await session.waitSpawn(handle.spawnId);
+    const path = artifactPath(session, handle.spawnId);
+
+    // Settled but not delivered: the artifact is written lazily at delivery, so
+    // it does not exist yet, and the record the resume reads still carries the
+    // report.
+    const persisted = saved.at(-1)!;
+    expect(existsSync(path)).toBe(false);
+    expect((persisted.spawns as SpawnHandle[])[0]?.result).toBe("child answer");
+
+    const resumed = makeSession({ sessions: { childResultMaxChars: 5 } }, saved);
+    resumed.store.load = vi.fn(() => persisted) as unknown as typeof resumed.store.load;
+    await expect(resumed.load(session.sessionId)).resolves.toBe(true);
+
+    // The child comes back queued, still undocumented.
+    expect(
+      resumed.pendingSpawns().map((entry) => ({ id: entry.spawnId, status: entry.status })),
+    ).toEqual([{ id: handle.spawnId, status: "done" }]);
+
+    await parentTurn(resumed);
+
+    // The file holds the report once, not the report appended to itself.
+    const stored = readFileSync(path, "utf8");
+    expect(stored).toBe("child answer");
+    expect(stored.length).toBe("child answer".length);
+    expect(stored).not.toBe("child answerchild answer");
+    // Exactly one system message for that child, and it points at the file.
+    const delivered = deliveredFor(resumed, handle.spawnId);
+    expect(delivered).toHaveLength(1);
+    expect(delivered[0]).toContain(fullReportLine("child answer".length, path));
+    expect(resumed.pendingSpawns()).toEqual([]);
+
+    // A second settle of the same child with a different report REPLACES the
+    // file: the write is unconditional, so no previous bytes survive.
+    const again = makeSession({ sessions: { childResultMaxChars: 5 } }, saved);
+    again.store.load = vi.fn(() => saved.at(-1)!) as unknown as typeof again.store.load;
+    await expect(again.load(session.sessionId)).resolves.toBe(true);
+    expect(deliveredFor(again, handle.spawnId)).toHaveLength(1);
+
+    const renamed = "second report";
+    const resettled = { ...again.childHistory()[0], result: renamed, status: "done" as const };
+    again["spawnHistory"] = [resettled];
+    again["undelivered"] = [resettled];
+    await parentTurn(again);
+
+    const replaced = readFileSync(path, "utf8");
+    expect(replaced).toBe(renamed);
+    expect(replaced).not.toContain("child answer");
+    expect(replaced.length).toBe(renamed.length);
+  });
+
+  // resultChars is written at settlement, so it is part of the persisted
+  // record and survives the round trip: the assertion reads a handle obtained
+  // from a manager that only knows what the store gave it.
+  it("marks the handle with resultChars only when the report exceeded the cap", async () => {
+    stubChild("child answer");
+    const saved: Array<Record<string, unknown>> = [];
+    const capped = makeSession({ sessions: { childResultMaxChars: 5 } }, saved);
+    const narrow = capped.spawn("coder", "do the thing");
+    await capped.waitSpawn(narrow.spawnId);
+    await parentTurn(capped);
+
+    // "child answer" is 12 characters, over a budget of 5.
+    expect(capped.childHistory()[0]?.resultChars).toBe("child answer".length);
+
+    const reloaded = makeSession({ sessions: { childResultMaxChars: 5 } }, saved);
+    reloaded.store.load = vi.fn(() => saved.at(-1)!) as unknown as typeof reloaded.store.load;
+    await expect(reloaded.load(capped.sessionId)).resolves.toBe(true);
+
+    expect(reloaded.childHistory()[0]?.resultChars).toBe("child answer".length);
+
+    const roomy = makeSession({ sessions: { childResultMaxChars: 500 } }, []);
+    const fits = roomy.spawn("coder", "do the thing");
+    await roomy.waitSpawn(fits.spawnId);
+    await parentTurn(roomy);
+
+    expect(roomy.childHistory()[0]?.resultChars).toBeUndefined();
+    // Never inferred from the text: the whole report is there and unmarked.
+    expect(roomy.childHistory()[0]?.result).toBe("child answer");
+  });
+
+  it("falls back to the default budget when the config does not set one", async () => {
+    // Settlement and the formatter must agree on the budget: with no configured
+    // value both fall back to the same default, or a child is delivered
+    // truncated while its handle claims nothing was cut.
+    const report = "x".repeat(3000);
+
+    stubChild(report);
+    const session = makeSession({ sessions: undefined }, []);
+    const spawned = session.spawn("coder", "do the thing");
+    await session.waitSpawn(spawned.spawnId);
+
+    const path = artifactPath(session, spawned.spawnId);
+    expect(session.childHistory()[0]?.resultChars).toBe(3000);
+    await parentTurn(session);
+
+    expect(deliveredFor(session, spawned.spawnId)[0]).toContain(fullReportLine(3000, path));
+    expect(readFileSync(path, "utf8")).toBe(report);
+  });
+
+  it("does not mark a whitespace-only report as truncated", async () => {
+    // The cap (30) sits BETWEEN the placeholder "(no output)" (11) and the raw
+    // report (40), so measuring the raw text marks a report that was never cut.
+    stubChild();
+    const session = makeSession({ sessions: { childResultMaxChars: 30 } });
+    const blanks = " ".repeat(40);
+    const spawned = session.spawn("coder", "do the thing");
+
+    await session.waitSpawn(spawned.spawnId);
+
+    const manager = (
+      session as unknown as {
+        spawns: { runner: unknown; jobs: Map<string, unknown>; run(job: unknown): Promise<void> };
+      }
+    ).spawns;
+    manager.runner = async () => ({ text: blanks });
+
+    const job = {
+      spawnId: spawned.spawnId,
+      sessionId: session.sessionId,
+      agentId: "coder",
+      prompt: "do the thing",
+      status: "done",
+      startedAt: new Date(0).toISOString(),
+      controller: new AbortController(),
+    };
+
+    manager.jobs.set(spawned.spawnId, job);
+    await manager.run(job);
+
+    const settled = session.childHistory().find((entry) => entry.spawnId === spawned.spawnId);
+    expect(settled?.result).toBe(blanks);
+    expect(settled?.resultChars).toBeUndefined();
+
+    await parentTurn(session);
+
+    // The whole placeholder is delivered: nothing was cut and no artifact exists.
+    expect(deliveredFor(session, spawned.spawnId)).toEqual([
+      `[spawn ${spawned.spawnId} · coder · done]\n(no output)`,
+    ]);
+    expect(existsSync(artifactPath(session, spawned.spawnId))).toBe(false);
+  });
+
+  it("a child error longer than the cap also leaves an artifact", () => {
+    const session = makeSession();
+    const error = "provider exploded ".repeat(200);
+    const handle = handleWith({ sessionId: session.sessionId, status: "error", error });
+    const message = formatter(session)(handle);
+    const path = artifactPath(session, handle.spawnId);
+
+    expect(message.startsWith(`[spawn ${handle.spawnId} · coder · error]\n`)).toBe(true);
+    expect(message).toContain(fullReportLine(error.length, path));
+    expect(readFileSync(path, "utf8")).toBe(error);
   });
 });
 

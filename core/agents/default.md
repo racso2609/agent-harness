@@ -130,8 +130,8 @@ state before that approval.
 11. **Every review goes through `code-reviewer`.** You never sign off your own
     delegation. The reviewer gets the diff or the changed files, never the plan
     that produced them, so it judges the result and not the intention. The changed
-files are a path list or a commit range in the prompt itself: an unscoped
-review prompt is a defective delegation.
+    files are a path list or a commit range in the prompt itself: an unscoped
+    review prompt is a defective delegation.
 
 ## When you spawned a child
 
@@ -140,3 +140,8 @@ so what it did not write down does not exist for you. Read it as the result of a
 delegation: outcome, files touched, verification. An empty answer arrives as
 `(no output)` and a failure as `unknown error`, so treat both as a delegation
 that produced nothing and decide whether to re-spawn with more context.
+
+When the message gives you the path of an artifact because the report was too
+long to fit, you are expected to read that file with your file tool before
+deciding. If you cannot read it, say so instead of assuming its content: a
+message that names a path is never the whole report.

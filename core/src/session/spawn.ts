@@ -38,6 +38,13 @@ export interface SpawnHandle {
   // never changes a status (poll/list/childHistory just hand the handle over),
   // and it is absent on every child nobody ever cancelled.
   cancelRequestedAt?: string;
+  // Length of the report in characters, set only when it exceeded the
+  // delivery cap and was therefore delivered as a truncated body plus an
+  // artifact. Its absence means the report fitted and was delivered whole, so
+  // consumers must not infer truncation from the text itself. Recorded at
+  // settlement, so pollSpawn, waitSpawn, listSpawns, collectSpawns and the
+  // `settled` event all carry it once the child is done.
+  resultChars?: number;
 }
 
 // Runs one child to completion. Injected so the manager stays decoupled from
@@ -57,6 +64,10 @@ export interface SpawnManagerOptions {
   maxChildren?: number;
   // Wall-clock budget per child before it is aborted.
   timeoutMs?: number;
+  // Delivery budget in characters: the report of a settled child longer than
+  // this is recorded as resultChars, so a consumer knows the parent will only
+  // see it truncated. Omitted means "never mark a report as truncated".
+  resultMaxChars?: number;
   // Session id provider; defaults to crypto.randomUUID.
   idFactory?: () => string;
 }
@@ -78,8 +89,28 @@ interface SpawnJob extends SpawnHandle {
 
 export const DEFAULT_MAX_CHILDREN = 4;
 
+// Default delivery budget in characters, the same default configuration writes
+// for sessions.childResultMaxChars. The session manager reads it through
+// childResultBudget() for BOTH the settlement that records resultChars and the
+// message that truncates the body, so the two cannot drift.
+export const DEFAULT_CHILD_RESULT_MAX_CHARS = 2000;
+
+// Effective delivery budget for a configuration. undefined means "no budget
+// configured", which is not the same as the default: an explicitly missing key
+// still means 2000, and tests rely on this being the ONE place that decides it.
+export const childResultBudget = (configured?: number): number =>
+  configured ?? DEFAULT_CHILD_RESULT_MAX_CHARS;
+
 // Budget of the one-line summary kept on a settled handle.
-const SUMMARY_MAX_CHARS = 120;
+export const SUMMARY_MAX_CHARS = 120;
+
+// The text a settled child really delivers to the parent. undefined (never
+// set) and an empty or blank report are the same case, so both fall back to a
+// placeholder instead of a blank string. Shared with the session manager,
+// which formats the delivery message: measuring a different string than the
+// one formatted is how a blank report ends up recorded as truncated.
+export const outcomeText = (value: string | undefined, fallback: string) =>
+  value && value.trim() ? value : fallback;
 
 // Summary carried by a cancelled handle. It is a fixed literal on purpose:
 // the cancellation is not the child's output, so summarize() never derives it.
@@ -106,12 +137,12 @@ class SpawnTimeoutError extends Error {
 // made, the child's answer (or its error) is already the shortest faithful
 // description of what happened. Whitespace is flattened so the value is
 // always a single line, and empty text yields undefined rather than "".
-const summarize = (text?: string): string | undefined => {
+export const summarize = (text?: string, max = SUMMARY_MAX_CHARS): string | undefined => {
   const flat = (text ?? "").replace(/\s+/g, " ").trim();
 
   if (!flat) return undefined;
 
-  return flat.length > SUMMARY_MAX_CHARS ? `${flat.slice(0, SUMMARY_MAX_CHARS - 1)}…` : flat;
+  return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
 };
 
 // Tracks background child agents spawned by a parent session. Children run
@@ -123,6 +154,7 @@ class SpawnManager {
   protected runner: SpawnRunner;
   protected maxChildren: number;
   protected timeoutMs: number;
+  protected resultMaxChars: number | undefined;
   protected idFactory: () => string;
   // Reactive subscribers notified on started/settled transitions.
   protected listeners = new Set<SpawnEventListener>();
@@ -131,6 +163,7 @@ class SpawnManager {
     this.runner = options.runner;
     this.maxChildren = Math.max(1, options.maxChildren ?? DEFAULT_MAX_CHILDREN);
     this.timeoutMs = options.timeoutMs ?? 0;
+    this.resultMaxChars = options.resultMaxChars;
     this.idFactory = options.idFactory ?? (() => crypto.randomUUID());
   }
 
@@ -290,6 +323,23 @@ class SpawnManager {
     // A cancellation is not the child's output, so it never goes through
     // summarize(): the fixed literal is the summary, whatever the error says.
     job.summary = status === "cancelled" ? CANCELLED_SUMMARY : summarize(job.result ?? job.error);
+
+
+    // The length is recorded here, next to the other derived fields, so a
+    // report the parent will only see truncated is described by the settlement
+    // itself and travels to disk with it, instead of depending on which code
+    // formats the message later. Without a configured budget the comparison is
+    // false and the field stays unset. The measured text is the one the message
+    // will format, placeholder included, so a blank report is never marked.
+    if (this.resultMaxChars === undefined) {
+      job.resultChars = undefined;
+    } else {
+      const report = outcomeText(
+        job.status === "error" ? job.error : job.result,
+        job.status === "error" ? "unknown error" : "(no output)",
+      );
+      job.resultChars = report.length > this.resultMaxChars ? report.length : undefined;
+    }
   }
 
   // Notifies subscribers; listener errors never break the scheduler.
@@ -328,6 +378,7 @@ class SpawnManager {
       summary: job.summary,
       durationMs: job.durationMs,
       cancelRequestedAt: job.cancelRequestedAt,
+      resultChars: job.resultChars,
     };
   }
 }

@@ -79,6 +79,11 @@ class SessionStore {
       // carries the child result inside history, so it reads as "nothing
       // delivered" and a settled child without a matching system message is
       // queued again.
+      // resultChars is additive too: it is set only when the child report exceeded
+      // the delivery budget, so its absence reads as "the report fitted". The report
+      // artifact is an idempotent derivative of the persisted result, written under a
+      // path derived from the session id and the spawn id, so a record without its
+      // artifact heals itself on the next delivery and nothing needs migrating.
       record.spawns ??= [];
       record.deliveredSpawns ??= [];
 
@@ -101,6 +106,10 @@ class SessionStore {
   }
 
   // Removes a session file.
+  // Deletes the session record only. The report artifacts of its children live
+  // in the workspace (<workspace>/.racso-harness/artifacts/<id>/) and are NOT
+  // removed here: known debt, since a path already published to the parent in a
+  // delivered message would otherwise dangle.
   remove(id: string) {
     try {
       fs.rmSync(this.filePath(id), { force: true });
