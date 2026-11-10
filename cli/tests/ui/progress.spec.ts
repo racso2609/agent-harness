@@ -6,6 +6,8 @@ import {
   RESTORED_LIMIT,
   spawnStrip,
   SPAWN_LINGER_MS,
+stoppable,
+stripRowAt,
   toSpawnEntry,
   visibleSpawns,
 } from "../../src/ui/tui/progress";
@@ -214,4 +216,82 @@ describe("spawnStrip", () => {
 
     expect(rows).toEqual([]);
   });
+});
+
+describe("stripRowAt", () => {
+// A strip starting at viewport row 2 with three children: top border at 2,
+// children at 3, 4 and 5, bottom border at 6, the "+N older" row at 7.
+const geometry = { top: 2, children: 3, hidden: 0 };
+// SGR rows are 1-based, so the first child row in a report is top + 2.
+const firstChild = geometry.top + 2;
+
+it("ignores the top border", () => {
+expect(stripRowAt({ row: firstChild - 1 }, geometry)).toBeNull();
+});
+
+it("maps the first child row to index 0", () => {
+expect(stripRowAt({ row: firstChild }, geometry)).toBe(0);
+});
+
+it("maps the last child row to children - 1", () => {
+expect(stripRowAt({ row: firstChild + geometry.children - 1 }, geometry)).toBe(
+geometry.children - 1,
+);
+});
+
+it("ignores the bottom border", () => {
+expect(stripRowAt({ row: firstChild + geometry.children }, geometry)).toBeNull();
+});
+
+it("ignores the +N older counter row", () => {
+expect(stripRowAt({ row: firstChild + geometry.children + 1 }, geometry)).toBeNull();
+});
+
+it("ignores a row well below the strip", () => {
+expect(stripRowAt({ row: 40 }, geometry)).toBeNull();
+});
+
+it("ignores row 0 and negative rows", () => {
+expect(stripRowAt({ row: 0 }, geometry)).toBeNull();
+expect(stripRowAt({ row: -3 }, geometry)).toBeNull();
+});
+
+it("moves the hit exactly one row when the strip moves one row", () => {
+// The coherence test: if the geometry and this arithmetic ever drifted apart,
+// moving the strip down would stop matching the row the user clicked.
+for (let k = firstChild; k < firstChild + geometry.children; k++) {
+expect(stripRowAt({ row: k + 1 }, { ...geometry, top: geometry.top + 1 })).toBe(
+stripRowAt({ row: k }, geometry),
+);
+}
+});
+
+it("ignores the strip entirely when it paints no children", () => {
+const empty = { top: 2, children: 0, hidden: 0 };
+
+expect(stripRowAt({ row: firstChild }, empty)).toBeNull();
+});
+});
+
+describe("stoppable", () => {
+const row = (status: string, restored = false) => ({
+id: "spawn-1",
+agent: "coder",
+status,
+restored,
+});
+
+it("stops a running child of this process", () => {
+expect(stoppable(row("running"))).toBe(true);
+});
+
+it("never offers a settled child", () => {
+expect(stoppable(row("done"))).toBe(false);
+expect(stoppable(row("error"))).toBe(false);
+expect(stoppable(row("cancelled"))).toBe(false);
+});
+
+it("never offers a child restored from a previous run", () => {
+expect(stoppable(row("running", true))).toBe(false);
+});
 });

@@ -122,3 +122,37 @@ export const spawnStrip = (
 
   return { rows, hidden: past.length - Math.min(past.length, RESTORED_LIMIT) };
 };
+
+// Only a running child of THIS process can be stopped. A settled one has no
+// work left to abort, and one restored from a previous run does not even live
+// in this process — offering the click on either would be a lie.
+export const stoppable = (row: SpawnStripRow): boolean =>
+row.status === "running" && !row.restored;
+
+export interface StripGeometry {
+// 0-based row inside the ink viewport where the top border of the strip starts.
+top: number;
+// Rows painted inside the strip: one per child (it does NOT include the
+// "+N older" counter).
+children: number;
+hidden: boolean;
+}
+
+// Mouse report row (1-based, as SGR sends it) -> index in `strip.rows`, or null.
+//
+// The arithmetic lives here instead of the JSX on purpose: a click landing on
+// the wrong child is a bug no snapshot of the rendered tree would catch, and a
+// pure function can be tested by moving the strip one row and checking the hit
+// moves with it.
+export const stripRowAt = (
+report: { row: number },
+geometry: StripGeometry,
+): number | null => {
+// The strip has one row of top border (STRIP_BORDER_ROWS counts both), so the
+// first child sits one row below `top`.
+const local = report.row - 1 - (geometry.top + 1);
+
+if (local < 0 || local >= geometry.children) return null;
+
+return local;
+};
