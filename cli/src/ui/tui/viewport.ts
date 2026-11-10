@@ -6,6 +6,7 @@
 // inside App.tsx, where they could only be checked by mounting ink on a real
 // TTY.
 
+import { parseMouseReports } from "./mouse";
 import { clampView, scrollBy, scrollToBottom, scrollToTop, type ScrollView } from "./scroll";
 
 // Rows the transcript pane spends on things that are not transcript lines.
@@ -214,24 +215,22 @@ export const WHEEL_LINES = 3;
 export const MOUSE_ENABLE = "\u001b[?1000h\u001b[?1006h";
 export const MOUSE_DISABLE = "\u001b[?1006l\u001b[?1000l";
 
-// SGR mouse reports look like `ESC [ < button ; column ; row M` (press) or `m`
-// (release). Only the wheel buttons mean anything here: 64 scrolls up and 65
-// down. Clicks and drags are ignored so they cannot move the transcript.
-// eslint-disable-next-line no-control-regex -- SGR mouse reports start with ESC.
-const SGR_MOUSE = /\u001b\[<(\d+);\d+;\d+[Mm]/g;
-
 // Scroll deltas, in lines, carried by one raw stdin chunk. Positive scrolls up,
 // matching `scrollBy`. A chunk can hold several notches when the terminal
 // batches them, so the caller applies them in order.
+//
+// The SGR lexer lives in `mouse.ts`, not here: the wheel is one reading of a
+// mouse report and the click that will cancel a turn is another, and two regexes
+// over the same escape sequences drift. `WHEEL_LINES` stays in this module and
+// is not imported by the parser, so the dependency only ever goes
+// viewport -> mouse and there is no import cycle to untangle.
 export const wheelScrollLines = (input: string): number[] => {
-  const deltas: number[] = [];
+const deltas: number[] = [];
 
-  for (const match of input.matchAll(SGR_MOUSE)) {
-    const button = Number(match[1]);
+for (const report of parseMouseReports(input)) {
+if (report.button === "wheel-up") deltas.push(WHEEL_LINES);
+else if (report.button === "wheel-down") deltas.push(-WHEEL_LINES);
+}
 
-    if (button === 64) deltas.push(WHEEL_LINES);
-    else if (button === 65) deltas.push(-WHEEL_LINES);
-  }
-
-  return deltas;
+return deltas;
 };
