@@ -1,5 +1,5 @@
 import { Box, Text, useInput, useStdin, useStdout, useWindowSize } from "ink";
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { memo, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { CommandOption } from "@/commands/CommandRepository";
 import { menuMove, menuRows } from "@/terminal/commandMenu";
 import type { SelectionRequest, UiStatus } from "../UiAdapter";
@@ -20,6 +20,7 @@ import {
 } from "./progress";
 import { GLYPH, resolveTheme, type Role, type Theme } from "./theme";
 import { collapse } from "./collapse";
+import { backspaceDraft, backspaceKind, type Burst, pressBurst } from "./draft";
 import { fitColumns, gapBefore, truncateCell, wrapText } from "./layout";
 import { menuCommandLine, menuCompletion, menuQueryFor, menuView } from "./menu";
 import {
@@ -124,6 +125,15 @@ const PANEL_CHROME = BORDER_ROWS + PANEL_PADDING_X * 2;
 // Below this the layout stops shrinking and lets the terminal scroll.
 const MIN_WIDTH = 20;
 
+// Glyph of the insertion point. A left half block is one column wide in every
+// terminal font and reads as a caret sitting right after the typed text. The
+// cursor is a glyph and not a style on purpose: ink compares the plain text of
+// the frame to decide whether to write, so a cursor that only differed in
+// colour would produce an identical frame and never be repainted.
+const CURSOR_GLYPH = "\u258F";
+// Half a second lit, half a second dark: the blink rate every terminal uses.
+const BLINK_MS = 500;
+
 const CHOICES = [
   { key: "allow" as const, label: "allow once" },
   { key: "always" as const, label: "always allow this" },
@@ -157,6 +167,9 @@ export const App = ({
   onCancelSpawn,
 }: AppProps) => {
   const [draft, setDraft] = useState("");
+  // Last backspace press in the input box, for the "held key" heuristic of
+  // draft.ts. A ref and not state: the clock must not repaint the box.
+  const backspaceRef = useRef<Burst | null>(null);
   // Text typed into the open question. It lives here and not in the owner for
   // the same reason as the draft: every keystroke must repaint the panel.
   const [answer, setAnswer] = useState("");
@@ -175,6 +188,11 @@ export const App = ({
   useEffect(() => {
     setAnswer("");
   }, [state.prompt]);
+  // Whether the insertion point is lit right now. The tick is only mounted while
+  // a panel that takes typing is on screen: with a picker, a question or an
+  // approval the box is not painted, and a timer re-rendering the whole App for
+  // nothing would also make still-frame tests flaky.
+  const [cursorOn, setCursorOn] = useState(true);
   const [now, setNow] = useState(() => Date.now());
   // Where the transcript is looking. `bottomView()` starts pinned to the bottom,
   // like a shell: the newest line is the first thing the user sees.
@@ -245,6 +263,24 @@ export const App = ({
   useEffect(() => {
     onDraftChange?.(draft);
   }, [draft, onDraftChange]);
+
+  // The blink. Every tick flips a boolean on the App, so it re-renders the whole
+  // tree, transcript included. That is affordable because the expensive half of
+  // a render, `measureEntries`, sits behind a `useMemo` keyed on the transcript,
+  // and React skips the transcript and the strip on identity alone. Mounting the
+  // clock where nothing blinks is what is not affordable, hence the guard.
+  const typing = !prompt && !selection && !approval;
+  useEffect(() => {
+    if (!typing) return;
+
+    const timer = setInterval(() => setCursorOn((lit) => !lit), BLINK_MS);
+    return () => clearInterval(timer);
+  }, [typing]);
+  // Leaving the box always reopens the cursor lit: after a send the box is back
+  // and must not look dead for the first half second.
+  useEffect(() => {
+    if (!typing) setCursorOn(true);
+  }, [typing]);
 
   // What the slash dropdown shows, derived from the draft: it opens on a lone
   // "/command" and closes as soon as the box stops looking like one, so there
@@ -497,8 +533,15 @@ export const App = ({
     }
 
     if (key.backspace || key.delete) {
+      // Ink has no "key held" event: a held backspace is a burst of ordinary
+      // presses, so the clock decides whether this one takes a character or a
+      // word. The bookkeeping is a ref, never state, so it costs no render.
+      const burst = pressBurst(backspaceRef.current, Date.now());
+      backspaceRef.current = burst;
+      const kind = backspaceKind(burst);
+
       setDraft((current) => {
-        const next = current.slice(0, -1);
+        const next = backspaceDraft(current, kind);
         // The dismissed query only guards a list the user closed on purpose; once
         // the box is empty the next "/" is a new question, and it has to open.
         if (!next) setMenuDismissed(null);
@@ -846,7 +889,13 @@ both are painted there. */}
           </Text>
         </Box>
       ) : approval ? null : (
-        <InputBox width={width} draft={draft} activity={state.activity} menu={menu} />
+        <InputBox
+          width={width}
+          draft={draft}
+          activity={state.activity}
+          menu={menu}
+          cursorOn={cursorOn}
+        />
       )}
 
       <Box paddingX={PANEL_PADDING_X}>
@@ -914,49 +963,73 @@ const PromptPanel = ({
 // The input box and the slash dropdown under it. They are one component
 // because the dropdown only exists as long as the box looks like a command:
 // keeping them together is what stops the list from outliving its query.
-const InputBox = ({
-  draft,
-  width,
-  activity,
-  menu,
-}: {
-  draft: string;
-  width: number;
-  activity?: string;
-  menu: ReturnType<typeof menuView> | null;
-}) => (
-  <>
-    <Box borderStyle="round" paddingX={PANEL_PADDING_X} paddingY={PANEL_PADDING_Y}>
-      <Text color="green">{"> "}</Text>
-      <Text>{draft}</Text>
-      <Text dimColor>{activity ? ` ${activity}` : ""}</Text>
-    </Box>
+//
+// Memoised because of the blink: it re-renders App twice a second, and the
+// memo keeps those renders from walking this subtree again whenever the draft
+// and the lit half did not change. It is a small win -- the box is a few
+// `<Text>` nodes and the transcript, which is the real cost, is already skipped
+// by React on identity -- and a bigger one would need the menu's identity
+// stabilised too, which is not worth a cache for three nodes.
+const InputBox = memo(
+  ({
+    draft,
+    width,
+    activity,
 
-    {menu ? (
-      <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={PANEL_PADDING_X}>
-        {menu.rows.rows.length ? (
-          menu.rows.rows.map((command, index) => {
-            const selected = menu.rows.start + index === menu.state.selected;
-
-            return (
-              <Text key={command.name} inverse={selected} color={selected ? "cyan" : undefined}>
-                {selected ? "› " : "  "}
-                {menuLine(command, Math.max(10, width - 2))}
-              </Text>
-            );
-          })
-        ) : (
-          <Text dimColor>no matching commands</Text>
-        )}
-        <Text dimColor>
-          {menu.rows.hiddenAbove || menu.rows.hiddenBelow
-            ? `${menu.state.selected + 1}/${menu.state.items.length} · `
-            : ""}
-          tab complete · enter run · esc close
-        </Text>
+    menu,
+    cursorOn,
+  }: {
+    draft: string;
+    width: number;
+    activity?: string;
+    menu: ReturnType<typeof menuView> | null;
+    // Whether the insertion point is lit in this half of the blink.
+    cursorOn: boolean;
+  }) => (
+    <>
+      <Box borderStyle="round" paddingX={PANEL_PADDING_X} paddingY={PANEL_PADDING_Y}>
+        <Text color="green">{"> "}</Text>
+        {/* The cursor is a painted glyph and not a style: ink compares the text of
+the frame to decide whether to write, so the two halves of the blink must
+differ in glyphs or the screen never changes. Lit is a one-column half block
+after the draft, dark is nothing at all -- which also covers the empty box,
+where the cursor is the only thing to see. The glyph never enters `draft`, so
+the text handed to `onSubmit` cannot carry it. */}
+        <Text>{cursorOn ? `${draft}${CURSOR_GLYPH}` : draft}</Text>
+        <Text dimColor>{activity ? ` ${activity}` : ""}</Text>
       </Box>
-    ) : null}
-  </>
+
+      {menu ? (
+        <Box
+          flexDirection="column"
+          borderStyle="round"
+          borderColor="cyan"
+          paddingX={PANEL_PADDING_X}
+        >
+          {menu.rows.rows.length ? (
+            menu.rows.rows.map((command, index) => {
+              const selected = menu.rows.start + index === menu.state.selected;
+
+              return (
+                <Text key={command.name} inverse={selected} color={selected ? "cyan" : undefined}>
+                  {selected ? "› " : "  "}
+                  {menuLine(command, Math.max(10, width - 2))}
+                </Text>
+              );
+            })
+          ) : (
+            <Text dimColor>no matching commands</Text>
+          )}
+          <Text dimColor>
+            {menu.rows.hiddenAbove || menu.rows.hiddenBelow
+              ? `${menu.state.selected + 1}/${menu.state.items.length} · `
+              : ""}
+            tab complete · enter run · esc close
+          </Text>
+        </Box>
+      ) : null}
+    </>
+  ),
 );
 
 // Renders one entry with the style of its role. Colour alone is not enough to
