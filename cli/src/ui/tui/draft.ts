@@ -18,27 +18,56 @@ export const WORD_DELETE_AFTER_MS = 400;
 // What a press does to the draft.
 export type BackspaceKind = "char" | "word";
 
-// Word boundaries: whitespace and the punctuation a sentence is built from.
-// The draft is a prompt, not prose: `/resume` or `foo.ts` are single things
-// the user wrote on purpose and wants gone in one go, while `hola, mundo`
-// splits on the comma and the space. Only common punctuation is listed — the
-// point is to agree with what a prompt looks like, not to classify unusual
-// symbols.
-const BREAKS = /[\s,.;:!?'"()[\]{}<>/\\|@#$%^&*+=~`-]/;
+// Word boundaries. The draft is a prompt, not prose: `foo.ts` or `/resume` are
+// single things the user wrote on purpose and want gone in one go, so the
+// punctuation inside a token does not split it. Only whitespace separates
+// words. Punctuation glued to the end of a token belongs to that token and
+// leaves with it: `hola, mundo` deletes `mundo`, then the space, then `hola,`.
+const isSpace = (char: string): boolean => /\s/.test(char);
 
-const isBreak = (char: string): boolean => BREAKS.test(char);
-
-// Tail of a word deletion: the separators after the word go with it, then the
-// word itself stops at the next separator. Trailing spaces first so
-// "hola mundo " loses the trailing space too, and a press on a run of spaces
-// only eats that run.
+// Start index of what a `word` deletion removes, counting code points so a
+// slice here can never land inside a surrogate pair. A "word" is a run of
+// non-space code points; the punctuation inside it is part of it. Two rules,
+// in order:
+//
+// 1. When the draft ends in spaces, those spaces are the token under the
+//    cursor, so the press eats only that run: `"hola "` becomes `"hola"` and
+//    `"   "` becomes `""`.
+// 2. Otherwise the trailing word goes, and so do the spaces in front of it
+//    (each of those spaces is the separator between the two words):
+//    `"hola mundo "` becomes `"hola "` and `"src/ui/draft.ts"` becomes `""`.
+//    A single space before the word survives, because it is the last character
+//    of what was already there: `"a b"` becomes `"a "`.
 const wordStart = (text: string): number => {
-  let end = text.length;
+  const chars = Array.from(text);
+  let end = chars.length;
 
-  while (end > 0 && isBreak(text[end - 1]!)) end--;
-  while (end > 0 && !isBreak(text[end - 1]!)) end--;
+  // Rule 1: the draft ends in spaces. That run is the token under the
+  // cursor, so the press eats it and stops there.
+  let runStart = end;
+  while (runStart > 0 && isSpace(chars[runStart - 1]!)) runStart--;
+  if (runStart < end) return runStart;
+  // Rule 2: the draft ends in a word. Take the word and the spaces that
+  // separated it from the word before, keeping the last of those spaces:
+  // `"hola mundo "` loses `"mundo "` and `"a b"` loses `"b"`.
+  end = runStart;
+  while (end > 0 && !isSpace(chars[end - 1]!)) end--;
+  while (end > 1 && isSpace(chars[end - 1]!) && isSpace(chars[end - 2]!)) end--;
 
   return end;
+};
+
+// Index just past the last code point of the draft: one character for a `char`
+// deletion. Counting code points keeps the surrogate pairs of astral
+// characters whole, so an emoji is deleted in one press instead of leaving a
+// lone surrogate that ink would paint as U+FFFD. A grapheme cluster (an emoji
+// with a skin-tone modifier, a ZWJ family, a letter plus its combining accent)
+// is several code points and therefore several presses; each one leaves a
+// valid string behind, which is the guarantee this function makes.
+const charStart = (text: string): number => {
+  const chars = Array.from(text);
+
+  return chars.slice(0, -1).join("").length;
 };
 
 // The draft after one backspace. `kind` is the caller's call from the clock;
@@ -46,7 +75,7 @@ const wordStart = (text: string): number => {
 export const backspaceDraft = (draft: string, kind: BackspaceKind): string => {
   if (!draft) return draft;
 
-  return kind === "word" ? draft.slice(0, wordStart(draft)) : draft.slice(0, -1);
+  return kind === "word" ? draft.slice(0, wordStart(draft)) : draft.slice(0, charStart(draft));
 };
 
 export interface Burst {
